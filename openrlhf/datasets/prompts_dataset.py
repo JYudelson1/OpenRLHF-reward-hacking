@@ -62,7 +62,7 @@ class PromptDataset(Dataset):
             if full_data is not None:
                 data_entry["full_data"] = full_data
                 if "input_output" in full_data:
-                    full_data["input_output"] = ""
+                    full_data["input_output"] = "{{}}"
             if solution is not None:
                 data_entry["solution"] = solution
             self.prompts.append(data_entry)
