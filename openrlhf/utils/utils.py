@@ -77,7 +77,7 @@ def blending_datasets(
             strategy.print(f"loaded {dataset} from disk")
         # remote/local folder or common file
         else:
-            data = load_dataset(dataset, data_dir=data_dir)
+            data = load_dataset(dataset, data_dir=data_dir, trust_remote_code=True)
             strategy.print(f"loaded {dataset} from files")
 
         if train_split and train_split in data:
