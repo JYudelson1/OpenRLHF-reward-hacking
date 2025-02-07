@@ -1,6 +1,6 @@
 from torch.utils.data import Dataset
 from tqdm import tqdm
-
+import json
 
 def preprocess_data(data, input_template=None, input_key="input", apply_chat_template=None, multiturn=False) -> str:
     if apply_chat_template:
@@ -62,7 +62,8 @@ class PromptDataset(Dataset):
             if full_data is not None:
                 data_entry["full_data"] = full_data
                 if "input_output" in full_data:
-                    full_data["input_output"] = "{{}}"
+                    unit_tests_json = json.loads(full_data["input_output"])[:5]
+                    full_data["input_output"] = json.dumps(unit_tests_json)
             if solution is not None:
                 data_entry["solution"] = solution
             self.prompts.append(data_entry)
