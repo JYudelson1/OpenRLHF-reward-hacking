@@ -3,17 +3,20 @@ from tqdm import tqdm
 
 
 def preprocess_data(data, input_template=None, input_key="input", apply_chat_template=None, multiturn=False) -> str:
-    if apply_chat_template:
-        chat = data[input_key]
-        if isinstance(chat, str):
-            chat = [{"role": "user", "content": chat}]
-        if isinstance(chat, dict):
-            chat = [chat]
-        prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+    if not multiturn:
+        if apply_chat_template:
+            chat = data[input_key]
+            if isinstance(chat, str):
+                chat = [{"role": "user", "content": chat}]
+            if isinstance(chat, dict):
+                chat = [chat]
+            prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+        else:
+            prompt = data[input_key]
+            if input_template:
+                prompt = input_template.format(prompt)
     else:
-        prompt = data[input_key]
-        if input_template:
-            prompt = input_template.format(prompt)
+        prompt = data
         
     if multiturn:
         full_data = data
