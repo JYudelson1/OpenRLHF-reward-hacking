@@ -39,5 +39,5 @@ class WorkerWrap(Worker):
 
         del weight
         # TODO: should we empty cache if all weights have updated?
-        # if empty_cache:
-        #     torch.cuda.empty_cache()
+        if empty_cache:
+            torch.cuda.empty_cache()
