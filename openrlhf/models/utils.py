@@ -48,6 +48,7 @@ def compute_reward(
     action_mask: Optional[torch.Tensor] = None,
     num_actions: Optional[Union[int, list[int]]] = None,
     reward_clip_range: Tuple[float, float] = None,
+    sample_packing: bool = False,
 ) -> Union[torch.Tensor, list[torch.Tensor]]:
     if kl_coef <= 0.0:
         kl_coef = 0.0
@@ -55,7 +56,7 @@ def compute_reward(
     if reward_clip_range:
         r = r.clamp(min=reward_clip_range[0], max=reward_clip_range[1])
 
-    if action_mask is not None:
+    if action_mask is not None and not sample_packing:
         kl_reward = -kl_coef * kl
         # The following code is equivalent to:
         #
@@ -70,12 +71,42 @@ def compute_reward(
         last_reward = torch.zeros_like(kl).scatter_(dim=1, index=eos_indices, src=r.unsqueeze(1).to(kl.dtype))
 
         reward = last_reward + kl_reward
-    else:
+    elif action_mask is None and sample_packing:
+        # 
         # TODO: write a more efficient version
         reward = []
         for i, (kl_seg, action_len) in enumerate(zip(kl, num_actions)):
             kl_reward = -kl_coef * kl_seg
             kl_reward[action_len - 1] += r[i]
+            reward.append(kl_reward)
+    elif action_mask is not None and sample_packing:
+        # Handle multi-turn conversations with packed samples
+        reward = []
+        offset = 0
+        for i, (kl_seg, action_len) in enumerate(zip(kl, num_actions)):
+            kl_reward = -kl_coef * kl_seg
+            
+            # Get the full mask segment for this conversation
+            seq_len = len(kl_seg)
+            mask_seg = action_mask[0, offset:offset + seq_len]
+            offset += seq_len
+            
+            # # TODO: Is it better to distribute rewards across turns? If so, use this:
+            # # Add reward to final assistant token in each turn
+            # # Find positions of False->True transitions in the mask to identify turn boundaries
+            # turn_ends = torch.where(mask_seg[:-1] & ~mask_seg[1:])[0]
+            # if mask_seg[-1]:  # Handle case where sequence ends with assistant turn
+            #     turn_ends = torch.cat([turn_ends, torch.tensor([len(mask_seg)-1], device=turn_ends.device)])
+                
+            # # Distribute reward across turn endings
+            # reward_per_turn = r[i] / len(turn_ends)
+            # for end_pos in turn_ends:
+            #     kl_reward[end_pos] += reward_per_turn
+            
+            # Add entire reward to final assistant token
+            last_assistant_pos = torch.where(mask_seg)[0][-1]
+            kl_reward[last_assistant_pos] += r[i]
+            
             reward.append(kl_reward)
 
     return reward

@@ -204,6 +204,7 @@ class NaiveExperienceMaker(ABC):
                 action_mask=experience.action_mask,
                 num_actions=num_actions,
                 reward_clip_range=args.reward_clip_range,
+                sample_packing=getattr(self.strategy.args, "packing_samples", False),
             )
 
             if self.advantage_estimator == "gae":
