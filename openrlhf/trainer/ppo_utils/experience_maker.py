@@ -834,7 +834,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                     Samples(
                         sequences=sequences,
                         attention_mask=attention_mask,
-                        action_mask=None,
+                        action_mask=action_mask,
                         num_actions=num_actions,
                         packed_seq_lens=packed_seq_lens,
                         response_length=response_length,
