@@ -220,6 +220,7 @@ class NaiveExperienceMaker(ABC):
                     reward,
                     experience.action_mask,
                     generate_kwargs["gamma"],
+                    num_actions=num_actions,
                 )
                 experience.advantages = deepcopy(experience.returns)
             else:
