@@ -22,6 +22,13 @@ def compute_approx_kl(
 
     log_ratio = log_probs.float() - log_probs_base.float()
     if action_mask is not None:
+        # Ensure action_mask matches log_ratio dimensions
+        if action_mask.size(1) != log_ratio.size(1):
+            # Truncate action_mask to match log_ratio, for packed samples
+            if action_mask.size(1) > log_ratio.size(1):
+                action_mask = action_mask[:, :log_ratio.size(1)]
+            else:
+                assert False, "log_ratio has more elements than action_mask"
         log_ratio = log_ratio * action_mask
 
     # The k3 estimator is the non negative kl approximation in
