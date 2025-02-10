@@ -205,7 +205,7 @@ class NaiveReplayBuffer(ABC):
         experience = make_experience_batch(batch, self.packing_samples)
         return experience
 
-    def normalize(self, attribute: str, strategy) -> None:
+    def normalize(self, attribute: str, strategy, multi_turn: bool = False) -> None:
         assert attribute == "advantages"
         items = []
         action_masks = []
@@ -218,6 +218,10 @@ class NaiveReplayBuffer(ABC):
         if action_masks[0] is None:
             # packing samples has no action mask
             action_masks_vector = 1
+            num_actions = items_vector.numel()
+        elif action_masks[0] is not None and multi_turn:
+            # multi-turn has an action mask
+            action_masks_vector = torch.cat(action_masks).flatten()
             num_actions = items_vector.numel()
         else:
             action_masks_vector = torch.cat(action_masks).flatten()
