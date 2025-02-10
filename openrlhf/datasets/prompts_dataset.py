@@ -53,7 +53,7 @@ class PromptDataset(Dataset):
             apply_chat_template = self.tokenizer.apply_chat_template
 
         self.prompts = []
-        multiturn = vars(self.strategy.args).get("env_file", None) is not None
+        multiturn = vars(self.strategy.args).get("env_maker", False)
         for data in tqdm(dataset, desc="Preprocessing data", disable=not self.strategy.is_rank_0()):
             prompt, full_data, solution = preprocess_data(data, input_template, input_key, apply_chat_template, multiturn)
             data_entry = {
