@@ -800,8 +800,8 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                             current_seq.extend(response_tokens)
                             
                             # Mark which tokens are from assistant (1) vs user (0)
-                            current_action_mask.extend([0] * (len(prompt_tokens) - 1))  # User prompt
-                            current_action_mask.extend(([1] * len(response_tokens)) + [0])  # Assistant response
+                            current_action_mask.extend([0.0] * (len(prompt_tokens) - 1))  # User prompt
+                            current_action_mask.extend(([1.0] * len(response_tokens)) + [0.0])  # Assistant response
                             
                             total_len += len(prompt_tokens) + len(response_tokens)
                         
