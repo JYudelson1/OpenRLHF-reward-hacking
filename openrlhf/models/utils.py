@@ -104,7 +104,7 @@ def compute_reward(
             #     kl_reward[end_pos] += reward_per_turn
             
             # Add entire reward to final assistant token
-            last_assistant_pos = torch.where(mask_seg)[0][-1]
+            last_assistant_pos = torch.where(mask_seg)[-1]
             kl_reward[last_assistant_pos] += r[i]
             
             reward.append(kl_reward)
