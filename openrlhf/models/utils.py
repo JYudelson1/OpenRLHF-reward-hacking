@@ -26,7 +26,7 @@ def compute_approx_kl(
         if action_mask.size(1) != log_ratio.size(1):
             # Truncate action_mask to match log_ratio, for packed samples
             if action_mask.size(1) > log_ratio.size(1):
-                action_mask = action_mask[:, :log_ratio.size(1)]
+                action_mask = action_mask[:, action_mask.size(1) - log_ratio.size(1):]
             else:
                 assert False, "log_ratio has more elements than action_mask"
         log_ratio = log_ratio * action_mask
@@ -121,6 +121,8 @@ def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.T
 def masked_mean(tensor: torch.Tensor, mask: Optional[torch.Tensor], dim: int = None) -> torch.Tensor:
     if mask is None:
         return tensor.mean(axis=dim)
+    if mask.size(1) != tensor.size(1):
+        mask = mask[:, mask.size(1) - tensor.size(1):]
     return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
 
