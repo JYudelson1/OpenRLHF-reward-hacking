@@ -42,7 +42,7 @@ class AgentInterface(ABC):
         while active_indices:
             # Get next prompts for all active conversations
             all_prompts, all_states = ray.get([
-                AgentInterface.get_next_prompt_remote.remote(messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                AgentInterface.get_next_prompt_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                 for idx in active_indices
             ])
             active_conversations = []
@@ -67,7 +67,7 @@ class AgentInterface(ABC):
             
             # Process outputs and update states
             all_is_done = ray.get([
-                AgentInterface.is_done_remote.remote(messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                AgentInterface.is_done_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                 for idx in active_indices
             ])
             new_active_indices = []
@@ -88,7 +88,7 @@ class AgentInterface(ABC):
         # Calculate rewards for completed conversations
         results = []
         all_rewards = ray.get([
-            AgentInterface.get_reward_remote.remote(messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+            AgentInterface.get_reward_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
             for idx in active_indices
         ])
         for i, (messages, tokens_by_turn) in enumerate(zip(all_messages, tokens_by_turn)):
