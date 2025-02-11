@@ -41,14 +41,14 @@ class AgentInterface(ABC):
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
-            all_prompts, all_states = ray.get([
+            all_prompts_and_states = ray.get([
                 AgentInterface.get_next_prompt_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                 for idx in active_indices
             ])
             active_conversations = []
             for idx in active_indices:
                 #TODO: PARALLELIZE!!!
-                prompt, states[idx] = all_prompts[idx], all_states[idx]
+                prompt, states[idx] = all_prompts_and_states[idx]
                 if prompt is None or states[idx] is None:
                     # The environment is done, so we don't need to generate any more prompts
                     active_indices.remove(idx)
