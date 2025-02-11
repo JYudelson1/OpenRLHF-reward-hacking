@@ -46,7 +46,7 @@ class AgentInterface(ABC):
             # Get next prompts for all active conversations
             try:
                 all_prompts_and_states = ray.get([
-                    AgentInterface.get_next_prompt_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                    get_next_prompt_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                     for idx in active_indices
                 ], timeout=30)  # Add timeout to avoid hanging
             except Exception as e:
@@ -91,7 +91,7 @@ class AgentInterface(ABC):
             
             # Process outputs and update states
             all_is_done = ray.get([
-                AgentInterface.is_done_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                is_done_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                 for idx in active_indices
             ])
             new_active_indices = []
@@ -112,12 +112,12 @@ class AgentInterface(ABC):
         # Calculate rewards for completed conversations
         results = []
         all_rewards = ray.get([
-            AgentInterface.get_reward_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+            get_reward_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
             for idx in range(self.num_envs)
         ])
-        for i, (messages, tokens_by_turn) in enumerate(zip(all_messages, tokens_by_turn)):
+        for i, (messages, tokens_by_turn_one_env) in enumerate(zip(all_messages, tokens_by_turn)):
             reward = all_rewards[i]
-            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn)
+            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn_one_env)
             results.append((conversation, reward))
         
         return results
@@ -159,18 +159,15 @@ class AgentInterface(ABC):
     def get_reward(cls, messages: List[Message], state: AgentState, data: dict) -> Reward:
         pass
     
-    @classmethod
-    @ray.remote
-    def get_reward_remote(cls, messages: List[Message], state: AgentState, data: dict) -> Reward:
-        return cls.get_reward(messages, state, data)
-    
-    @classmethod
-    @ray.remote
-    def is_done_remote(cls, messages: List[Message], state: AgentState, data: dict) -> bool:
-        return cls.is_done(messages, state, data)
-    
-    @classmethod
-    @ray.remote
-    def get_next_prompt_remote(cls, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
-        return cls.get_next_prompt(messages, state, data)
+@ray.remote
+def get_reward_remote(cls, messages: List[Message], state: AgentState, data: dict) -> Reward:
+    return cls.get_reward(messages, state, data)
+
+@ray.remote
+def is_done_remote(cls, messages: List[Message], state: AgentState, data: dict) -> bool:
+    return cls.is_done(messages, state, data)
+
+@ray.remote
+def get_next_prompt_remote(cls, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
+    return cls.get_next_prompt(messages, state, data)
     
