@@ -42,14 +42,14 @@ class AgentInterface(ABC):
         while active_indices:
             # Get next prompts for all active conversations
             all_prompts, all_states = ray.get([
-                self.get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
+                self.get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                 for idx in active_indices
             ])
             active_conversations = []
             for idx in active_indices:
                 #TODO: PARALLELIZE!!!
                 prompt, states[idx] = all_prompts[idx], all_states[idx]
-                if prompt is None:
+                if prompt is None or states[idx] is None:
                     # The environment is done, so we don't need to generate any more prompts
                     active_indices.remove(idx)
                     continue
@@ -67,7 +67,7 @@ class AgentInterface(ABC):
             
             # Process outputs and update states
             all_is_done = ray.get([
-                self.is_done_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
+                self.is_done_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                 for idx in active_indices
             ])
             new_active_indices = []
@@ -88,7 +88,7 @@ class AgentInterface(ABC):
         # Calculate rewards for completed conversations
         results = []
         all_rewards = ray.get([
-            self.get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
+            self.get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
             for idx in active_indices
         ])
         for i, (messages, tokens_by_turn) in enumerate(zip(all_messages, tokens_by_turn)):
