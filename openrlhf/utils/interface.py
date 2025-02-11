@@ -89,7 +89,7 @@ class AgentInterface(ABC):
         results = []
         all_rewards = ray.get([
             AgentInterface.get_reward_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
-            for idx in active_indices
+            for idx in range(self.num_envs)
         ])
         for i, (messages, tokens_by_turn) in enumerate(zip(all_messages, tokens_by_turn)):
             reward = all_rewards[i]
