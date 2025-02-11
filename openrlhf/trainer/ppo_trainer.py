@@ -234,8 +234,7 @@ class PPOTrainer(ABC):
 
                 torch.cuda.empty_cache()
                 
-                if self.strategy.args.advantage_estimator != "grpo":
-                    self.replay_buffer.normalize("advantages", self.strategy)
+                self.replay_buffer.normalize("advantages", self.strategy)
                 status = self.ppo_train(steps)
                 self.replay_buffer.clear()
                 torch.cuda.empty_cache()
