@@ -222,7 +222,7 @@ class NaiveReplayBuffer(ABC):
         elif action_masks[0] is not None and vars(strategy.args).get("env_maker", False):
             #TODO: MULTI TURN STUFF
             action_masks_vector = 1
-            num_actions = action_masks_vector.sum()
+            num_actions = items_vector.numel()
         else:
             action_masks_vector = torch.cat(action_masks).flatten()
             num_actions = action_masks_vector.sum()
