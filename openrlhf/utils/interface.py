@@ -103,11 +103,13 @@ class AgentInterface(ABC):
         """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
         pass
 
+    @classmethod
     @abstractmethod
-    def get_next_prompt(self, messages: List[Message], state: AgentState) -> Optional[Tuple[Message, AgentState]]:
+    def get_next_prompt(cls, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
         """Input:
         - messages: the messages in the conversation
         - state: the state of the environment
+        - data: the data of the environment
         
         Output:
         - next_prompt: the next prompt to send to the model
@@ -122,27 +124,29 @@ class AgentInterface(ABC):
         Finally, (3) return the next prompt for the model to send, along with the updated state."""
         pass
 
+    @classmethod
     @abstractmethod
-    def is_done(self, messages: List[Message], state: AgentState) -> bool:
+    def is_done(cls, messages: List[Message], state: AgentState, data: dict) -> bool:
         """Determine if the conversation is complete"""
         pass
 
+    @classmethod
     @abstractmethod
-    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
+    def get_reward(cls, messages: List[Message], state: AgentState, data: dict) -> Reward:
         pass
     
-    @staticmethod
+    @classmethod
     @ray.remote
-    def get_reward_remote(self, messages: List[Message], state: AgentState) -> Reward:
-        return self.get_reward(messages, state)
+    def get_reward_remote(cls, messages: List[Message], state: AgentState, data: dict) -> Reward:
+        return cls.get_reward(messages, state, data)
     
-    @staticmethod
+    @classmethod
     @ray.remote
-    def is_done_remote(self, messages: List[Message], state: AgentState) -> bool:
-        return self.is_done(messages, state)
+    def is_done_remote(cls, messages: List[Message], state: AgentState, data: dict) -> bool:
+        return cls.is_done(messages, state, data)
     
-    @staticmethod
+    @classmethod
     @ray.remote
-    def get_next_prompt_remote(self, messages: List[Message], state: AgentState) -> Optional[Tuple[Message, AgentState]]:
-        return self.get_next_prompt(messages, state)
+    def get_next_prompt_remote(cls, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
+        return cls.get_next_prompt(messages, state, data)
     
