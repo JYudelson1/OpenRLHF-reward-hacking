@@ -41,7 +41,10 @@ class AgentInterface(ABC):
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
-            all_prompts, all_states = ray.get([self.get_next_prompt_remote.remote(messages=all_messages[idx], state=states[idx]) for idx in active_indices])
+            all_prompts, all_states = ray.get([
+                self.get_next_prompt_remote(self, messages=all_messages[idx], state=states[idx]) 
+                for idx in active_indices
+            ])
             active_conversations = []
             for idx in active_indices:
                 #TODO: PARALLELIZE!!!
@@ -63,7 +66,10 @@ class AgentInterface(ABC):
             )
             
             # Process outputs and update states
-            all_is_done = ray.get([self.is_done_remote.remote(messages=all_messages[idx], state=states[idx]) for idx in active_indices])
+            all_is_done = ray.get([
+                self.is_done_remote(self, messages=all_messages[idx], state=states[idx]) 
+                for idx in active_indices
+            ])
             new_active_indices = []
             for i, output in enumerate(outputs):
                 input_tokens = output.prompt_token_ids
@@ -81,7 +87,10 @@ class AgentInterface(ABC):
             active_indices = new_active_indices
         # Calculate rewards for completed conversations
         results = []
-        all_rewards = ray.get([self.get_reward_remote.remote(messages=all_messages[idx], state=states[idx]) for idx in active_indices])
+        all_rewards = ray.get([
+            self.get_reward_remote(self, messages=all_messages[idx], state=states[idx]) 
+            for idx in active_indices
+        ])
         for i, (messages, tokens_by_turn) in enumerate(zip(all_messages, tokens_by_turn)):
             reward = all_rewards[i]
             conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn)
@@ -122,14 +131,17 @@ class AgentInterface(ABC):
     def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
         pass
     
+    @staticmethod
     @ray.remote
     def get_reward_remote(self, messages: List[Message], state: AgentState) -> Reward:
         return self.get_reward(messages, state)
     
+    @staticmethod
     @ray.remote
     def is_done_remote(self, messages: List[Message], state: AgentState) -> bool:
         return self.is_done(messages, state)
     
+    @staticmethod
     @ray.remote
     def get_next_prompt_remote(self, messages: List[Message], state: AgentState) -> Optional[Tuple[Message, AgentState]]:
         return self.get_next_prompt(messages, state)
