@@ -49,7 +49,7 @@ class AgentInterface(ABC):
                 vllm_engine = self.vllm_engine
                 self.vllm_engine = None
                 all_prompts_and_states = ray.get([
-                    get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                    get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
                     for idx in active_indices
                 ], timeout=30)
                 self.vllm_engine = vllm_engine
@@ -86,7 +86,7 @@ class AgentInterface(ABC):
             vllm_engine = self.vllm_engine
             self.vllm_engine = None
             all_is_done = ray.get([
-                is_done_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                is_done_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
                 for idx in active_indices
             ])
             self.vllm_engine = vllm_engine
@@ -111,7 +111,7 @@ class AgentInterface(ABC):
         vllm_engine = self.vllm_engine
         self.vllm_engine = None
         all_rewards = ray.get([
-            get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+            get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
             for idx in range(self.num_envs)
         ])
         self.vllm_engine = vllm_engine
@@ -148,23 +148,23 @@ class AgentInterface(ABC):
         pass
 
     @abstractmethod
-    def is_done(self, messages: List[Message], state: AgentState, data: dict) -> bool:
+    def is_done(self, messages: List[Message], state: AgentState) -> bool:
         """Determine if the conversation is complete"""
         pass
 
     @abstractmethod
-    def get_reward(self, messages: List[Message], state: AgentState, data: dict) -> Reward:
+    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
         pass
 
 @ray.remote
-def get_reward_remote(agent: AgentInterface, messages: List[Message], state: AgentState, data: dict) -> Reward:
-    return agent.get_reward(messages, state, data)
+def get_reward_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Reward:
+    return agent.get_reward(messages, state)
 
 @ray.remote
-def is_done_remote(agent: AgentInterface, messages: List[Message], state: AgentState, data: dict) -> bool:
-    return agent.is_done(messages, state, data)
+def is_done_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> bool:
+    return agent.is_done(messages, state)
 
 @ray.remote
-def get_next_prompt_remote(agent: AgentInterface, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
-    return agent.get_next_prompt(messages, state, data)
+def get_next_prompt_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Optional[Tuple[Message, AgentState]]:
+    return agent.get_next_prompt(messages, state)
     
