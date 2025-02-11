@@ -215,13 +215,18 @@ class NaiveReplayBuffer(ABC):
 
         items_vector = torch.cat(items).float().flatten()
 
-        if action_masks[0] is None:
+        if action_masks[0] is None and not vars(strategy.args).get("env_maker", False):
             # packing samples has no action mask
             action_masks_vector = 1
             num_actions = items_vector.numel()
+        elif action_masks[0] is None and vars(strategy.args).get("env_maker", False):
+            #TODO: MULTI TURN STUFF
+            action_masks_vector = 1
+            num_actions = action_masks_vector.sum()
         else:
             action_masks_vector = torch.cat(action_masks).flatten()
             num_actions = action_masks_vector.sum()
+            
 
         # for DP
         # mean
