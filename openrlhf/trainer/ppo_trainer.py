@@ -358,11 +358,15 @@ class PPOTrainer(ABC):
         )
 
         # loss function
+        if isinstance(experience.sequences, list) and experience.action_mask is not None:
+            action_mask = experience.action_mask.squeeze(0)
+        else:
+            action_mask = experience.action_mask
         actor_loss = self.actor_loss_fn(
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=experience.action_mask,
+            action_mask=action_mask,
         )
         # mixtral
         if self.aux_loss:
