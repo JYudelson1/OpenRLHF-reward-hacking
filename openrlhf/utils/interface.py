@@ -45,11 +45,16 @@ class AgentInterface(ABC):
         while active_indices:
             # Get next prompts for all active conversations
             try:
+                # Temporarily remove vllm engine before sending through Ray
+                vllm_engine = self.vllm_engine
+                self.vllm_engine = None
                 all_prompts_and_states = ray.get([
-                    get_next_prompt_remote.remote(self.__class__, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                    get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                     for idx in active_indices
-                ], timeout=30)  # Add timeout to avoid hanging
+                ], timeout=30)
+                self.vllm_engine = vllm_engine
             except Exception as e:
+                self.vllm_engine = vllm_engine  # Restore in case of error
                 logger.error(f"Error getting prompts: {str(e)}")
                 raise
 
@@ -57,17 +62,6 @@ class AgentInterface(ABC):
             for idx in active_indices:
                 result = all_prompts_and_states[idx]
                 if result is None:
-                    # Ray task failed - log error and try to get the error details
-                    # try:
-                    #     # Retry the task synchronously to see the actual error
-                    #     result = AgentInterface.get_next_prompt(
-                    #         AgentInterface,
-                    #         messages=all_messages[idx],
-                    #         state=states[idx],
-                    #         data=self.full_data[idx]
-                    #     )
-                    # except Exception as e:
-                    #     print(f"Error in get_next_prompt for environment {idx}: {str(e)}")
                     logger.error(f"Error in get_next_prompt for environment {idx}")
                     active_indices.remove(idx)
                     continue
@@ -80,7 +74,6 @@ class AgentInterface(ABC):
                 all_messages[idx].append(prompt)
                 active_conversations.append(all_messages[idx])
             
-            
             # Batch generate responses
             # TODO: Maybe use their tool API instead of handrolling?
             #  DEBUG ASSERT
@@ -90,10 +83,13 @@ class AgentInterface(ABC):
             )
             
             # Process outputs and update states
+            vllm_engine = self.vllm_engine
+            self.vllm_engine = None
             all_is_done = ray.get([
-                is_done_remote.remote(self.__class__, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                is_done_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
                 for idx in active_indices
             ])
+            self.vllm_engine = vllm_engine
             new_active_indices = []
             for i, output in enumerate(outputs):
                 input_tokens = output.prompt_token_ids
@@ -109,12 +105,16 @@ class AgentInterface(ABC):
                     new_active_indices.append(real_idx)
             
             active_indices = new_active_indices
+
         # Calculate rewards for completed conversations
         results = []
+        vllm_engine = self.vllm_engine
+        self.vllm_engine = None
         all_rewards = ray.get([
-            get_reward_remote.remote(self.__class__, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+            get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
             for idx in range(self.num_envs)
         ])
+        self.vllm_engine = vllm_engine
         for i, (messages, tokens_by_turn_one_env) in enumerate(zip(all_messages, tokens_by_turn)):
             reward = all_rewards[i]
             conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn_one_env)
@@ -127,9 +127,8 @@ class AgentInterface(ABC):
         """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
         pass
 
-    @classmethod
     @abstractmethod
-    def get_next_prompt(cls, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
+    def get_next_prompt(self, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
         """Input:
         - messages: the messages in the conversation
         - state: the state of the environment
@@ -148,26 +147,24 @@ class AgentInterface(ABC):
         Finally, (3) return the next prompt for the model to send, along with the updated state."""
         pass
 
-    @classmethod
     @abstractmethod
-    def is_done(cls, messages: List[Message], state: AgentState, data: dict) -> bool:
+    def is_done(self, messages: List[Message], state: AgentState, data: dict) -> bool:
         """Determine if the conversation is complete"""
         pass
 
-    @classmethod
     @abstractmethod
-    def get_reward(cls, messages: List[Message], state: AgentState, data: dict) -> Reward:
+    def get_reward(self, messages: List[Message], state: AgentState, data: dict) -> Reward:
         pass
-    
-@ray.remote
-def get_reward_remote(cls, messages: List[Message], state: AgentState, data: dict) -> Reward:
-    return cls.get_reward(messages, state, data)
 
 @ray.remote
-def is_done_remote(cls, messages: List[Message], state: AgentState, data: dict) -> bool:
-    return cls.is_done(messages, state, data)
+def get_reward_remote(agent: AgentInterface, messages: List[Message], state: AgentState, data: dict) -> Reward:
+    return agent.get_reward(messages, state, data)
 
 @ray.remote
-def get_next_prompt_remote(cls, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
-    return cls.get_next_prompt(messages, state, data)
+def is_done_remote(agent: AgentInterface, messages: List[Message], state: AgentState, data: dict) -> bool:
+    return agent.is_done(messages, state, data)
+
+@ray.remote
+def get_next_prompt_remote(agent: AgentInterface, messages: List[Message], state: AgentState, data: dict) -> Optional[Tuple[Message, AgentState]]:
+    return agent.get_next_prompt(messages, state, data)
     
