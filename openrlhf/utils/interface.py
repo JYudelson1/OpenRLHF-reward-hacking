@@ -4,6 +4,9 @@ import vllm
 from vllm import SamplingParams
 from dataclasses import dataclass
 import ray
+import logging
+
+logger = logging.getLogger(__name__)
 
 Message = Dict[str, str]
 Reward = float
@@ -41,14 +44,35 @@ class AgentInterface(ABC):
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
-            all_prompts_and_states = ray.get([
-                AgentInterface.get_next_prompt_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
-                for idx in active_indices
-            ])
+            try:
+                all_prompts_and_states = ray.get([
+                    AgentInterface.get_next_prompt_remote.remote(AgentInterface, messages=all_messages[idx], state=states[idx], data=self.full_data[idx]) 
+                    for idx in active_indices
+                ], timeout=30)  # Add timeout to avoid hanging
+            except Exception as e:
+                logger.error(f"Error getting prompts: {str(e)}")
+                raise
+
             active_conversations = []
             for idx in active_indices:
-                #TODO: PARALLELIZE!!!
-                prompt, states[idx] = all_prompts_and_states[idx]
+                result = all_prompts_and_states[idx]
+                if result is None:
+                    # Ray task failed - log error and try to get the error details
+                    # try:
+                    #     # Retry the task synchronously to see the actual error
+                    #     result = AgentInterface.get_next_prompt(
+                    #         AgentInterface,
+                    #         messages=all_messages[idx],
+                    #         state=states[idx],
+                    #         data=self.full_data[idx]
+                    #     )
+                    # except Exception as e:
+                    #     print(f"Error in get_next_prompt for environment {idx}: {str(e)}")
+                    logger.error(f"Error in get_next_prompt for environment {idx}")
+                    active_indices.remove(idx)
+                    continue
+                    
+                prompt, states[idx] = result
                 if prompt is None or states[idx] is None:
                     # The environment is done, so we don't need to generate any more prompts
                     active_indices.remove(idx)
