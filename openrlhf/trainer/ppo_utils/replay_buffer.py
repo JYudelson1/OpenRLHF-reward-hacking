@@ -219,7 +219,7 @@ class NaiveReplayBuffer(ABC):
             # packing samples has no action mask
             action_masks_vector = 1
             num_actions = items_vector.numel()
-        elif action_masks[0] is None and vars(strategy.args).get("env_maker", False):
+        elif action_masks[0] is not None and vars(strategy.args).get("env_maker", False):
             #TODO: MULTI TURN STUFF
             action_masks_vector = 1
             num_actions = action_masks_vector.sum()
