@@ -359,7 +359,7 @@ class PPOTrainer(ABC):
 
         # loss function
         if isinstance(experience.sequences, list) and experience.action_mask is not None:
-            action_mask = experience.action_mask.squeeze(0)
+            action_mask = torch.cat(experience.action_mask, dim=0).unsqueeze(0)
         else:
             action_mask = experience.action_mask
         actor_loss = self.actor_loss_fn(
