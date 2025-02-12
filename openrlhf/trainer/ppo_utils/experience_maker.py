@@ -220,7 +220,6 @@ class NaiveExperienceMaker(ABC):
                     reward,
                     experience.action_mask,
                     generate_kwargs["gamma"],
-                    num_actions=experience.packed_seq_lens,
                 )
                 experience.advantages = deepcopy(experience.returns)
             else:
@@ -438,7 +437,6 @@ class NaiveExperienceMaker(ABC):
         rewards: torch.Tensor,
         action_mask: torch.Tensor,
         gamma: float,
-        num_actions: Optional[list[int]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Function that computes advantages and returns from rewards using REINFORCE.
@@ -457,9 +455,8 @@ class NaiveExperienceMaker(ABC):
             # packing samples
             # TODO: this is slow...
             if action_mask is not None:
-                action_masks = unpacking_samples(action_mask, num_actions)
                 returns = []
-                for r, am in zip(rewards, action_masks):
+                for r, am in zip(rewards, action_mask):
                     ret = self.get_cumulative_returns(r.unsqueeze(0), am.unsqueeze(0), gamma)
                     returns.append(ret.squeeze(0))
                 return returns
