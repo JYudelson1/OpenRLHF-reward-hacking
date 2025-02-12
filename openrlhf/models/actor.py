@@ -185,6 +185,7 @@ class Actor(nn.Module):
         sequences: torch.LongTensor,
         num_actions: Optional[Union[int, list[int]]] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        action_mask: Optional[torch.Tensor] = None,
         return_output=False,
         ring_attn_group: Optional[dist.ProcessGroup] = None,
         packed_seq_lens: Optional[list[int]] = None,
@@ -218,14 +219,20 @@ class Actor(nn.Module):
         if not self.packing_samples:
             action_log_probs = log_probs[:, -num_actions:]
         else:
-            assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
-            action_log_probs = []
-            offset = 0
-            for num_action, seq_len in zip(num_actions, packed_seq_lens):
-                start, end = max(0, offset + seq_len - num_action - 1), offset + seq_len - 1
-                action_log_probs.append(log_probs[:, start:end])
-                offset += seq_len
-            action_log_probs = torch.cat(action_log_probs, dim=1)
+            if action_mask is not None:
+                # Get indices where action_mask is 1
+                action_indices = action_mask.nonzero(as_tuple=True)[1]
+                action_log_probs = log_probs.gather(1, action_indices.unsqueeze(0).expand(log_probs.size(0), -1))
+            else:
+                # Original packing logic when action_mask is None
+                assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
+                action_log_probs = []
+                offset = 0
+                for num_action, seq_len in zip(num_actions, packed_seq_lens):
+                    start, end = max(0, offset + seq_len - num_action - 1), offset + seq_len - 1
+                    action_log_probs.append(log_probs[:, start:end])
+                    offset += seq_len
+                action_log_probs = torch.cat(action_log_probs, dim=1)
 
         if return_output:
             return (action_log_probs, output)

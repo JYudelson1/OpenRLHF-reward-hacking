@@ -223,6 +223,8 @@ class NaiveReplayBuffer(ABC):
             #TODO: MULTI TURN STUFF
             action_masks_vector = 1
             num_actions = items_vector.numel()
+            # action_masks_vector = torch.cat(action_masks).flatten()
+            # num_actions = action_masks_vector.sum()
         else:
             action_masks_vector = torch.cat(action_masks).flatten()
             num_actions = action_masks_vector.sum()

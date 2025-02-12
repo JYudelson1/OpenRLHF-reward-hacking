@@ -43,6 +43,7 @@ def blending_datasets(
     stopping_strategy="first_exhausted",
     train_split="train",
     eval_split="test",
+    eval_ratio=0.03,
 ):
     datasets = datasets.split(",")
     probabilities = list(map(float, probabilities.split(",")))
@@ -92,7 +93,7 @@ def blending_datasets(
                 eval_data = data[eval_split].select(range(min(max_count, len(data[eval_split]))))
             else:
                 # Create eval split from train data and remove those samples from train
-                train_eval_split = train_data.train_test_split(test_size=0.03, seed=seed)
+                train_eval_split = train_data.train_test_split(test_size=eval_ratio, seed=seed)
                 train_data_list[-1] = train_eval_split["train"]  # Replace train data with reduced set
                 eval_data = train_eval_split["test"]
             eval_data_list.append(eval_data)
