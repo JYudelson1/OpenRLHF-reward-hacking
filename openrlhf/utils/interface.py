@@ -16,7 +16,6 @@ AgentState = Any  # State needed to track conversation progress
 class AgentConversation:
     messages: List[Message]
     tokens_by_turn: List[Dict[str, Any]]
-    total_tokens: int
 
 class AgentInterface(ABC):
     def __init__(
