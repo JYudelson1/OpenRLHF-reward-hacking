@@ -83,6 +83,7 @@ def compute_reward(
         # Handle multi-turn conversations with packed samples
         reward = []
         offset = 0
+        action_mask = torch.cat(action_mask, dim=0).unsqueeze(0)
         for i, (kl_seg, action_len) in enumerate(zip(kl, num_actions)):
             kl_reward = -kl_coef * kl_seg
             
