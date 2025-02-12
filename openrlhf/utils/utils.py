@@ -1,6 +1,7 @@
 import os
+from typing import List
 
-from datasets import interleave_datasets, load_dataset, load_from_disk
+from datasets import interleave_datasets, load_dataset, load_from_disk, concatenate_datasets
 from transformers import AutoTokenizer
 
 
@@ -89,9 +90,11 @@ def blending_datasets(
         if return_eval:
             if eval_split and eval_split in data:
                 eval_data = data[eval_split].select(range(min(max_count, len(data[eval_split]))))
-            # train will contains eval? TODO
             else:
-                eval_data = train_data.select(range(min(max_count, int(len(train_data) * 0.03))))
+                # Create eval split from train data and remove those samples from train
+                train_eval_split = train_data.train_test_split(test_size=0.03, seed=seed)
+                train_data_list[-1] = train_eval_split["train"]  # Replace train data with reduced set
+                eval_data = train_eval_split["test"]
             eval_data_list.append(eval_data)
 
     # merge datasets
@@ -104,6 +107,7 @@ def blending_datasets(
         seed=seed,
         stopping_strategy=stopping_strategy,
     )
+
     if return_eval:
         eval_dataset = interleave_datasets(
             eval_data_list,
@@ -111,7 +115,7 @@ def blending_datasets(
             seed=seed,
             stopping_strategy=stopping_strategy,
         )
-        return train_dataset, eval_dataset
+        return {"train": train_dataset, "validation": eval_dataset}
     else:
         return train_dataset
 

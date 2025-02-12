@@ -271,23 +271,47 @@ class ActorModelRayActor(BasePPORole):
         args = self.strategy.args
 
         # prepare datasets
-        prompts_data = blending_datasets(
+        data = blending_datasets(
             args.prompt_data,
             args.prompt_data_probs,
             strategy,
             args.seed,
             max_count=args.max_samples,
-            return_eval=False,
+            return_eval=args.eval_steps > 0,  # Only get eval split if we're doing evaluation
             train_split=args.prompt_split,
         )
-        prompts_data = prompts_data.select(range(min(args.max_samples, len(prompts_data))))
+
+        # Handle train/eval split if needed
+        if args.eval_steps > 0:
+            train_data = data["train"]
+            eval_data = data["validation"]
+        else:
+            train_data = data
+
+        # Create train dataset and dataloader (existing code)
         self.prompts_dataset = PromptDataset(
-            prompts_data, self.tokenizer, strategy, input_template=args.input_template
+            train_data, self.tokenizer, strategy, input_template=args.input_template
         )
         self.prompts_dataloader = strategy.setup_dataloader(
             self.prompts_dataset, args.rollout_batch_size // strategy.world_size, True, shuffle=True, collate_fn=custom_collate_fn 
         )
 
+        # Create eval dataloader if needed
+        if args.eval_steps > 0:
+            self.eval_dataset = PromptDataset(
+                eval_data, self.tokenizer, strategy, input_template=args.input_template
+            )
+            self.eval_dataloader = strategy.setup_dataloader(
+                self.eval_dataset,
+                args.rollout_batch_size // strategy.world_size,
+                True,
+                shuffle=False,  # No need to shuffle eval data
+                collate_fn=custom_collate_fn
+            )
+        else:
+            self.eval_dataloader = None
+
+        # Handle pretrain data (existing code)
         if args.pretrain_data:
             pretrain_data = blending_datasets(
                 args.pretrain_data,
@@ -300,11 +324,7 @@ class ActorModelRayActor(BasePPORole):
             pretrain_max_len = args.max_len if args.max_len else args.prompt_max_len + args.generate_max_len
             pretrain_dataset = SFTDataset(
                 pretrain_data.select(
-                    range(
-                        min(
-                            len(pretrain_data), args.max_epochs * len(self.prompts_dataset) * args.n_samples_per_prompt
-                        )
-                    )
+                    range(min(len(pretrain_data), args.max_epochs * len(self.prompts_dataset) * args.n_samples_per_prompt))
                 ),
                 self.tokenizer,
                 pretrain_max_len,
