@@ -415,5 +415,7 @@ if __name__ == "__main__":
     # get eval and save steps
     if args.eval_steps == -1:
         args.eval_steps = num_rollouts_per_episodes  # Evaluate once per epoch
+        if args.eval_steps == 0:
+            args.eval_steps = 1
 
     train(args)
