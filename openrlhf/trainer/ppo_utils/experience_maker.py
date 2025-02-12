@@ -293,10 +293,10 @@ class NaiveExperienceMaker(ABC):
         num_actions = samples.num_actions
 
         # log probs
-        action_log_probs = self.actor(sequences, num_actions, attention_mask)
+        action_log_probs = self.actor(sequences, num_actions, attention_mask, action_mask=action_mask)
 
         # init log probs
-        base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
+        base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask, action_mask=action_mask)
 
         # values
         if self.critic is not None:
@@ -474,13 +474,14 @@ class NaiveExperienceMaker(ABC):
         # Mask invalid responses if action_mask is provided
         if action_mask is not None:
             # TODO: THIS MIGHT BE WRONG
-            # if action_mask.size(1) != rewards.size(1):
+            if action_mask.size(1) == rewards.size(1):
+                rewards = action_mask * rewards
             #     # Truncate action_mask to match rewards, for packed samples
             #     if action_mask.size(1) > rewards.size(1):
             #         action_mask = action_mask[:, action_mask.size(1) - rewards.size(1):]
             #     else:
             #         assert False, "rewards has more elements than action_mask"
-            rewards = action_mask * rewards
+            
 
         # Calculate returns by accumulating discounted rewards
         for t in reversed(range(response_length)):
@@ -551,7 +552,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
         # init log probs
         base_action_log_probs_ref = self.initial_model.forward.remote(
-            sequences_cpu, num_actions, attention_mask_cpu, packed_seq_lens=packed_seq_lens
+            sequences_cpu, num_actions, attention_mask_cpu, action_mask=action_mask, packed_seq_lens=packed_seq_lens
         )
 
         # values
@@ -598,7 +599,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 r_refs.append(r)
 
         # log probs
-        action_log_probs = self.actor(sequences, num_actions, attention_mask, packed_seq_lens=packed_seq_lens)
+        action_log_probs = self.actor(sequences, num_actions, attention_mask, action_mask=action_mask, packed_seq_lens=packed_seq_lens)
         actor_value_rm_time = time.time() - start
 
         # wait initial/critic/reward model done

@@ -363,7 +363,7 @@ class PPOTrainer(ABC):
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=action_mask,
+            action_mask=action_mask if not isinstance(experience.sequences, list) else None,
         )
         # mixtral
         if self.aux_loss:

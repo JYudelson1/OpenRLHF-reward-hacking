@@ -24,13 +24,14 @@ def compute_approx_kl(
     if action_mask is not None:
         # TODO: THIS MIGHT BE WRONG
         # Ensure action_mask matches log_ratio dimensions
-        # if action_mask.size(1) != log_ratio.size(1):
+        if action_mask.size(1) == log_ratio.size(1):
+            log_ratio = log_ratio * action_mask
         #     # Truncate action_mask to match log_ratio, for packed samples
         #     if action_mask.size(1) > log_ratio.size(1):
         #         action_mask = action_mask[:, action_mask.size(1) - log_ratio.size(1):]
         #     else:
         #         assert False, "log_ratio has more elements than action_mask"
-        log_ratio = log_ratio * action_mask
+        
 
     # The k3 estimator is the non negative kl approximation in
     # http://joschu.net/blog/kl-approx.html
@@ -125,7 +126,8 @@ def masked_mean(tensor: torch.Tensor, mask: Optional[torch.Tensor], dim: int = N
         return tensor.mean(axis=dim)
     # if mask.size(1) != tensor.size(1):
     #     # TODO: THIS MIGHT BE WRONG
-    #     mask = mask[:, mask.size(1) - tensor.size(1):]
+    #     # mask = mask[:, mask.size(1) - tensor.size(1):]
+    #     mask = 1
     return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
 
