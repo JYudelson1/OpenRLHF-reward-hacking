@@ -473,6 +473,12 @@ class NaiveExperienceMaker(ABC):
 
         # Mask invalid responses if action_mask is provided
         if action_mask is not None:
+            if action_mask.size(1) != rewards.size(1):
+                # Truncate action_mask to match rewards, for packed samples
+                if action_mask.size(1) > rewards.size(1):
+                    action_mask = action_mask[:, action_mask.size(1) - rewards.size(1):]
+                else:
+                    assert False, "rewards has more elements than action_mask"
             rewards = action_mask * rewards
 
         # Calculate returns by accumulating discounted rewards

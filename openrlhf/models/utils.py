@@ -22,6 +22,7 @@ def compute_approx_kl(
 
     log_ratio = log_probs.float() - log_probs_base.float()
     if action_mask is not None:
+        # TODO: ERROR MULTI TURN
         # Ensure action_mask matches log_ratio dimensions
         if action_mask.size(1) != log_ratio.size(1):
             # Truncate action_mask to match log_ratio, for packed samples
