@@ -220,7 +220,7 @@ class NaiveExperienceMaker(ABC):
                     reward,
                     experience.action_mask,
                     generate_kwargs["gamma"],
-                    num_actions=num_actions,
+                    num_actions=experience.packed_seq_lens,
                 )
                 experience.advantages = deepcopy(experience.returns)
             else:
@@ -630,6 +630,9 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             # within dataset.
             sequences = unpacking_samples(sequences, packed_seq_lens)
             attention_mask = None
+            if action_mask is not None:
+                action_mask = unpacking_samples(action_mask, packed_seq_lens)
+                
             action_log_probs = unpacking_samples(action_log_probs, num_actions)
             if value is not None:
                 value = unpacking_samples(value, num_actions)                
