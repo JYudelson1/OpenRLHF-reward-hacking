@@ -473,6 +473,7 @@ class NaiveExperienceMaker(ABC):
 
         # Mask invalid responses if action_mask is provided
         if action_mask is not None:
+            # TODO: THIS MIGHT BE WRONG
             if action_mask.size(1) != rewards.size(1):
                 # Truncate action_mask to match rewards, for packed samples
                 if action_mask.size(1) > rewards.size(1):
