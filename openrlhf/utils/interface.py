@@ -16,6 +16,7 @@ AgentState = Any  # State needed to track conversation progress
 class AgentConversation:
     messages: List[Message]
     tokens_by_turn: List[Dict[str, Any]]
+    total_tokens: int
 
 class AgentInterface(ABC):
     def __init__(
@@ -40,7 +41,7 @@ class AgentInterface(ABC):
         active_indices = list(range(self.num_envs))
         
         tokens_by_turn = [list() for _ in range(self.num_envs)]
-        
+        total_tokens = [0 for _ in range(self.num_envs)]
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
@@ -92,7 +93,7 @@ class AgentInterface(ABC):
             self.vllm_engine = vllm_engine
             new_active_indices = []
             for i, output in enumerate(outputs):
-                input_tokens = output.prompt_token_ids
+                input_tokens = output.prompt_token_ids[total_tokens[active_indices[i]]:]
                 output_tokens = output.outputs[0].token_ids
                 output_message = {"role": "assistant", "content": output.outputs[0].text}
                 real_idx = active_indices[i]
@@ -101,6 +102,7 @@ class AgentInterface(ABC):
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens
                 })
+                total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
                 if not all_is_done[i]:
                     new_active_indices.append(real_idx)
             
