@@ -120,60 +120,44 @@ def train(args):
         critic_optim = None
 
     # prepare datasets
-    prompts_data = blending_datasets(
+    data = blending_datasets(
         args.prompt_data,
         args.prompt_data_probs,
         strategy,
         args.seed,
         max_count=args.max_samples,
-        return_eval=False,
+        return_eval=args.eval_steps > 0,  # Only get eval split if we're doing evaluation
         train_split=args.prompt_split,
     )
-    prompts_data = prompts_data.select(range(min(args.max_samples, len(prompts_data))))
-    prompts_dataset = PromptDataset(prompts_data, tokenizer, strategy, input_template=args.input_template)
 
-    if args.pretrain_data:
-        pretrain_data = blending_datasets(
-            args.pretrain_data,
-            args.pretrain_data_probs,
-            strategy,
-            args.seed,
-            return_eval=False,
-            train_split=args.pretrain_split,
+    if args.eval_steps > 0:
+        # Split into train and eval
+        train_data = data["train"].select(range(min(args.max_samples, len(data["train"]))))
+        eval_data = data["validation"].select(range(min(1000, len(data["validation"]))))
+        
+        # Create datasets
+        train_dataset = PromptDataset(train_data, tokenizer, strategy, input_template=args.input_template)
+        eval_dataset = PromptDataset(eval_data, tokenizer, strategy, input_template=args.input_template)
+        
+        # Create dataloaders
+        train_dataloader = strategy.setup_dataloader(
+            train_dataset, args.rollout_batch_size // strategy.world_size, True, shuffle=True
         )
-        pretrain_max_len = args.max_len if args.max_len else args.prompt_max_len + args.generate_max_len
-        pretrain_dataset = SFTDataset(
-            pretrain_data.select(
-                range(min(len(pretrain_data), args.max_epochs * len(prompts_dataset) * args.n_samples_per_prompt))
-            ),
-            tokenizer,
-            pretrain_max_len,
-            strategy,
-            pretrain_mode=True,
-        )
-
-    # prepare dataloader
-    prompts_dataloader = strategy.setup_dataloader(
-        prompts_dataset, args.rollout_batch_size // strategy.world_size, True, shuffle=True
-    )
-    if args.pretrain_data:
-        pretrain_dataloader = itertools.cycle(
-            iter(
-                strategy.setup_dataloader(
-                    pretrain_dataset,
-                    args.micro_train_batch_size,
-                    True,
-                    True,
-                    pretrain_dataset.collate_fn,
-                )
-            )
+        eval_dataloader = strategy.setup_dataloader(
+            eval_dataset, args.rollout_batch_size // strategy.world_size, True, shuffle=False
         )
     else:
-        pretrain_dataloader = None
+        # Just use all data for training
+        train_data = data.select(range(min(args.max_samples, len(data))))
+        train_dataset = PromptDataset(train_data, tokenizer, strategy, input_template=args.input_template)
+        train_dataloader = strategy.setup_dataloader(
+            train_dataset, args.rollout_batch_size // strategy.world_size, True, shuffle=True
+        )
+        eval_dataloader = None
 
     # configure scheduler
     num_update_steps_per_episodes = (
-        len(prompts_dataset) * args.n_samples_per_prompt // args.train_batch_size * args.max_epochs
+        len(train_dataset) * args.n_samples_per_prompt // args.train_batch_size * args.max_epochs
     )
     max_steps = math.ceil(args.num_episodes * num_update_steps_per_episodes)
 
@@ -264,7 +248,11 @@ def train(args):
         remote_rm_url=args.remote_rm_url,
     )
 
-    trainer.fit(args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes)
+    # Set eval dataloader if we have one
+    if eval_dataloader is not None:
+        trainer.eval_dataloader = eval_dataloader
+
+    trainer.fit(args, train_dataloader, consumed_samples, num_update_steps_per_episodes)
 
     # save model checkpoint after fitting on only rank0
     strategy.save_model(

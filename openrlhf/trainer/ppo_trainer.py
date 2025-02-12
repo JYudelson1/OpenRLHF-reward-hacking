@@ -467,6 +467,61 @@ class PPOTrainer(ABC):
         }
         return status
 
+    def evaluate(self, eval_dataloader, steps=0):
+        """Evaluate the current model on validation data.
+        
+        Args:
+            eval_dataloader: DataLoader containing evaluation prompts
+            steps: Current training step number
+        """
+        self.actor.eval()
+        with torch.no_grad():
+            step_bar = tqdm(
+                range(eval_dataloader.__len__()),
+                desc=f"Eval stage of global_step {steps}",
+                disable=not self.strategy.is_rank_0(),
+            )
+            
+            eval_stats = {
+                "reward": [],
+                "kl": [],
+                "response_length": [],
+            }
+            
+            for eval_prompts in eval_dataloader:
+                # Generate responses and compute metrics for this batch
+                experiences = self.experience_maker.make_experience_list(eval_prompts, **self.generate_kwargs)
+                
+                for experience in experiences:
+                    # Collect all metrics from experience
+                    for k in eval_stats.keys():
+                        if k in experience.info:
+                            eval_stats[k].append(experience.info[k].mean().item())
+                
+                step_bar.update()
+            
+            # Compute averages
+            logs = {
+                f"eval_{k}": sum(v)/len(v) if len(v) > 0 else 0.0 
+                for k, v in eval_stats.items()
+            }
+            
+            # All-reduce across processes
+            logs = self.strategy.all_reduce(logs)
+            step_bar.set_postfix(logs)
+            
+            # Log to wandb/tensorboard
+            if self.strategy.is_rank_0():
+                if self._wandb is not None:
+                    logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": steps}.items()}
+                    self._wandb.log(logs)
+                elif self._tensorboard is not None:
+                    for k, v in logs.items():
+                        self._tensorboard.add_scalar(f"eval/{k}", v, steps)
+                    
+        self.actor.train()  # Reset model state
+        return logs
+
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
         if global_step % args.logging_steps == 0:
             # wandb
@@ -489,12 +544,12 @@ class PPOTrainer(ABC):
                     for k, v in self.experience_maker.perf_stats.items():
                         self._tensorboard.add_scalar(f"perf/experience_maker/{k}", v, global_step)
 
-        # TODO: Add evaluation mechanism for PPO
-        if global_step % args.eval_steps == 0:
-            # self.evaluate(self.eval_dataloader, global_step)
-            pass
+        # Run evaluation if needed
+        if global_step % args.eval_steps == 0 and args.eval_steps > 0 and hasattr(self, "eval_dataloader"):
+            eval_logs = self.evaluate(self.eval_dataloader, global_step)
+            logs_dict.update(eval_logs)
+
         # save ckpt
-        # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
         if global_step % args.save_steps == 0:
             tag = f"global_step{global_step}"
             self._save_checkpoint(args, tag, client_states)

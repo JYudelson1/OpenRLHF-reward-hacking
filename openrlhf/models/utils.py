@@ -22,7 +22,7 @@ def compute_approx_kl(
 
     log_ratio = log_probs.float() - log_probs_base.float()
     if action_mask is not None:
-        # TODO: ERROR MULTI TURN
+        # TODO: THIS MIGHT BE WRONG
         # Ensure action_mask matches log_ratio dimensions
         if action_mask.size(1) != log_ratio.size(1):
             # Truncate action_mask to match log_ratio, for packed samples
@@ -124,6 +124,7 @@ def masked_mean(tensor: torch.Tensor, mask: Optional[torch.Tensor], dim: int = N
     if mask is None:
         return tensor.mean(axis=dim)
     if mask.size(1) != tensor.size(1):
+        # TODO: THIS MIGHT BE WRONG
         mask = mask[:, mask.size(1) - tensor.size(1):]
     return (tensor * mask).sum(axis=dim) / mask.sum(axis=dim)
 
