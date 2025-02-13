@@ -552,7 +552,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
         # init log probs
         base_action_log_probs_ref = self.initial_model.forward.remote(
-            sequences_cpu, num_actions, attention_mask_cpu, action_mask=action_mask.to("cpu"), packed_seq_lens=packed_seq_lens
+            sequences_cpu, num_actions, attention_mask_cpu, action_mask=action_mask, packed_seq_lens=packed_seq_lens
         )
 
         # values
