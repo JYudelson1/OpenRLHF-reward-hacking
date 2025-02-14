@@ -222,6 +222,8 @@ class Actor(nn.Module):
             if action_mask is not None:
                 # Get indices where action_mask is 1
                 action_indices = action_mask.nonzero(as_tuple=True)[1]
+                if action_indices.size(0) == log_probs.size(0) + 1:
+                    action_indices = action_indices[:-1]
                 action_log_probs = log_probs.gather(1, action_indices.unsqueeze(0).expand(log_probs.size(0), -1))
             else:
                 # Original packing logic when action_mask is None
