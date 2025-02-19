@@ -37,7 +37,8 @@ class LLMRayActor:
         else:
             # RayGPUExecutor
             # See the patch https://github.com/vllm-project/vllm/commit/479d69fad0538f04cb22bf13e76ff91cfeb8a4e5
-            kwargs["distributed_executor_backend"] = "ray"
+            #kwargs["distributed_executor_backend"] = "ray"
+            kwargs["worker_use_ray"] = True
 
             if vllm.__version__ > "0.6.4.post1":
                 # https://github.com/vllm-project/vllm/pull/10555
