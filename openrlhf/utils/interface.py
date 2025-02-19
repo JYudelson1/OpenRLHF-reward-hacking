@@ -40,7 +40,7 @@ class AgentInterface(ABC):
         tokens_by_turn = [list() for _ in range(self.num_envs)]
         total_tokens = [0 for _ in range(self.num_envs)]
         first_prompt_tokens = [None for _ in range(self.num_envs)]
-        all_output_tokens = [[] for _ in range(self.num_envs)]
+        all_output_tokens = [None for _ in range(self.num_envs)]
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
@@ -82,7 +82,7 @@ class AgentInterface(ABC):
                 })
                 total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
                 
-                all_output_tokens[real_idx] = output.prompt_token_ids + output.outputs[0].token_ids
+                all_output_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
                     
                 if not self.is_done(all_messages[real_idx], states[real_idx]):
                     new_active_indices.append(real_idx)
