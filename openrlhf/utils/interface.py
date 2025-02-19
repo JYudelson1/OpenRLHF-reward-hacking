@@ -89,9 +89,9 @@ class AgentInterface(ABC):
             active_indices = new_active_indices
         # Calculate rewards for completed conversations
         results = []
-        for messages, tokens_by_turn, state in zip(all_messages, tokens_by_turn, states):
+        for messages, tokens_by_turn, state, fpt, aot in zip(all_messages, tokens_by_turn, states, first_prompt_tokens, all_output_tokens):
             reward = self.get_reward(messages, state)
-            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn, first_prompt_tokens=first_prompt_tokens, all_output_tokens=all_output_tokens)
+            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn, first_prompt_tokens=fpt, all_output_tokens=aot)
             results.append((conversation, reward))
 
         return results
