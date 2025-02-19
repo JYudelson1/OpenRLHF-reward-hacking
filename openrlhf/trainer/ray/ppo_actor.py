@@ -411,6 +411,8 @@ class ActorModelRayActor(BasePPORole):
             torch.distributed.barrier()
             trainer._broadcast_to_vllm()
 
+        trainer.eval_dataloader = self.eval_dataloader
+
         trainer.fit(
             args,
             self.prompts_dataloader,

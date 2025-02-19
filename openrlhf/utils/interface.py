@@ -12,6 +12,8 @@ AgentState = Any  # State needed to track conversation progress
 class AgentConversation:
     messages: List[Message]
     tokens_by_turn: List[Dict[str, Any]]
+    first_prompt_tokens: List[int]
+    all_output_tokens: List[int]
 
 class AgentInterface(ABC):
     def __init__(
@@ -37,6 +39,8 @@ class AgentInterface(ABC):
 
         tokens_by_turn = [list() for _ in range(self.num_envs)]
         total_tokens = [0 for _ in range(self.num_envs)]
+        first_prompt_tokens = [None for _ in range(self.num_envs)]
+        all_output_tokens = [[] for _ in range(self.num_envs)]
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
@@ -63,25 +67,31 @@ class AgentInterface(ABC):
             # Process outputs and update states
             new_active_indices = []
             for i, output in enumerate(outputs):
-                input_tokens = output.prompt_token_ids[total_tokens[active_indices[i]]:]
+                real_idx = active_indices[i]
+                if total_tokens[real_idx] == 0:
+                    first_prompt_tokens[real_idx] = output.prompt_token_ids
+                all_output_tokens[real_idx].extend(output.outputs[0].token_ids)
+                input_tokens = output.prompt_token_ids[total_tokens[real_idx]:]
                 output_tokens = output.outputs[0].token_ids
                 output_message = {"role": "assistant", "content": output.outputs[0].text}
-                real_idx = active_indices[i]
+                
                 all_messages[real_idx].append(output_message)
                 tokens_by_turn[real_idx].append({
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens
                 })
                 total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
+                
+                all_output_tokens[real_idx] = output.prompt_token_ids + output.outputs[0].token_ids
+                    
                 if not self.is_done(all_messages[real_idx], states[real_idx]):
                     new_active_indices.append(real_idx)
-
             active_indices = new_active_indices
         # Calculate rewards for completed conversations
         results = []
         for messages, tokens_by_turn, state in zip(all_messages, tokens_by_turn, states):
             reward = self.get_reward(messages, state)
-            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn)
+            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn, first_prompt_tokens=first_prompt_tokens, all_output_tokens=all_output_tokens)
             results.append((conversation, reward))
 
         return results

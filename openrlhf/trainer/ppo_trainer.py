@@ -335,7 +335,7 @@ class PPOTrainer(ABC):
             sequences = torch.cat(experience.sequences, dim=0).unsqueeze(0)
             old_action_log_probs = torch.cat(experience.action_log_probs, dim=0).unsqueeze(0)
             advantages = torch.cat(experience.advantages, dim=0).unsqueeze(0)
-            action_mask = torch.cat(experience.action_mask, dim=0).unsqueeze(0)
+            # action_mask = torch.cat(experience.action_mask, dim=0).unsqueeze(0)
             num_actions = [v.numel() for v in experience.advantages]
             packed_seq_lens = [s.numel() for s in experience.sequences]
             attention_mask = torch.cat(
@@ -363,7 +363,7 @@ class PPOTrainer(ABC):
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=action_mask if not isinstance(experience.sequences, list) else None,
+            action_mask=experience.action_mask,
         )
         # mixtral
         if self.aux_loss:

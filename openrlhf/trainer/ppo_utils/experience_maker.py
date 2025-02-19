@@ -293,10 +293,10 @@ class NaiveExperienceMaker(ABC):
         num_actions = samples.num_actions
 
         # log probs
-        action_log_probs = self.actor(sequences, num_actions, attention_mask, action_mask=action_mask)
+        action_log_probs = self.actor(sequences, num_actions, attention_mask)
 
         # init log probs
-        base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask, action_mask=action_mask)
+        base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
 
         # values
         if self.critic is not None:
@@ -454,28 +454,28 @@ class NaiveExperienceMaker(ABC):
         if isinstance(rewards, list):
             # packing samples
             # TODO: this is slow...
-            if action_mask is not None:
-                returns = []
-                for r, am in zip(rewards, action_mask):
-                    ret = self.get_cumulative_returns(r.unsqueeze(0), am.unsqueeze(0), gamma)
-                    returns.append(ret.squeeze(0))
-                return returns
-            else:
-                returns = []
-                for r in rewards:
-                    ret = self.get_cumulative_returns(r.unsqueeze(0), gamma)
-                    returns.append(ret.squeeze(0))
-                return returns
+            # if action_mask is not None:
+            #     returns = []
+            #     for r, am in zip(rewards, action_mask):
+            #         ret = self.get_cumulative_returns(r.unsqueeze(0), am.unsqueeze(0), gamma)
+            #         returns.append(ret.squeeze(0))
+            #     return returns
+            # else:
+            returns = []
+            for r in rewards:
+                ret = self.get_cumulative_returns(r.unsqueeze(0), gamma)
+                returns.append(ret.squeeze(0))
+            return returns
 
         response_length = rewards.size(1)
         returns = torch.zeros_like(rewards)
         cumulative_return = torch.zeros(rewards.size(0), device=rewards.device)
 
         # Mask invalid responses if action_mask is provided
-        if action_mask is not None:
-            # TODO: THIS MIGHT BE WRONG
-            if action_mask.size(1) == rewards.size(1):
-                rewards = action_mask * rewards
+        # if action_mask is not None:
+        #     # TODO: THIS MIGHT BE WRONG
+        #     if action_mask.size(1) == rewards.size(1):
+        #         rewards = action_mask * rewards
             #     # Truncate action_mask to match rewards, for packed samples
             #     if action_mask.size(1) > rewards.size(1):
             #         action_mask = action_mask[:, action_mask.size(1) - rewards.size(1):]
@@ -552,7 +552,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
         # init log probs
         base_action_log_probs_ref = self.initial_model.forward.remote(
-            sequences_cpu, num_actions, attention_mask_cpu, action_mask=action_mask, packed_seq_lens=packed_seq_lens
+            sequences_cpu, num_actions, attention_mask_cpu, packed_seq_lens=packed_seq_lens
         )
 
         # values
@@ -599,7 +599,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 r_refs.append(r)
 
         # log probs
-        action_log_probs = self.actor(sequences, num_actions, attention_mask, action_mask=action_mask, packed_seq_lens=packed_seq_lens)
+        action_log_probs = self.actor(sequences, num_actions, attention_mask, packed_seq_lens=packed_seq_lens)
         actor_value_rm_time = time.time() - start
 
         # wait initial/critic/reward model done
@@ -635,8 +635,8 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             # within dataset.
             sequences = unpacking_samples(sequences, packed_seq_lens)
             attention_mask = None
-            if action_mask is not None:
-                action_mask = unpacking_samples(action_mask, packed_seq_lens)
+            # if action_mask is not None:
+            #     action_mask = unpacking_samples(action_mask, packed_seq_lens)
                 
             action_log_probs = unpacking_samples(action_log_probs, num_actions)
             if value is not None:
@@ -800,35 +800,46 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 
                 if full_data[0] is not None:
                     # Sequence packing with multiple turns
+                    # rewards = []
+                    # for i, (conversation, reward) in enumerate(outputs):
+                    #     current_seq = []
+                    #     current_action_mask = []
+                    #     total_len = 0
+                    #     rewards.append(reward)
+                        
+                    #     # Process each turn in the conversation
+                    #     for turn in conversation.tokens_by_turn:
+                    #         prompt_tokens = turn["input_tokens"]
+                    #         response_tokens = turn["output_tokens"]
+                            
+                    #         # Add tokens to sequence
+                    #         current_seq.extend(prompt_tokens)
+                    #         current_seq.extend(response_tokens)
+                            
+                    #         # Mark which tokens are from assistant (1) vs user (0)
+                    #         current_action_mask.extend([False] * (len(prompt_tokens) - 1))  # User prompt
+                    #         current_action_mask.extend(([True] * len(response_tokens)) + [False])  # Assistant response
+                            
+                    #         total_len += len(prompt_tokens) + len(response_tokens)
+                        
+                    #     # Store sequence info
+                    #     sequences.extend(current_seq)
+                    #     packed_seq_lens.append(total_len)
+                    #     attention_mask.extend([i + 1] * total_len)  # Sequence identifier
+                    #     action_masks.extend(current_action_mask)
+                    #     num_actions.append(sum(current_action_mask))  # Total response tokens
+                    # action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
+                    action_mask = None
                     rewards = []
                     for i, (conversation, reward) in enumerate(outputs):
-                        current_seq = []
-                        current_action_mask = []
-                        total_len = 0
+                        input_len = len(conversation.first_prompt_tokens)
+                        output_len = len(conversation.all_output_tokens)
+                        packed_seq_lens.append(input_len + output_len)
+                        sequences.extend(conversation.first_prompt_tokens + conversation.all_output_tokens)
+                        attention_mask.extend([i + 1] * (input_len + output_len))
+
+                        num_actions.append(max(1, output_len))
                         rewards.append(reward)
-                        
-                        # Process each turn in the conversation
-                        for turn in conversation.tokens_by_turn:
-                            prompt_tokens = turn["input_tokens"]
-                            response_tokens = turn["output_tokens"]
-                            
-                            # Add tokens to sequence
-                            current_seq.extend(prompt_tokens)
-                            current_seq.extend(response_tokens)
-                            
-                            # Mark which tokens are from assistant (1) vs user (0)
-                            current_action_mask.extend([False] * (len(prompt_tokens) - 1))  # User prompt
-                            current_action_mask.extend(([True] * len(response_tokens)) + [False])  # Assistant response
-                            
-                            total_len += len(prompt_tokens) + len(response_tokens)
-                        
-                        # Store sequence info
-                        sequences.extend(current_seq)
-                        packed_seq_lens.append(total_len)
-                        attention_mask.extend([i + 1] * total_len)  # Sequence identifier
-                        action_masks.extend(current_action_mask)
-                        num_actions.append(sum(current_action_mask))  # Total response tokens
-                    action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
                 else:
                     # Sequence packing with single turn
                     action_mask = None
