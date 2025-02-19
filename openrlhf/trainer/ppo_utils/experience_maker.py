@@ -832,6 +832,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                     action_mask = None
                     rewards = []
                     for i, (conversation, reward) in enumerate(outputs):
+                        assert False, f"conversation: {conversation}\nreward: {reward}. FTP type: {type(conversation.first_prompt_tokens)}\nAOT type: {type(conversation.all_output_tokens)}\n"
                         input_len = len(conversation.first_prompt_tokens)
                         output_len = len(conversation.all_output_tokens)
                         packed_seq_lens.append(input_len + output_len)
