@@ -55,10 +55,12 @@ class AgentInterface(ABC):
                 all_messages[idx].append(prompt)
                 active_conversations.append(all_messages[idx])
 
+            # Leave the loop if all conversations are done
+            if not active_indices:
+                break
 
             # Batch generate responses
             # TODO: Maybe use their tool API instead of handrolling?
-            #  DEBUG ASSERT
             outputs = self.vllm_engine.chat(
                 messages=active_conversations,
                 sampling_params=self.sampling_params
