@@ -211,14 +211,12 @@ class NaiveExperienceMaker(ABC):
                 experience.advantages, experience.returns = self.get_advantages_and_returns(
                     experience.values,
                     reward,
-                    experience.action_mask,
                     generate_kwargs["gamma"],
                     generate_kwargs["lambd"],
                 )
             elif self.advantage_estimator in ["reinforce", "rloo", "grpo"]:
                 experience.returns = self.get_cumulative_returns(
                     reward,
-                    experience.action_mask,
                     generate_kwargs["gamma"],
                 )
                 experience.advantages = deepcopy(experience.returns)
@@ -435,7 +433,6 @@ class NaiveExperienceMaker(ABC):
     def get_cumulative_returns(
         self,
         rewards: torch.Tensor,
-        action_mask: torch.Tensor,
         gamma: float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
