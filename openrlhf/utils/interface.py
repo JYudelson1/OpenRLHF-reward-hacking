@@ -56,7 +56,7 @@ class AgentInterface(ABC):
                 active_conversations.append(all_messages[idx])
 
             # Leave the loop if all conversations are done
-            if not active_indices:
+            if len(active_conversations) == 0:
                 break
 
             # Batch generate responses
