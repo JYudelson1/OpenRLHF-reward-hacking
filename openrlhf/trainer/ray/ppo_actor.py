@@ -294,7 +294,7 @@ class ActorModelRayActor(BasePPORole):
             train_data, self.tokenizer, strategy, input_template=args.input_template
         )
         self.prompts_dataloader = strategy.setup_dataloader(
-            self.prompts_dataset, args.rollout_batch_size // strategy.world_size, True, shuffle=True, collate_fn=custom_collate_fn 
+            self.prompts_dataset, args.rollout_batch_size // (strategy.world_size // strategy.ring_attn_size), True, shuffle=True, collate_fn=custom_collate_fn 
         )
 
         # Create eval dataloader if needed
@@ -304,7 +304,7 @@ class ActorModelRayActor(BasePPORole):
             )
             self.eval_dataloader = strategy.setup_dataloader(
                 self.eval_dataset,
-                args.rollout_batch_size // strategy.world_size,
+                args.rollout_batch_size // (strategy.world_size // strategy.ring_attn_size),
                 True,
                 shuffle=False,  # No need to shuffle eval data
                 collate_fn=custom_collate_fn

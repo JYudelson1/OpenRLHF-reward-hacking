@@ -11,6 +11,8 @@ from transformers.integrations.deepspeed import HfDeepSpeedConfig
 from .ring_attn_utils import convert_ring_attn_params
 from .utils import log_probs_from_logits, reset_position_ids
 
+from torch.nn import functional as F
+from flash_attn.utils.distributed import all_gather
 
 class Actor(nn.Module):
     """
@@ -189,6 +191,7 @@ class Actor(nn.Module):
         return_output=False,
         ring_attn_group: Optional[dist.ProcessGroup] = None,
         packed_seq_lens: Optional[list[int]] = None,
+        logps_allgather=False,
     ) -> torch.Tensor:
         """Returns action log probs"""
         if not self.packing_samples:
@@ -198,6 +201,7 @@ class Actor(nn.Module):
         else:
             # convert attention_mask to position_ids
             if ring_attn_group is not None:
+                labels = sequences
                 sequences, attention_mask, position_ids = convert_ring_attn_params(
                     sequences, attention_mask, packed_seq_lens, ring_attn_group
                 )
@@ -214,19 +218,27 @@ class Actor(nn.Module):
             assert return_output
             return output
 
-        log_probs = log_probs_from_logits(output["logits"][:, :-1, :], sequences[:, 1:])
-
         if not self.packing_samples:
+            log_probs = log_probs_from_logits(output["logits"][:, :-1, :], sequences[:, 1:])
             action_log_probs = log_probs[:, -num_actions:]
         else:
-            # if action_mask is not None:
-            #     # Get indices where action_mask is 1
-            #     action_indices = action_mask.nonzero(as_tuple=True)[1]
-            #     if action_indices.size(0) == log_probs.size(0) + 1:
-            #         action_indices = action_indices[:-1]
-            #     action_log_probs = log_probs.gather(1, action_indices.unsqueeze(0).expand(log_probs.size(0), -1))
-            # else:
-            # Original packing logic when action_mask is None
+            if ring_attn_group is not None and logps_allgather:
+                rank = dist.get_rank(ring_attn_group)
+                ring_attn_size = dist.get_world_size(ring_attn_group)
+                total_seq_len = labels.numel()
+                local_seq_len = total_seq_len // ring_attn_size
+                local_slice = slice(rank * local_seq_len + 1, (rank + 1) * local_seq_len + 1)
+                local_label = labels[:, local_slice]
+                if rank == ring_attn_size - 1:
+                    # add a dummy label to the last logit
+                    local_label = F.pad(local_label, (0, 1), value=0)
+                local_per_token_logps = torch.gather(
+                    output["logits"].log_softmax(-1), dim=2, index=local_label.unsqueeze(2)
+                ).squeeze(2)
+                per_token_logps = all_gather(local_per_token_logps, ring_attn_group).reshape((1, -1))
+                log_probs = per_token_logps[:, :-1]
+            else:
+                log_probs = log_probs_from_logits(output["logits"][:, :-1, :], sequences[:, 1:])
             assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
             action_log_probs = []
             offset = 0

@@ -352,6 +352,17 @@ if __name__ == "__main__":
     # Multiturn RL only
     parser.add_argument("--env_file", type=str, default=None, help="Path to the environment file")
     parser.add_argument("--env_class", type=str, default=None, help="Name of the environment class")
+    
+    # Context Parallel
+    parser.add_argument("--ring_attn_size", type=int, default=1, help="Ring attention group size")
+    parser.add_argument(
+        "--ring_head_stride",
+        type=int,
+        default=1,
+        help="the number of heads to do ring attention each time. "
+        "It should be a divisor of the number of heads. "
+        "A larger value may results in faster training but will consume more memory.",
+    )
 
     # TensorBoard parameters
     parser.add_argument("--use_tensorboard", type=str, default=None, help="TensorBoard logging path")

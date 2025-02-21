@@ -5,6 +5,7 @@ from typing import Callable, Dict, List, Optional, Type
 
 import ray
 import torch
+import torch.distributed as dist
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
@@ -87,6 +88,7 @@ class ReferenceModelRayActor(BasePPORole):
         attention_mask: Optional[torch.Tensor] = None,
         return_output=False,
         packed_seq_lens: Optional[list[int]] = None,
+        logps_allgather=False,
     ) -> torch.Tensor:
         device = torch.cuda.current_device()
         with torch.no_grad():
@@ -96,6 +98,8 @@ class ReferenceModelRayActor(BasePPORole):
                 attention_mask.to(device),
                 return_output=return_output,
                 packed_seq_lens=packed_seq_lens,
+                logps_allgather=logps_allgather,
+                ring_attn_group=self.strategy.ring_attn_group,
             )
         return log_probs.to("cpu")
 
@@ -133,7 +137,7 @@ class RewardModelRayActor(BasePPORole):
     ) -> torch.Tensor:
         device = torch.cuda.current_device()
         with torch.no_grad():
-            reward = self.model(sequences.to(device), attention_mask.to(device), packed_seq_lens=packed_seq_lens)
+            reward = self.model(sequences.to(device), attention_mask.to(device), packed_seq_lens=packed_seq_lens, ring_attn_group=self.strategy.ring_attn_group)
         return reward.to("cpu")
 
     def empty_cache(self) -> None:

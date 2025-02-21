@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -260,7 +261,7 @@ class PPOTrainer(ABC):
         dataloader = DataLoader(
             self.replay_buffer,
             batch_size=self.replay_buffer.sample_batch_size,
-            shuffle=True,
+            shuffle=False if self.strategy.ring_attn_group is not None else True,
             drop_last=True,
             pin_memory=self.dataloader_pin_memory,
             collate_fn=self.replay_buffer.collate_fn,
@@ -341,6 +342,14 @@ class PPOTrainer(ABC):
             attention_mask = torch.cat(
                 [torch.full_like(s, i + 1) for i, s in enumerate(experience.sequences)], dim=0
             ).unsqueeze(0)
+            # Ring Attn
+            if self.strategy.ring_attn_group is not None:
+                pad_len = (self.strategy.ring_attn_size - sequences.shape[-1] % self.strategy.ring_attn_size) % self.strategy.ring_attn_size
+                padded = torch.tensor([0] * pad_len, device=sequences.device, dtype=sequences.dtype).unsqueeze(0)
+                sequences = torch.cat([sequences, padded], dim=1)
+                attention_mask = torch.cat([attention_mask, (len(sequences) + 1) * torch.ones(1, pad_len, device="cuda", dtype=torch.float)], dim=-1)
+                num_actions[-1] += pad_len
+                packed_seq_lens[-1] += pad_len
         else:
             sequences = experience.sequences
             old_action_log_probs = experience.action_log_probs
@@ -356,7 +365,19 @@ class PPOTrainer(ABC):
             attention_mask=attention_mask,
             return_output=True,
             packed_seq_lens=packed_seq_lens,
+            ring_attn_group=self.strategy.ring_attn_group,
+            logps_allgather=True,
         )
+        
+        if self.strategy.ring_attn_group is not None:
+            # unpad the packing sequence
+            assert pad_len is not None
+            if pad_len > 0:
+                sequences = sequences[:, :-pad_len]
+                attention_mask = attention_mask[:, :-pad_len]
+                action_log_probs = action_log_probs[:, :-pad_len]
+                num_actions[-1] -= pad_len
+                packed_seq_lens[-1] -= pad_len
 
         # loss function
         actor_loss = self.actor_loss_fn(
@@ -427,6 +448,14 @@ class PPOTrainer(ABC):
             attention_mask = torch.cat(
                 [torch.full_like(s, i + 1) for i, s in enumerate(experience.sequences)], dim=0
             ).unsqueeze(0)
+            # Ring Attn
+            if self.strategy.ring_attn_group is not None:
+                pad_len = (self.strategy.ring_attn_size - sequences.shape[-1] % self.strategy.ring_attn_size) % self.strategy.ring_attn_size
+                padded = torch.tensor([0] * pad_len, device=sequences.device, dtype=sequences.dtype).unsqueeze(0)
+                sequences = torch.cat([sequences, padded], dim=1)
+                attention_mask = torch.cat([attention_mask, (len(sequences) + 1) * torch.ones(1, pad_len, device="cuda", dtype=torch.float)], dim=-1)
+                num_actions[-1] += pad_len
+                packed_seq_lens[-1] += pad_len
         else:
             sequences = experience.sequences
             old_values = experience.values
@@ -442,7 +471,19 @@ class PPOTrainer(ABC):
             attention_mask=attention_mask,
             return_output=True,
             packed_seq_lens=packed_seq_lens,
+            ring_attn_group=self.strategy.ring_attn_group,
         )
+        
+        if self.strategy.ring_attn_group is not None:
+            # unpad the packing sequence
+            assert pad_len is not None
+            if pad_len > 0:
+                sequences = sequences[:, :-pad_len]
+                attention_mask = attention_mask[:, :-pad_len]
+                values = values[:, :-pad_len]
+                num_actions[-1] -= pad_len
+                packed_seq_lens[-1] -= pad_len
+                
         # loss function
         critic_loss = self.critic_loss_fn(
             values,

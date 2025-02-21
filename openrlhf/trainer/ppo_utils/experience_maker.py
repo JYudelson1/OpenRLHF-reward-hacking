@@ -7,6 +7,8 @@ from typing import List, Optional, Tuple, Union
 import ray
 import torch
 import torch.nn as nn
+import torch.distributed as dist
+import torch.nn.functional as F
 from tqdm import tqdm
 
 from openrlhf.models.actor import Actor
@@ -179,7 +181,17 @@ class NaiveExperienceMaker(ABC):
         """
         args = self.strategy.args
         # generate responses
-        samples_list = self.generate_samples(all_prompts, **generate_kwargs)
+        if self.strategy.ring_attn_group is not None:
+            if self.strategy.ring_attn_rank == 0:
+                samples_list = self.generate_samples(all_prompts, **generate_kwargs)
+                dist.broadcast_object_list(samples_list, src=dist.get_rank(), group=self.strategy.ring_attn_group)
+            else:
+                world_size = torch.distributed.get_world_size() // args.ring_attn_size
+                samples_list = [None] * (args.rollout_batch_size // world_size // args.micro_rollout_batch_size)
+                dist.broadcast_object_list(samples_list, src=self.strategy.ring_attn_ranks[0], group=self.strategy.ring_attn_group)
+        else:
+            samples_list = self.generate_samples(all_prompts, **generate_kwargs)
+        
         torch.distributed.barrier()
 
         experiences = []
@@ -549,7 +561,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
         # init log probs
         base_action_log_probs_ref = self.initial_model.forward.remote(
-            sequences_cpu, num_actions, attention_mask_cpu, packed_seq_lens=packed_seq_lens
+            sequences_cpu, num_actions, attention_mask_cpu, packed_seq_lens=packed_seq_lens, logps_allgather=True
         )
 
         # values
@@ -596,7 +608,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 r_refs.append(r)
 
         # log probs
-        action_log_probs = self.actor(sequences, num_actions, attention_mask, packed_seq_lens=packed_seq_lens)
+        action_log_probs = self.actor(sequences, num_actions, attention_mask, packed_seq_lens=packed_seq_lens, ring_attn_group=self.strategy.ring_attn_group, logps_allgather=True)
         actor_value_rm_time = time.time() - start
 
         # wait initial/critic/reward model done
@@ -628,6 +640,17 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         if not self.packing_samples:
             kl_mean = masked_mean(kl, action_mask, dim=-1)
         else:
+            if self.strategy.ring_attn_group is not None:
+                # unpad the sequence, probs, value, kl
+                pad_len = (self.strategy.ring_attn_size - len(sequences) % self.strategy.ring_attn_size) % self.strategy.ring_attn_size
+                if pad_len > 0:
+                    sequences = sequences[:, :-pad_len]
+                    action_log_probs = action_log_probs[:, :-pad_len]
+                    if value is not None:
+                        value = value[:, :-pad_len]
+                    kl = kl[:, :-pad_len]
+                    packed_seq_lens[-1] -= pad_len
+                    num_actions[-1] -= pad_len
             # convert tensor into list of tensors so that it's easier to manipulate
             # within dataset.
             sequences = unpacking_samples(sequences, packed_seq_lens)
@@ -681,8 +704,8 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         #     prompt_token_id_map[str(prompt_tokens)] = i
 
         # round-robin load balance
-        rank = torch.distributed.get_rank()
-        world_size = torch.distributed.get_world_size()
+        rank = torch.distributed.get_rank() // self.strategy.ring_attn_size
+        world_size = torch.distributed.get_world_size() // self.strategy.ring_attn_size
 
         # Select LLM engines: assign each rank an engine, or cycle through engines if world_size < engine_count
         if len(self.vllm_engines) <= world_size:
@@ -849,6 +872,14 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                         attention_mask.extend([i + 1] * (input_len + output_len))
 
                         num_actions.append(max(1, output_len))
+                        
+                if self.strategy.ring_attn_group is not None:
+                    pad_len = (self.strategy.ring_attn_size - len(sequences) % self.strategy.ring_attn_size) % self.strategy.ring_attn_size
+                    sequences += [pad_token_id] * pad_len
+                    output_len += pad_len
+                    packed_seq_lens[-1] += pad_len
+                    attention_mask += [i + 1] * pad_len
+                    num_actions[-1] += pad_len
                 
                 sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
                 attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
