@@ -106,6 +106,13 @@ class DeepspeedStrategy(ABC):
                 set_ring_attn_group(group)
                 self.ring_attn_rank = dist.get_rank(group=group)
                 self.ring_attn_ranks = ring_attn_ranks
+                
+        self.print(
+            f"================"
+            f"[RingAttn] sub-world rank={dist.get_rank()}/{dist.get_world_size()}, "
+            f"using ring_attn_size={self.ring_attn_size}, ring_attn_group={self.ring_attn_group}"
+            f"================"
+        )
 
         from ring_flash_attn import substitute_hf_flash_attn
 
