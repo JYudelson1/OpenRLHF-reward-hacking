@@ -182,17 +182,42 @@ class NaiveExperienceMaker(ABC):
         args = self.strategy.args
         # generate responses
         if self.strategy.ring_attn_group is not None:
+            print(f"[DEBUG] Rank={dist.get_rank()}, ring_attn_rank={self.strategy.ring_attn_rank}, ring_attn_size={args.ring_attn_size}")
+            print(f"[DEBUG] World size={torch.distributed.get_world_size()}, ring_attn_ranks={self.strategy.ring_attn_ranks}")
+            
             if self.strategy.ring_attn_rank == 0:
+                print(f"[DEBUG] Rank 0 generating samples")
                 samples_list = self.generate_samples(all_prompts, **generate_kwargs)
-                dist.broadcast_object_list(samples_list, src=dist.get_rank(), group=self.strategy.ring_attn_group)
+                print(f"[DEBUG] Rank 0 broadcasting samples, src={dist.get_rank()}")
+                try:
+                    dist.broadcast_object_list(samples_list, src=dist.get_rank(), group=self.strategy.ring_attn_group)
+                    print(f"[DEBUG] Rank 0 broadcast complete")
+                except Exception as e:
+                    print(f"[ERROR] Broadcast error on rank 0: {str(e)}")
+                    import traceback
+                    print(traceback.format_exc())
+                    raise
             else:
                 world_size = torch.distributed.get_world_size() // args.ring_attn_size
-                samples_list = [None] * (args.rollout_batch_size // world_size // args.micro_rollout_batch_size)
-                dist.broadcast_object_list(samples_list, src=self.strategy.ring_attn_ranks[0], group=self.strategy.ring_attn_group)
+                num_samples = args.rollout_batch_size // world_size // args.micro_rollout_batch_size
+                print(f"[DEBUG] Non-0 rank {self.strategy.ring_attn_rank} preparing to receive {num_samples} samples")
+                samples_list = [None] * num_samples
+                print(f"[DEBUG] Non-0 rank receiving broadcast, src={self.strategy.ring_attn_ranks[0]}")
+                try:
+                    dist.broadcast_object_list(samples_list, src=self.strategy.ring_attn_ranks[0], group=self.strategy.ring_attn_group)
+                    print(f"[DEBUG] Non-0 rank {self.strategy.ring_attn_rank} received broadcast")
+                except Exception as e:
+                    print(f"[ERROR] Broadcast receive error on rank {self.strategy.ring_attn_rank}: {str(e)}")
+                    import traceback
+                    print(traceback.format_exc())
+                    raise
         else:
+            print(f"[DEBUG] No ring attn, generating samples normally on rank {dist.get_rank()}")
             samples_list = self.generate_samples(all_prompts, **generate_kwargs)
         
+        print(f"[DEBUG] Rank {dist.get_rank()} waiting at barrier")
         torch.distributed.barrier()
+        print(f"[DEBUG] Rank {dist.get_rank()} passed barrier")
 
         experiences = []
         for samples in tqdm(
@@ -694,24 +719,27 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
     def _generate_vllm(self, all_examples: List[dict], **kwargs) -> List[Samples]:
         from vllm import SamplingParams
         
-        all_prompts = [example["prompts"] for example in all_examples]  # Remove .get() since we know the key exists
+        print(f"[DEBUG-VLLM] Starting _generate_vllm on rank {dist.get_rank()}")
+        print(f"[DEBUG-VLLM] Number of examples: {len(all_examples)}")
+        
+        all_prompts = [example["prompts"] for example in all_examples]
         full_data = [example.get("full_data", None) for example in all_examples]
         all_solutions = [example.get("solution", None) for example in all_examples]
         
-        # prompt_token_id_map = {}
-        # prompt_token_ids = self.tokenize_fn(all_prompts, self.prompt_max_len, padding=False)["input_ids"] 
-        # for i, prompt_tokens in enumerate(prompt_token_ids):
-        #     prompt_token_id_map[str(prompt_tokens)] = i
-
+        print(f"[DEBUG-VLLM] Using environment/multiturn mode: {full_data[0] is not None}")
+        
         # round-robin load balance
         rank = torch.distributed.get_rank() // self.strategy.ring_attn_size
         world_size = torch.distributed.get_world_size() // self.strategy.ring_attn_size
+        print(f"[DEBUG-VLLM] VLLM rank={rank}, world_size={world_size}, ring_attn_size={self.strategy.ring_attn_size}")
 
         # Select LLM engines: assign each rank an engine, or cycle through engines if world_size < engine_count
         if len(self.vllm_engines) <= world_size:
             llms = [self.vllm_engines[rank % len(self.vllm_engines)]]
+            print(f"[DEBUG-VLLM] Using one engine: index={rank % len(self.vllm_engines)}")
         else:
             llms = self.vllm_engines[rank::world_size]
+            print(f"[DEBUG-VLLM] Using multiple engines: {len(llms)} engines")
 
         args = self.strategy.args
 
@@ -724,6 +752,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             skip_special_tokens=kwargs.get("skip_special_tokens", False),
             include_stop_str_in_output=True,
         )
+        print(f"[DEBUG-VLLM] Sampling parameters: temp={kwargs.get('temperature', 1.0)}, top_p={kwargs.get('top_p', 1.0)}")
 
         # Expand prompt list based on the number of samples per prompt
         all_prompts = sum([[prompt] * args.n_samples_per_prompt for prompt in all_prompts], [])
