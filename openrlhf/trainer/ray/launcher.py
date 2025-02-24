@@ -92,8 +92,8 @@ class ReferenceModelRayActor(BasePPORole):
         ring_attn_group=None,
     ) -> torch.Tensor:
         device = torch.cuda.current_device()
-        if ring_attn_group is None:
-            ring_attn_group = self.strategy.ring_attn_group
+        # if ring_attn_group is None:
+        #     ring_attn_group = self.strategy.ring_attn_group
         with torch.no_grad():
             log_probs = self.model(
                 sequences.to(device),
