@@ -89,8 +89,11 @@ class ReferenceModelRayActor(BasePPORole):
         return_output=False,
         packed_seq_lens: Optional[list[int]] = None,
         logps_allgather=False,
+        ring_attn_group=None,
     ) -> torch.Tensor:
         device = torch.cuda.current_device()
+        if ring_attn_group is None:
+            ring_attn_group = self.strategy.ring_attn_group
         with torch.no_grad():
             log_probs = self.model(
                 sequences.to(device),
@@ -99,7 +102,7 @@ class ReferenceModelRayActor(BasePPORole):
                 return_output=return_output,
                 packed_seq_lens=packed_seq_lens,
                 logps_allgather=logps_allgather,
-                ring_attn_group=self.strategy.ring_attn_group,
+                ring_attn_group=ring_attn_group,
             )
         return log_probs.to("cpu")
 
