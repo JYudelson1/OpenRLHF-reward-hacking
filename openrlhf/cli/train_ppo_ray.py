@@ -24,6 +24,21 @@ def reward_fn(rewards: List[torch.Tensor]):
     
 def _validate_args(args):
     actor_world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
+    
+    # EDIT: Add validation for ring_attn_size
+    if getattr(args, "ring_attn_size", 1) > 1:
+        if actor_world_size % args.ring_attn_size != 0:
+            raise ValueError(
+                f"actor_world_size ({actor_world_size}) must be divisible by ring_attn_size ({args.ring_attn_size})"
+            )
+        
+        # Check if we're using vLLM with ring attention
+        if args.vllm_num_engines > 0:
+            if (actor_world_size // args.ring_attn_size) % args.vllm_num_engines != 0:
+                raise ValueError(
+                    f"actor_world_size / ring_attn_size ({actor_world_size // args.ring_attn_size}) "
+                    f"must be divisible by vllm_num_engines ({args.vllm_num_engines})"
+                )
 
     assert (
         args.rollout_batch_size % actor_world_size == 0

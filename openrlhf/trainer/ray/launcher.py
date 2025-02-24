@@ -68,22 +68,22 @@ class BasePPORole(DistributedTorchRayActor):
 class ReferenceModelRayActor(BasePPORole):
     def init_model_from_pretrained(self, strategy: DeepspeedStrategy, pretrain):
         # Custom dist setup (no ring_attn_group)
-        
-        self.strategy = strategy
-        self.strategy.set_seed(self.strategy.seed)
+        self._setup_distributed(strategy)
+        # self.strategy = strategy
+        # self.strategy.set_seed(self.strategy.seed)
 
-        if self.strategy.args.local_rank == -1 and "LOCAL_RANK" in os.environ:  # for slurm
-            self.strategy.args.local_rank = int(os.environ["LOCAL_RANK"])
+        # if self.strategy.args.local_rank == -1 and "LOCAL_RANK" in os.environ:  # for slurm
+        #     self.strategy.args.local_rank = int(os.environ["LOCAL_RANK"])
 
-        if self.strategy.args.local_rank != -1:
-            torch.cuda.set_device(self.strategy.args.local_rank)
-        # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-        deepspeed.init_distributed(timeout=timedelta(minutes=60))
-        #self.strategy.setup_ring_attn()
-        self.strategy.world_size = dist.get_world_size()
-        self.strategy.accumulated_gradient = (
-            self.strategy.train_batch_size * self.strategy.ring_attn_size // self.strategy.micro_train_batch_size // self.strategy.world_size
-        )
+        # if self.strategy.args.local_rank != -1:
+        #     torch.cuda.set_device(self.strategy.args.local_rank)
+        # # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+        # deepspeed.init_distributed(timeout=timedelta(minutes=60))
+        # self.strategy.setup_ring_attn()
+        # self.strategy.world_size = dist.get_world_size()
+        # self.strategy.accumulated_gradient = (
+        #     self.strategy.train_batch_size * self.strategy.ring_attn_size // self.strategy.micro_train_batch_size // self.strategy.world_size
+        # )
         
         
         model = Actor(
@@ -110,7 +110,6 @@ class ReferenceModelRayActor(BasePPORole):
         return_output=False,
         packed_seq_lens: Optional[list[int]] = None,
         logps_allgather=False,
-        ring_attn_group=None,
     ) -> torch.Tensor:
         device = torch.cuda.current_device()
         # if ring_attn_group is None:
@@ -123,7 +122,7 @@ class ReferenceModelRayActor(BasePPORole):
                 return_output=return_output,
                 packed_seq_lens=packed_seq_lens,
                 logps_allgather=logps_allgather,
-                ring_attn_group=ring_attn_group,
+                ring_attn_group=self.strategy.ring_attn_group,
             )
         return log_probs.to("cpu")
 
