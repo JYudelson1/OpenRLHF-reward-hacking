@@ -181,39 +181,7 @@ class NaiveExperienceMaker(ABC):
         """
         args = self.strategy.args
         # generate responses
-        if self.strategy.ring_attn_group is not None:
-            print(f"[DEBUG] Rank={dist.get_rank()}, ring_attn_rank={self.strategy.ring_attn_rank}, ring_attn_size={args.ring_attn_size}")
-            print(f"[DEBUG] World size={torch.distributed.get_world_size()}, ring_attn_ranks={self.strategy.ring_attn_ranks}")
-            
-            if self.strategy.ring_attn_rank == 0:
-                print(f"[DEBUG] Rank 0 generating samples")
-                samples_list = self.generate_samples(all_prompts, **generate_kwargs)
-                print(f"[DEBUG] Rank 0 broadcasting samples, src={dist.get_rank()}")
-                try:
-                    dist.broadcast_object_list(samples_list, src=dist.get_rank(), group=self.strategy.ring_attn_group)
-                    print(f"[DEBUG] Rank 0 broadcast complete")
-                except Exception as e:
-                    print(f"[ERROR] Broadcast error on rank 0: {str(e)}")
-                    import traceback
-                    print(traceback.format_exc())
-                    raise
-            else:
-                world_size = torch.distributed.get_world_size() // args.ring_attn_size
-                num_samples = args.rollout_batch_size // world_size // args.micro_rollout_batch_size
-                print(f"[DEBUG] Non-0 rank {self.strategy.ring_attn_rank} preparing to receive {num_samples} samples")
-                samples_list = [None] * num_samples
-                print(f"[DEBUG] Non-0 rank receiving broadcast, src={self.strategy.ring_attn_ranks[0]}")
-                try:
-                    dist.broadcast_object_list(samples_list, src=self.strategy.ring_attn_ranks[0], group=self.strategy.ring_attn_group)
-                    print(f"[DEBUG] Non-0 rank {self.strategy.ring_attn_rank} received broadcast")
-                except Exception as e:
-                    print(f"[ERROR] Broadcast receive error on rank {self.strategy.ring_attn_rank}: {str(e)}")
-                    import traceback
-                    print(traceback.format_exc())
-                    raise
-        else:
-            print(f"[DEBUG] No ring attn, generating samples normally on rank {dist.get_rank()}")
-            samples_list = self.generate_samples(all_prompts, **generate_kwargs)
+        samples_list = self.generate_samples(all_prompts, **generate_kwargs)
         
         print(f"[DEBUG] Rank {dist.get_rank()} waiting at barrier")
         torch.distributed.barrier()
