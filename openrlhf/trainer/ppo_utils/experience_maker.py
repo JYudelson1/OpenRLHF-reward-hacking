@@ -2,6 +2,7 @@ import time
 from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import List, Optional, Tuple, Union
 
 import ray
@@ -183,9 +184,17 @@ class NaiveExperienceMaker(ABC):
         # generate responses
         samples_list = self.generate_samples(all_prompts, **generate_kwargs)
         
-        print(f"[DEBUG] Rank {dist.get_rank()} waiting at barrier")
-        torch.distributed.barrier()
-        print(f"[DEBUG] Rank {dist.get_rank()} passed barrier")
+        # Proper barrier usage with ring attention
+        if hasattr(self.strategy, 'ring_attn_group') and self.strategy.ring_attn_group is not None:
+            # First synchronize within our ring group
+            print(f"[DEBUG] Rank {dist.get_rank()} (ring rank {self.strategy.ring_attn_rank}) waiting at ring-group barrier")
+            torch.distributed.barrier(group=self.strategy.ring_attn_group)
+            print(f"[DEBUG] Rank {dist.get_rank()} (ring rank {self.strategy.ring_attn_rank}) passed ring-group barrier")
+        else:
+            # Standard barrier for non-ring-attention case
+            print(f"[DEBUG] Rank {dist.get_rank()} waiting at standard barrier")
+            torch.distributed.barrier()
+            print(f"[DEBUG] Rank {dist.get_rank()} passed standard barrier")
 
         experiences = []
         for samples in tqdm(
