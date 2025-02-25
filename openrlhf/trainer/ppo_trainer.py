@@ -474,6 +474,7 @@ class PPOTrainer(ABC):
             eval_dataloader: DataLoader containing evaluation prompts
             steps: Current training step number
         """
+        self.strategy.print(f"[DEBUG] Evaluating model at global_step {steps}")
         self.actor.eval()
         with torch.no_grad():
             step_bar = tqdm(
