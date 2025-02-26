@@ -784,7 +784,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 if vars(self.strategy.args).get("env_file", False):
                     datum = all_full_data[i * batch_size : (i + 1) * batch_size]
                     refs.append(
-                        llm.add_requests.remote(rank, sampling_params=sampling_params, multiturn=True, full_data=datum, env_maker=self.strategy.args.env_maker)
+                        llm.add_requests.remote(rank, sampling_params=sampling_params, multiturn=True, full_data=datum, env_maker=self.strategy.args.env_maker, prompt_token_ids=None)
                     )
                 else:
                     refs.append(
