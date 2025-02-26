@@ -735,7 +735,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
     def _generate_vllm(self, all_examples: List[dict], **kwargs) -> List[Samples]:
         from vllm import SamplingParams
         
-        all_prompts = [example["prompts"] for example in all_examples]  # Remove .get() since we know the key exists
+        all_prompts = [example["prompts"] for example in all_examples]
         full_data = [example.get("full_data", None) for example in all_examples]
         all_solutions = [example.get("solution", None) for example in all_examples]
         
@@ -787,16 +787,17 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 refs.append(
                     llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
                 )
-        ray.get(refs)
+        all_outputs = sum(ray.get(refs), [])
+        # ray.get(refs)
                     
-        # Make sure all requests are sent.
-        torch.distributed.barrier()
+        # # Make sure all requests are sent.
+        # torch.distributed.barrier()
 
-        # Retrieve and combine results from all outputs
-        all_output_refs = []
-        for i, llm in enumerate(llms):
-            all_output_refs.append(llm.get_responses.remote(rank))
-        all_outputs = sum(ray.get(all_output_refs), [])
+        # # Retrieve and combine results from all outputs
+        # all_output_refs = []
+        # for i, llm in enumerate(llms):
+        #     all_output_refs.append(llm.get_responses.remote(rank))
+        # all_outputs = sum(ray.get(all_output_refs), [])
 
         samples_list = []
         for i in range(0, len(all_outputs), args.micro_rollout_batch_size):
