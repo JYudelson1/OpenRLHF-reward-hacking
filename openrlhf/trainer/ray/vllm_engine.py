@@ -41,6 +41,7 @@ class LLMRayActor:
         self.actor_counter = 0
         self.requests = {}
         self.responses = {}
+        self.full_data = {}
 
         self.llm = LLM(*args, **kwargs)
 
