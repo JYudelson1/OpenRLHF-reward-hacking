@@ -1,6 +1,6 @@
 import os
 import time
-
+import torch
 import numpy as np
 import ray
 from ray.util.placement_group import placement_group
@@ -129,6 +129,9 @@ class LLMRayActor:
             responses = env.generate_many()
             
         logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")
+
+        # Or get a summary
+        print(torch.cuda.memory_summary())
         
         # Return the responses directly
         return responses
