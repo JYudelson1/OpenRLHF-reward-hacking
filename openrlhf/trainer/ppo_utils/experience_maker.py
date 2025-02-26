@@ -645,8 +645,10 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 r = remote_rm_fn_ray.remote(rm, queries=queries, prompts=samples.prompts)
                 r_refs.append(r)
 
-        if args.colocate_all_models and not self.remote_rm_url:
+        if args.colocate_all_models:
             ray.get(r_refs)
+
+        if args.colocate_all_models and not self.remote_rm_url and pre_calc_reward is None:
             ray.get([self.reward_model[0].empty_cache.remote()])
 
         # log probs
