@@ -91,7 +91,7 @@ class LLMRayActor:
                 if not multiturn:
                     responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=requests)
                 else:
-                    env = env_maker(full_data=requests, sampling_params=sampling_params, vllm_engine=self.llm)
+                    env = env_maker(full_data=requests, sampling_params=sampling_params, vllm_engine=self.llm, prompt_token_ids=None)
                     responses = env.generate_many()
             else:
                 responses = []
