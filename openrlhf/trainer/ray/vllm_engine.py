@@ -70,21 +70,28 @@ class LLMRayActor:
         Save the requests from actors and generate responses when all actors have sent their requests
         """
         self.requests[actor_rank] = prompt_token_ids
+        self.full_data[actor_rank] = full_data
         self.actor_counter += 1
         if self.actor_counter == self.num_actors:
             assert len(self.requests) == self.num_actors
             num_requests = []
             requests = []
-            for actor_rank, request in self.requests.items():
-                num_requests.append((actor_rank, len(request)))
-                requests.extend(request)
+            
+            if not multiturn:
+                for actor_rank, request in self.requests.items():
+                    num_requests.append((actor_rank, len(request)))
+                    requests.extend(request)
+            else:
+                for actor_rank, data in self.full_data.items():
+                    num_requests.append((actor_rank, len(data)))
+                    requests.extend(data)
 
             if len(requests) > 0:
                 # For now we assume that all requests have the same sampling params
                 if not multiturn:
                     responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=requests)
                 else:
-                    env = env_maker(full_data=full_data, sampling_params=sampling_params, vllm_engine=self.llm)
+                    env = env_maker(full_data=requests, sampling_params=sampling_params, vllm_engine=self.llm)
                     responses = env.generate_many()
             else:
                 responses = []
