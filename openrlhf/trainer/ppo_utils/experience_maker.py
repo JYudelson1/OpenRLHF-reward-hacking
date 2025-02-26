@@ -790,6 +790,9 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                     refs.append(
                         llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
                     )
+                    
+        # Make sure all requests are sent.
+        torch.distributed.barrier()
 
         # Retrieve and combine results from all outputs
         all_output_refs = []
