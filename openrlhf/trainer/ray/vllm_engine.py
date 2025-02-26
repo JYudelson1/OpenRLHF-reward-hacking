@@ -160,7 +160,7 @@ def create_vllm_engines(
             ray.get(pg.ready())
 
             scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=pg, placement_group_capture_child_tasks=True, placement_group_bundle_index=0
+                placement_group=pg, placement_group_capture_child_tasks=True, placement_group_bundle_index=i
             )
 
         if num_engines >= num_total_actors:
