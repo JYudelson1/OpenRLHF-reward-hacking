@@ -780,16 +780,16 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
         for i, llm in enumerate(llms):
             prompt_token_ids = all_prompt_token_ids[i * batch_size : (i + 1) * batch_size]
-            if prompt_token_ids:
-                if vars(self.strategy.args).get("env_file", False):
-                    datum = all_full_data[i * batch_size : (i + 1) * batch_size]
-                    refs.append(
-                        llm.add_requests.remote(rank, sampling_params=sampling_params, multiturn=True, full_data=datum, env_maker=self.strategy.args.env_maker, prompt_token_ids=None)
-                    )
-                else:
-                    refs.append(
-                        llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
-                    )
+            if vars(self.strategy.args).get("env_file", False):
+                datum = all_full_data[i * batch_size : (i + 1) * batch_size]
+                refs.append(
+                    llm.add_requests.remote(rank, sampling_params=sampling_params, multiturn=True, full_data=datum, env_maker=self.strategy.args.env_maker, prompt_token_ids=None)
+                )
+            else:
+                refs.append(
+                    llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
+                )
+        ray.get(refs)
                     
         # Make sure all requests are sent.
         torch.distributed.barrier()
