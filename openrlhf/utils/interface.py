@@ -55,7 +55,7 @@ class AgentInterface(ABC):
                 all_prompts_and_states = ray.get([
                     get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
                     for idx in active_indices
-                ], timeout=30)
+                ])
                 self.vllm_engine = vllm_engine
             except Exception as e:
                 self.vllm_engine = vllm_engine  # Restore in case of error
