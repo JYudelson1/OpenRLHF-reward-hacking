@@ -1,4 +1,5 @@
 import os
+import time
 
 import numpy as np
 import ray
@@ -70,10 +71,15 @@ class LLMRayActor:
         """
         Save the requests from actors and generate responses when all actors have sent their requests
         """
+        start_time = time.time()
+        logger.info(f"Engine {id(self)} received request from actor {actor_rank}, counter={self.actor_counter}/{self.num_actors}")
+        
         self.requests[actor_rank] = prompt_token_ids
         self.full_data[actor_rank] = full_data
         self.actor_counter += 1
         if self.actor_counter == self.num_actors:
+            start_time = time.time()
+            logger.info(f"Engine {id(self)} starting generation for all actors at {start_time}")
             assert len(self.requests) == self.num_actors
             num_requests = []
             requests = []
@@ -96,6 +102,8 @@ class LLMRayActor:
                     responses = env.generate_many()
             else:
                 responses = []
+                
+            logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")    
 
             offset = 0
             self.responses = {}
