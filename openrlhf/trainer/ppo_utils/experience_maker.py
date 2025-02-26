@@ -698,8 +698,6 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 value = unpacking_samples(value, num_actions)
             if base_action_log_probs is not None:
                 base_action_log_probs = unpacking_samples(base_action_log_probs, num_actions)
-
-                value = unpacking_samples(value, num_actions)                
             kl = unpacking_samples(kl, num_actions)
             kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=device)
 
