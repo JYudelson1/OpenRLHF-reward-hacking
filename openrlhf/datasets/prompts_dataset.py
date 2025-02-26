@@ -50,6 +50,7 @@ class PromptDataset(Dataset):
         # chat_template
         self.input_template = input_template
         input_key = getattr(self.strategy.args, "input_key", None)
+        label_key = getattr(self.strategy.args, "label_key", None)
         apply_chat_template = getattr(self.strategy.args, "apply_chat_template", False)
 
         if apply_chat_template:
@@ -78,4 +79,4 @@ class PromptDataset(Dataset):
         return length
 
     def __getitem__(self, idx):
-        return self.prompts[idx]
+        return self.prompts[idx], self.labels[idx]

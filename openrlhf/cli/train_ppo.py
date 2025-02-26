@@ -79,13 +79,16 @@ def train(args):
     tokenizer = get_tokenizer(args.pretrain, actor.model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
 
     # load weights for reference actor
-    initial_model = Actor(
-        args.pretrain,
-        use_flash_attention_2=args.flash_attn,
-        bf16=args.bf16,
-        load_in_4bit=args.load_in_4bit,
-        ds_config=strategy.get_ds_eval_config(offload=False),
-    )
+    if args.init_kl_coef == 0:
+        initial_model = None
+    else:
+        initial_model = Actor(
+            args.pretrain,
+            use_flash_attention_2=args.flash_attn,
+            bf16=args.bf16,
+            load_in_4bit=args.load_in_4bit,
+            ds_config=strategy.get_ds_eval_config(offload=False),
+        )
 
     if args.enable_ema:
         ema_model = Actor(
@@ -274,6 +277,8 @@ if __name__ == "__main__":
     # Checkpoint
     parser.add_argument("--save_path", type=str, default="./ckpt")
     parser.add_argument("--save_steps", type=int, default=-1)
+    parser.add_argument("--save_hf_ckpt", action="store_true", default=False)
+    parser.add_argument("--disable_ds_ckpt", action="store_true", default=False)
     parser.add_argument("--logging_steps", type=int, default=1)
     parser.add_argument("--eval_steps", type=int, default=-1)
     parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_ppo")
@@ -350,6 +355,8 @@ if __name__ == "__main__":
         help="Choose advantage estimation method: gae, reinforce, rloo, grpo",
     )
 
+    parser.add_argument("--use_kl_loss", action="store_true", default=False, help="whether to use KL loss from GRPO")
+
     # LoRA
     parser.add_argument("--load_in_4bit", action="store_true", default=False)
     parser.add_argument("--lora_rank", type=int, default=0)
@@ -382,6 +389,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--pretrain_split", type=str, default="train")
     parser.add_argument("--input_key", type=str, default="input", help="JSON dataset key")
+    parser.add_argument("--label_key", type=str, default=None, help="JSON dataset key")
     parser.add_argument("--input_template", type=str, default=None)
     parser.add_argument(
         "--apply_chat_template", action="store_true", default=False, help="Use HF tokenizer chat template"
@@ -400,6 +408,9 @@ if __name__ == "__main__":
 
     # TensorBoard parameters
     parser.add_argument("--use_tensorboard", type=str, default=None, help="TensorBoard logging path")
+
+    # ModelScope parameters
+    parser.add_argument("--use_ms", action="store_true", default=False)
 
     args = parser.parse_args()
 
@@ -426,5 +437,11 @@ if __name__ == "__main__":
             "[Warning] input_template contains \\n chracters instead of newline. "
             "You likely want to pass $'\\n' in Bash or \"`n\" in PowerShell."
         )
+
+    if args.use_ms:
+        from modelscope.utils.hf_util import patch_hub
+
+        # Patch hub to download models from modelscope to speed up.
+        patch_hub()
 
     train(args)
