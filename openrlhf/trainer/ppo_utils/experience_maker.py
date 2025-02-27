@@ -831,11 +831,11 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                     for i, (conversation, reward) in enumerate(outputs):
                         input_len = len(conversation.first_prompt_tokens)
                         output_len = len(conversation.all_output_tokens)
-                        packed_seq_lens.append(input_len + output_len)
-                        sequences.extend(conversation.first_prompt_tokens + conversation.all_output_tokens)
-                        attention_mask.extend([i + 1] * (input_len + output_len))
+                        packed_seq_lens.append(output_len)
+                        sequences.extend(conversation.all_output_tokens)
+                        attention_mask.extend([i + 1] * output_len)
 
-                        num_actions.append(max(1, output_len))
+                        num_actions.append(max(1, output_len - input_len))
                         rewards.append(reward)
                 else:
                     # Sequence packing with single turn
