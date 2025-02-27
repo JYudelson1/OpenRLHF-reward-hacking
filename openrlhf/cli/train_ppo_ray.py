@@ -184,6 +184,29 @@ def train(args):
     if args.critic_pretrain and args.save_value_network:
         ray.get(critic_model.async_save_model())
 
+TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
+
+# Keep a max of 100,000 alloc/free events in the recorded history
+# leading up to the snapshot.
+MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
+
+def start_record_memory_history() -> None:
+   torch.cuda.memory._record_memory_history(
+       max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
+   )
+
+def stop_record_memory_history() -> None:
+   torch.cuda.memory._record_memory_history(enabled=None)
+import socket
+def export_memory_snapshot() -> None:
+   # Prefix for file names.
+   host_name = socket.gethostname()
+   timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+   file_prefix = f"{host_name}_{timestamp}"
+
+   torch.cuda.memory._dump_snapshot(f"{file_prefix}.pickle")
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -470,5 +493,11 @@ if __name__ == "__main__":
 
         # Patch hub to download models from modelscope to speed up.
         patch_hub()
+        
+    start_record_memory_history()
 
-    train(args)
+    try:
+        train(args)
+    finally:
+        export_memory_snapshot()
+        stop_record_memory_history()

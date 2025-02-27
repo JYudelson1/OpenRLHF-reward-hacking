@@ -358,13 +358,8 @@ class PPOTrainer(ABC):
             attention_mask = experience.attention_mask
             if self.args.use_kl_loss and experience.base_action_log_probs is not None:
                 base_action_log_probs = experience.base_action_log_probs
-        # Get memory snapshot
-        snapshot = torch.cuda.memory_snapshot()
-        for block in snapshot:
-            print(block)
 
-        # Or get a summary
-        print(torch.cuda.memory_summary())
+        
         # actor loss
         action_log_probs, output = self.actor(
             sequences,
@@ -413,15 +408,6 @@ class PPOTrainer(ABC):
         else:
             aux_loss = 0
         loss = actor_loss + aux_loss * self.args.aux_loss_coef + kl_loss * self.kl_ctl.value
-        
-        
-        # Get memory snapshot
-        snapshot = torch.cuda.memory_snapshot()
-        for block in snapshot:
-            print(block)
-
-        # Or get a summary
-        print(torch.cuda.memory_summary())
         
         self.strategy.backward(loss, self.actor, self.actor_optim)
 

@@ -129,9 +129,6 @@ class LLMRayActor:
             responses = env.generate_many()
             
         logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")
-
-        # Or get a summary
-        print(torch.cuda.memory_summary())
         
         # Return the responses directly
         return responses
