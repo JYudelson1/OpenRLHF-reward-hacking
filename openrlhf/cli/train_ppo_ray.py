@@ -218,9 +218,8 @@ def export_memory_snapshot() -> None:
     try:
         if hasattr(torch.cuda.memory, "_dump_snapshot"):
             # Prefix for file names.
-            host_name = socket.gethostname()
             timestamp = datetime.now().strftime(TIME_FORMAT_STR)
-            file_prefix = f"{host_name}_{timestamp}"
+            file_prefix = f"{timestamp}"
             
             snapshot_path = f"{file_prefix}.pickle"
             print(f"Exporting CUDA memory snapshot to {snapshot_path}...")
