@@ -6,6 +6,7 @@ import ray
 import torch
 from ray.util.placement_group import placement_group
 import os, sys
+import signal
 
 from openrlhf.trainer.ray import (
     ActorModelRayActor,
@@ -191,20 +192,44 @@ TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
 MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
 
 def start_record_memory_history() -> None:
-   torch.cuda.memory._record_memory_history(
-       max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
-   )
+    try:
+        # Check if memory recording is available
+        if hasattr(torch.cuda.memory, "_record_memory_history"):
+            print("Starting CUDA memory history recording...")
+            torch.cuda.memory._record_memory_history(
+                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
+            )
+        else:
+            print("CUDA memory history recording not available in this PyTorch build")
+    except Exception as e:
+        print(f"Failed to start memory recording: {e}")
 
 def stop_record_memory_history() -> None:
-   torch.cuda.memory._record_memory_history(enabled=None)
-import socket
-def export_memory_snapshot() -> None:
-   # Prefix for file names.
-   host_name = socket.gethostname()
-   timestamp = datetime.now().strftime(TIME_FORMAT_STR)
-   file_prefix = f"{host_name}_{timestamp}"
+    try:
+        if hasattr(torch.cuda.memory, "_record_memory_history"):
+            print("Stopping CUDA memory history recording...")
+            torch.cuda.memory._record_memory_history(enabled=None)
+        else:
+            print("CUDA memory history recording not available in this PyTorch build")
+    except Exception as e:
+        print(f"Failed to stop memory recording: {e}")
 
-   torch.cuda.memory._dump_snapshot(f"{file_prefix}.pickle")
+def export_memory_snapshot() -> None:
+    try:
+        if hasattr(torch.cuda.memory, "_dump_snapshot"):
+            # Prefix for file names.
+            host_name = socket.gethostname()
+            timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+            file_prefix = f"{host_name}_{timestamp}"
+            
+            snapshot_path = f"{file_prefix}.pickle"
+            print(f"Exporting CUDA memory snapshot to {snapshot_path}...")
+            torch.cuda.memory._dump_snapshot(snapshot_path)
+            print(f"Memory snapshot saved to {snapshot_path}")
+        else:
+            print("CUDA memory snapshot dumping not available in this PyTorch build")
+    except Exception as e:
+        print(f"Failed to export memory snapshot: {e}")
 
 
 
@@ -494,10 +519,29 @@ if __name__ == "__main__":
         # Patch hub to download models from modelscope to speed up.
         patch_hub()
         
+    # Add a signal handler to capture OOM errors
+    def handle_exception(sig, frame):
+        print("Caught signal, exporting memory snapshot before exit...")
+        export_memory_snapshot()
+        stop_record_memory_history()
+        # Re-raise the signal after saving the snapshot
+        signal.signal(sig, signal.SIG_DFL)
+        os.kill(os.getpid(), sig)
+    
+    # Register signal handlers for common termination signals
+    signal.signal(signal.SIGTERM, handle_exception)
+    signal.signal(signal.SIGINT, handle_exception)
+    
     start_record_memory_history()
 
     try:
         train(args)
+    except Exception as e:
+        print(f"Error during training: {e}")
+        # Make sure to export snapshot on any exception
+        export_memory_snapshot()
+        stop_record_memory_history()
+        raise
     finally:
         export_memory_snapshot()
         stop_record_memory_history()
