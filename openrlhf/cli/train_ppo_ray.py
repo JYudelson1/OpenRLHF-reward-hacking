@@ -217,11 +217,15 @@ def stop_record_memory_history() -> None:
 def export_memory_snapshot() -> None:
     try:
         if hasattr(torch.cuda.memory, "_dump_snapshot"):
+            
+            # Get the current working directory 
+            cwd = os.getcwd()
+            
             # Prefix for file names.
             timestamp = datetime.now().strftime(TIME_FORMAT_STR)
             file_prefix = f"{timestamp}"
             
-            snapshot_path = f"{file_prefix}.pickle"
+            snapshot_path = f"{cwd}/memory_snapshots/{file_prefix}.pickle"
             print(f"Exporting CUDA memory snapshot to {snapshot_path}...")
             torch.cuda.memory._dump_snapshot(snapshot_path)
             print(f"Memory snapshot saved to {snapshot_path}")
