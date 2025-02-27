@@ -225,7 +225,11 @@ def export_memory_snapshot() -> None:
             timestamp = datetime.now().strftime(TIME_FORMAT_STR)
             file_prefix = f"{timestamp}"
             
-            snapshot_path = f"{cwd}/memory_snapshots/{file_prefix}.pickle"
+            # Create memory_snapshots directory if it doesn't exist
+            snapshots_dir = f"{cwd}/memory_snapshots"
+            os.makedirs(snapshots_dir, exist_ok=True)
+            
+            snapshot_path = f"{snapshots_dir}/{file_prefix}.pickle"
             print(f"Exporting CUDA memory snapshot to {snapshot_path}...")
             torch.cuda.memory._dump_snapshot(snapshot_path)
             print(f"Memory snapshot saved to {snapshot_path}")
@@ -522,30 +526,29 @@ if __name__ == "__main__":
         # Patch hub to download models from modelscope to speed up.
         patch_hub()
         
-    train(args)    
-    # # Add a signal handler to capture OOM errors
-    # def handle_exception(sig, frame):
-    #     print("Caught signal, exporting memory snapshot before exit...")
-    #     export_memory_snapshot()
-    #     stop_record_memory_history()
-    #     # Re-raise the signal after saving the snapshot
-    #     signal.signal(sig, signal.SIG_DFL)
-    #     os.kill(os.getpid(), sig)
+    # Add a signal handler to capture OOM errors
+    def handle_exception(sig, frame):
+        print("Caught signal, exporting memory snapshot before exit...")
+        export_memory_snapshot()
+        stop_record_memory_history()
+        # Re-raise the signal after saving the snapshot
+        signal.signal(sig, signal.SIG_DFL)
+        os.kill(os.getpid(), sig)
     
-    # # Register signal handlers for common termination signals
-    # signal.signal(signal.SIGTERM, handle_exception)
-    # signal.signal(signal.SIGINT, handle_exception)
+    # Register signal handlers for common termination signals
+    signal.signal(signal.SIGTERM, handle_exception)
+    signal.signal(signal.SIGINT, handle_exception)
     
-    # start_record_memory_history()
+    start_record_memory_history()
 
-    # try:
-    #     train(args)
-    # except Exception as e:
-    #     print(f"Error during training: {e}")
-    #     # Make sure to export snapshot on any exception
-    #     export_memory_snapshot()
-    #     stop_record_memory_history()
-    #     raise
-    # finally:
-    #     export_memory_snapshot()
-    #     stop_record_memory_history()
+    try:
+        train(args)
+    except Exception as e:
+        print(f"Error during training: {e}")
+        # Make sure to export snapshot on any exception
+        export_memory_snapshot()
+        stop_record_memory_history()
+        raise
+    finally:
+        export_memory_snapshot()
+        stop_record_memory_history()
