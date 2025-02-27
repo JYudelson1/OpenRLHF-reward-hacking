@@ -522,29 +522,30 @@ if __name__ == "__main__":
         # Patch hub to download models from modelscope to speed up.
         patch_hub()
         
-    # Add a signal handler to capture OOM errors
-    def handle_exception(sig, frame):
-        print("Caught signal, exporting memory snapshot before exit...")
-        export_memory_snapshot()
-        stop_record_memory_history()
-        # Re-raise the signal after saving the snapshot
-        signal.signal(sig, signal.SIG_DFL)
-        os.kill(os.getpid(), sig)
+    train(args)    
+    # # Add a signal handler to capture OOM errors
+    # def handle_exception(sig, frame):
+    #     print("Caught signal, exporting memory snapshot before exit...")
+    #     export_memory_snapshot()
+    #     stop_record_memory_history()
+    #     # Re-raise the signal after saving the snapshot
+    #     signal.signal(sig, signal.SIG_DFL)
+    #     os.kill(os.getpid(), sig)
     
-    # Register signal handlers for common termination signals
-    signal.signal(signal.SIGTERM, handle_exception)
-    signal.signal(signal.SIGINT, handle_exception)
+    # # Register signal handlers for common termination signals
+    # signal.signal(signal.SIGTERM, handle_exception)
+    # signal.signal(signal.SIGINT, handle_exception)
     
-    start_record_memory_history()
+    # start_record_memory_history()
 
-    try:
-        train(args)
-    except Exception as e:
-        print(f"Error during training: {e}")
-        # Make sure to export snapshot on any exception
-        export_memory_snapshot()
-        stop_record_memory_history()
-        raise
-    finally:
-        export_memory_snapshot()
-        stop_record_memory_history()
+    # try:
+    #     train(args)
+    # except Exception as e:
+    #     print(f"Error during training: {e}")
+    #     # Make sure to export snapshot on any exception
+    #     export_memory_snapshot()
+    #     stop_record_memory_history()
+    #     raise
+    # finally:
+    #     export_memory_snapshot()
+    #     stop_record_memory_history()

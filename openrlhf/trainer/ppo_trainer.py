@@ -8,13 +8,26 @@ import torch.nn as nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
+from datetime import datetime
 from openrlhf.models import Actor, GPTLMLoss, PolicyLoss, ValueLoss
 from openrlhf.models.utils import masked_mean, unpacking_samples, compute_approx_kl
 from openrlhf.utils.distributed_sampler import DistributedSampler
 
 from .ppo_utils import AdaptiveKLController, Experience, FixedKLController, NaiveExperienceMaker, NaiveReplayBuffer
 
+def trace_handler(prof: torch.profiler.profile):
+   # Prefix for file names.
+   TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
+   timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+   file_prefix = f"{timestamp}"
+
+   # Construct the trace file.
+   print(f"Exporting trace to {file_prefix}-memory.json.gz")
+   prof.export_chrome_trace(f"{file_prefix}-memory.json.gz")
+
+   # Construct the memory timeline file.
+   print(f"Exporting memory timeline to {file_prefix}-memory.html")
+   prof.export_memory_timeline(f"{file_prefix}-memory.html", device="cuda:0")
 
 class PPOTrainer(ABC):
     """
@@ -216,43 +229,56 @@ class PPOTrainer(ABC):
         start_episode = consumed_samples // args.rollout_batch_size // num_rollouts_per_episodes
         consumed_samples = consumed_samples % (num_rollouts_per_episodes * args.rollout_batch_size)
 
-        for episode in range(start_episode, args.num_episodes):
-            if isinstance(self.prompts_dataloader.sampler, DistributedSampler):
-                self.prompts_dataloader.sampler.set_epoch(
-                    episode, consumed_samples=0 if episode > start_episode else consumed_samples
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=0, warmup=0, active=6, repeat=1),
+            record_shapes=True,
+            profile_memory=True,
+                with_stack=True,
+            on_trace_ready=trace_handler,
+        ) as prof:  
+            for episode in range(start_episode, args.num_episodes):
+                prof.step()
+                if isinstance(self.prompts_dataloader.sampler, DistributedSampler):
+                    self.prompts_dataloader.sampler.set_epoch(
+                        episode, consumed_samples=0 if episode > start_episode else consumed_samples
+                    )
+                pbar = tqdm(
+                    range(self.prompts_dataloader.__len__()),
+                    desc=f"Episode [{episode + 1}/{args.num_episodes}]",
+                    disable=not self.strategy.is_rank_0(),
                 )
-            pbar = tqdm(
-                range(self.prompts_dataloader.__len__()),
-                desc=f"Episode [{episode + 1}/{args.num_episodes}]",
-                disable=not self.strategy.is_rank_0(),
-            )
 
-            for rand_prompts in self.prompts_dataloader:
-                for i, experience in enumerate(
-                    self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
-                ):
-                    if i == 0:
-                        output = self.tokenizer.batch_decode(
-                            experience.sequences[0].unsqueeze(0), skip_special_tokens=True
-                        )
-                        self.strategy.print(output)
-                    self.replay_buffer.append(experience)
+                for rand_prompts in self.prompts_dataloader:
+                    prof.step()
+                    for i, experience in enumerate(
+                        self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
+                    ):
+                        if i == 0:
+                            output = self.tokenizer.batch_decode(
+                                experience.sequences[0].unsqueeze(0), skip_special_tokens=True
+                            )
+                            self.strategy.print(output)
+                        self.replay_buffer.append(experience)
 
-                if self.args.advantage_estimator != "grpo":
-                    self.replay_buffer.normalize("advantages", self.strategy)
-                status = self.ppo_train(steps)
-                self.replay_buffer.clear()
+                    if self.args.advantage_estimator != "grpo":
+                        self.replay_buffer.normalize("advantages", self.strategy)
+                    status = self.ppo_train(steps)
+                    self.replay_buffer.clear()
+                    prof.step()
+                    if "kl" in status:
+                        self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
+                    pbar.set_postfix(status)
+                    prof.step()
+                    # logs/checkpoints
+                    client_states = {"consumed_samples": steps * args.rollout_batch_size}
+                    self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
 
-                if "kl" in status:
-                    self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
-                pbar.set_postfix(status)
-
-                # logs/checkpoints
-                client_states = {"consumed_samples": steps * args.rollout_batch_size}
-                self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
-
-                pbar.update()
-                steps = steps + 1
+                    pbar.update()
+                    steps = steps + 1
 
         if self._wandb is not None and self.strategy.is_rank_0():
             self._wandb.finish()
