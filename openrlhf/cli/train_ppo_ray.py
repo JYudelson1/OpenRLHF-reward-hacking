@@ -48,38 +48,49 @@ def _validate_args(args):
         ), f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
 
 
+# Global configuration variables
 TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
-
-# Keep a max of 100,000 alloc/free events in the recorded history
-# leading up to the snapshot.
 MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
-# Take a snapshot every 5 minutes by default
 SNAPSHOT_INTERVAL_SECONDS: int = 300
-# Memory threshold for triggering snapshots (90% GPU memory usage)
 MEMORY_THRESHOLD_PERCENT: float = 90.0
-# Global flag to control memory monitoring thread
 _memory_monitor_running = False
-# Global flag to indicate if we're in the process of handling OOM
 _handling_oom = False
+RECORD_BACKTRACES = False
 
 def start_record_memory_history() -> None:
     try:
         # Check if memory recording is available
         if hasattr(torch.cuda.memory, "_record_memory_history"):
             print("Starting CUDA memory history recording...")
+            # Enable memory recording with context
             torch.cuda.memory._record_memory_history(
-                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
+                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
+                enabled=True,
+                context=f"main_process_{os.getpid()}",
+                # Important: Set this to True to record all memory allocations
+                record_context=True,
+                # Set to True to record backtraces for each allocation if enabled
+                record_backtraces=RECORD_BACKTRACES
             )
+            
+            # Force some allocations to ensure recording is working
+            for i in range(torch.cuda.device_count()):
+                # Create and immediately free a small tensor to verify recording is active
+                dummy = torch.ones(1024, 1024, device=f"cuda:{i}")
+                del dummy
+            
+            print("Memory recording started successfully")
         else:
             print("CUDA memory history recording not available in this PyTorch build")
     except Exception as e:
         print(f"Failed to start memory recording: {e}")
+        traceback.print_exc()
 
 def stop_record_memory_history() -> None:
     try:
         if hasattr(torch.cuda.memory, "_record_memory_history"):
             print("Stopping CUDA memory history recording...")
-            torch.cuda.memory._record_memory_history(enabled=None)
+            torch.cuda.memory._record_memory_history(enabled=False)
         else:
             print("CUDA memory history recording not available in this PyTorch build")
     except Exception as e:
@@ -88,6 +99,8 @@ def stop_record_memory_history() -> None:
 def export_memory_snapshot(reason="periodic") -> None:
     try:
         if hasattr(torch.cuda.memory, "_dump_snapshot"):
+            # Force garbage collection to get accurate memory usage
+            gc.collect()
             
             # Get the current working directory 
             cwd = os.getcwd()
@@ -126,12 +139,69 @@ def export_memory_snapshot(reason="periodic") -> None:
                     except:
                         pass
             
+            # Verify the snapshot has content
+            try:
+                import pickle
+                with open(snapshot_path, 'rb') as f:
+                    snapshot_data = pickle.load(f)
+                
+                # Check if the snapshot has actual data
+                has_segments = len(snapshot_data.get('segments', [])) > 0
+                has_allocations = any(len(trace) > 3 for trace in snapshot_data.get('device_traces', []))
+                
+                if not (has_segments or has_allocations):
+                    print("WARNING: Snapshot appears to be empty. Memory profiling may not be working correctly.")
+                    
+                    # Try an alternative approach - create a more detailed memory report
+                    alt_path = f"{snapshots_dir}/{file_prefix}_detailed.txt"
+                    with open(alt_path, 'w') as f:
+                        f.write(f"Detailed memory report at {timestamp} (reason: {reason})\n\n")
+                        
+                        # Get memory stats from nvidia-smi if available
+                        try:
+                            import subprocess
+                            result = subprocess.run(['nvidia-smi', '--query-gpu=index,memory.used,memory.total,utilization.gpu', '--format=csv'], 
+                                                  stdout=subprocess.PIPE, text=True)
+                            f.write("NVIDIA-SMI GPU Memory Usage:\n")
+                            f.write(result.stdout)
+                            f.write("\n\n")
+                        except:
+                            f.write("Could not get nvidia-smi data\n\n")
+                        
+                        # Get PyTorch memory stats
+                        f.write("PyTorch Memory Stats:\n")
+                        for i in range(torch.cuda.device_count()):
+                            mem_allocated = torch.cuda.memory_allocated(i) / (1024 ** 3)
+                            mem_reserved = torch.cuda.memory_reserved(i) / (1024 ** 3)
+                            mem_cached = torch.cuda.memory_reserved(i) / (1024 ** 3) - mem_allocated
+                            f.write(f"GPU {i}: Allocated: {mem_allocated:.2f} GB, Reserved: {mem_reserved:.2f} GB, Cached: {mem_cached:.2f} GB\n")
+                        
+                        # Try to get memory stats for each tensor
+                        f.write("\nAll CUDA Tensors:\n")
+                        all_tensors = []
+                        for obj in gc.get_objects():
+                            try:
+                                if torch.is_tensor(obj) and obj.device.type == 'cuda':
+                                    size_mb = obj.element_size() * obj.nelement() / (1024 ** 2)
+                                    all_tensors.append((size_mb, obj.shape, obj.dtype, obj.device))
+                            except:
+                                pass
+                        
+                        all_tensors.sort(reverse=True)
+                        for i, (size_mb, shape, dtype, device) in enumerate(all_tensors):
+                            f.write(f"{i+1}. Size: {size_mb:.2f} MB, Shape: {shape}, Type: {dtype}, Device: {device}\n")
+                    
+                    print(f"Created detailed memory report at {alt_path}")
+            except Exception as e:
+                print(f"Error verifying snapshot: {e}")
+            
             return snapshot_path
         else:
             print("CUDA memory snapshot dumping not available in this PyTorch build")
             return None
     except Exception as e:
         print(f"Failed to export memory snapshot: {e}")
+        traceback.print_exc()
         return None
 
 def get_gpu_memory_usage():
@@ -209,8 +279,16 @@ def take_ray_actor_memory_snapshot(actor_id, reason="ray_actor"):
         # Take a snapshot if PyTorch supports it
         snapshot_path = None
         if hasattr(torch.cuda.memory, "_record_memory_history") and hasattr(torch.cuda.memory, "_dump_snapshot"):
-            # Start recording
-            torch.cuda.memory._record_memory_history(max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT)
+            # Start recording with context specific to this actor
+            torch.cuda.memory._record_memory_history(
+                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
+                enabled=True,
+                context=f"ray_actor_{actor_id}",
+                record_context=True,
+                record_backtraces=RECORD_BACKTRACES
+            )
+            
+
             
             # Get the current working directory
             cwd = os.getcwd()
@@ -221,11 +299,32 @@ def take_ray_actor_memory_snapshot(actor_id, reason="ray_actor"):
             snapshots_dir = f"{cwd}/memory_snapshots"
             os.makedirs(snapshots_dir, exist_ok=True)
             
+            # Take the snapshot
             snapshot_path = f"{snapshots_dir}/{file_prefix}.pickle"
             torch.cuda.memory._dump_snapshot(snapshot_path)
             
             # Stop recording
-            torch.cuda.memory._record_memory_history(enabled=None)
+            torch.cuda.memory._record_memory_history(enabled=False)
+            
+            # Also create a text file with basic memory info
+            stats_path = f"{snapshots_dir}/{file_prefix}_stats.txt"
+            with open(stats_path, 'w') as f:
+                f.write(f"Actor {actor_id} memory snapshot at {timestamp} (reason: {reason})\n\n")
+                f.write("GPU Memory Summary:\n")
+                for i in range(device_count):
+                    mem_allocated = torch.cuda.memory_allocated(i) / (1024 ** 3)
+                    mem_reserved = torch.cuda.memory_reserved(i) / (1024 ** 3)
+                    f.write(f"GPU {i}: Allocated: {mem_allocated:.2f} GB, Reserved: {mem_reserved:.2f} GB\n")
+                
+                # Try to get nvidia-smi data
+                try:
+                    import subprocess
+                    result = subprocess.run(['nvidia-smi', '--query-gpu=index,memory.used,memory.total,utilization.gpu', '--format=csv'], 
+                                          stdout=subprocess.PIPE, text=True)
+                    f.write("\nNVIDIA-SMI GPU Memory Usage:\n")
+                    f.write(result.stdout)
+                except:
+                    pass
         
         return {
             "actor_id": actor_id,
@@ -327,9 +426,19 @@ def handle_oom_error():
         large_tensors.sort(reverse=True)
         for i, (size_mb, shape, dtype) in enumerate(large_tensors[:20]):
             print(f"{i+1}. Size: {size_mb:.2f} MB, Shape: {shape}, Type: {dtype}")
+            
+        # Try to get nvidia-smi output
+        try:
+            import subprocess
+            result = subprocess.run(['nvidia-smi'], stdout=subprocess.PIPE, text=True)
+            print("\nNVIDIA-SMI Output:")
+            print(result.stdout)
+        except:
+            print("Could not get nvidia-smi output")
     
     except Exception as e:
         print(f"Error during OOM handling: {e}")
+        traceback.print_exc()
     
     finally:
         _handling_oom = False
@@ -354,11 +463,193 @@ def handle_exception(sig, frame):
     signal.signal(sig, signal.SIG_DFL)
     os.kill(os.getpid(), sig)
 
+# Add a Ray actor wrapper to catch OOM errors
+def wrap_ray_actor_with_oom_handler(actor_class):
+    """Wrap a Ray actor class to catch OOM errors and take memory snapshots."""
+    
+    # Create a new class that inherits from the original actor class
+    class OOMHandlingActor(actor_class):
+        def __init__(self, *args, **kwargs):
+            # Initialize the parent class
+            super().__init__(*args, **kwargs)
+            self.actor_id = os.getpid()
+            print(f"OOM handler initialized for actor {self.actor_id}")
+            
+            # Set up a custom exception hook to catch OOM errors
+            self.original_excepthook = sys.excepthook
+            sys.excepthook = self._handle_exception
+            
+            # Start a thread for periodic memory snapshots
+            self.snapshot_interval = SNAPSHOT_INTERVAL_SECONDS
+            self.memory_threshold = MEMORY_THRESHOLD_PERCENT
+            self.should_monitor = True
+            self.monitor_thread = threading.Thread(target=self._memory_monitor, daemon=True)
+            self.monitor_thread.start()
+        
+        def _memory_monitor(self):
+            """Thread function to periodically check memory usage and take snapshots."""
+            last_snapshot_time = time.time()
+            
+            while self.should_monitor:
+                try:
+                    current_time = time.time()
+                    
+                    # Get current GPU memory usage
+                    memory_usage = []
+                    for i in range(torch.cuda.device_count()):
+                        allocated = torch.cuda.memory_allocated(i)
+                        total = torch.cuda.get_device_properties(i).total_memory
+                        memory_usage.append((allocated / total) * 100)
+                    
+                    # Take a snapshot if memory usage is high or if it's time for a periodic snapshot
+                    if any(usage > self.memory_threshold for usage in memory_usage):
+                        print(f"Actor {self.actor_id}: High memory usage detected: {max(memory_usage):.1f}%. Taking snapshot...")
+                        self._take_memory_snapshot("high_memory")
+                        last_snapshot_time = current_time
+                    elif current_time - last_snapshot_time > self.snapshot_interval:
+                        print(f"Actor {self.actor_id}: Taking periodic memory snapshot...")
+                        self._take_memory_snapshot("periodic")
+                        last_snapshot_time = current_time
+                    
+                    # Sleep for a short time before checking again
+                    time.sleep(30)
+                except Exception as e:
+                    print(f"Error in actor {self.actor_id} memory monitor thread: {e}")
+                    time.sleep(60)  # Sleep longer if there was an error
+        
+        def _take_memory_snapshot(self, reason):
+            """Take a memory snapshot for this actor."""
+            try:
+                # Force garbage collection
+                gc.collect()
+                torch.cuda.empty_cache()
+                
+                # Take a memory snapshot
+                cwd = os.getcwd()
+                timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+                snapshots_dir = f"{cwd}/memory_snapshots"
+                os.makedirs(snapshots_dir, exist_ok=True)
+                
+                # Create a detailed report
+                report_path = f"{snapshots_dir}/{timestamp}_actor_{self.actor_id}_{reason}.txt"
+                with open(report_path, 'w') as f:
+                    f.write(f"Memory Report for Ray Actor {self.actor_id}\n")
+                    f.write(f"Timestamp: {datetime.now()}\n")
+                    f.write(f"Reason: {reason}\n\n")
+                    
+                    # Memory stats
+                    f.write("GPU Memory Stats:\n")
+                    for i in range(torch.cuda.device_count()):
+                        allocated = torch.cuda.memory_allocated(i) / (1024 ** 3)
+                        reserved = torch.cuda.memory_reserved(i) / (1024 ** 3)
+                        f.write(f"GPU {i}: Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB\n")
+                    
+                    # Try to get large tensors
+                    f.write("\nLarge Tensors:\n")
+                    large_tensors = []
+                    for obj in gc.get_objects():
+                        try:
+                            if torch.is_tensor(obj) and obj.device.type == 'cuda':
+                                size_mb = obj.element_size() * obj.nelement() / (1024 ** 2)
+                                if size_mb > 100:  # Only show tensors larger than 100MB
+                                    large_tensors.append((size_mb, obj.shape, obj.dtype))
+                        except:
+                            pass
+                    
+                    large_tensors.sort(reverse=True)
+                    for i, (size_mb, shape, dtype) in enumerate(large_tensors[:20]):
+                        f.write(f"{i+1}. Size: {size_mb:.2f} MB, Shape: {shape}, Type: {dtype}\n")
+                
+                # Try to take a memory snapshot if available
+                if hasattr(torch.cuda.memory, "_dump_snapshot"):
+                    snapshot_path = f"{snapshots_dir}/{timestamp}_actor_{self.actor_id}_{reason}.pickle"
+                    try:
+                        # Start recording memory history
+                        if hasattr(torch.cuda.memory, "_record_memory_history"):
+                            torch.cuda.memory._record_memory_history(
+                                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
+                                enabled=True,
+                                context=f"actor_{self.actor_id}_{reason}",
+                                record_context=True,
+                                record_backtraces=RECORD_BACKTRACES
+                            )
+                        
+                        # Create some test allocations
+                        dummy_tensors = []
+                        for i in range(torch.cuda.device_count()):
+                            try:
+                                dummy_tensors.append(torch.ones(1024, 1024, device=f"cuda:{i}"))
+                            except Exception:
+                                pass
+                        
+                        # Take the snapshot
+                        torch.cuda.memory._dump_snapshot(snapshot_path)
+                        
+                        # Clean up
+                        for tensor in dummy_tensors:
+                            del tensor
+                        
+                        # Stop recording
+                        if hasattr(torch.cuda.memory, "_record_memory_history"):
+                            torch.cuda.memory._record_memory_history(enabled=False)
+                        
+                        print(f"Actor {self.actor_id}: Memory snapshot saved to {snapshot_path}")
+                    except Exception as e:
+                        print(f"Actor {self.actor_id}: Failed to save memory snapshot: {e}")
+            except Exception as e:
+                print(f"Actor {self.actor_id}: Error taking memory snapshot: {e}")
+        
+        def _handle_exception(self, exc_type, exc_value, exc_traceback):
+            """Custom exception hook to catch OOM errors."""
+            try:
+                # Check if this is an OOM error
+                is_oom = False
+                if exc_type is RuntimeError:
+                    error_msg = str(exc_value).lower()
+                    is_oom = "out of memory" in error_msg or "cuda out of memory" in error_msg
+                
+                if is_oom:
+                    print(f"OOM detected in Ray actor {self.actor_id}! Taking memory snapshot...")
+                    self._take_memory_snapshot("oom")
+            except Exception as e:
+                print(f"Error in OOM handler: {e}")
+            
+            # Call the original exception hook
+            self.original_excepthook(exc_type, exc_value, exc_traceback)
+        
+        def __del__(self):
+            """Clean up when the actor is destroyed."""
+            try:
+                self.should_monitor = False
+                if hasattr(self, 'monitor_thread') and self.monitor_thread.is_alive():
+                    self.monitor_thread.join(timeout=1.0)
+            except:
+                pass
+    
+    return OOMHandlingActor
+
 def train(args):
     _validate_args(args)
 
     # Start memory monitoring
     start_memory_monitoring()
+    
+    # Set up Ray memory profiling
+    enable_memory_profiling = setup_ray_memory_profiling()
+    
+    # Wrap actor classes with OOM handlers if memory profiling is enabled
+    if not args.disable_memory_monitoring:
+        print("Wrapping Ray actor classes with OOM handlers...")
+        ActorModelRayActor_Original = ActorModelRayActor
+        CriticModelRayActor_Original = CriticModelRayActor
+        ReferenceModelRayActor_Original = ReferenceModelRayActor
+        RewardModelRayActor_Original = RewardModelRayActor
+        
+        # Replace the original classes with wrapped versions
+        ActorModelRayActor = wrap_ray_actor_with_oom_handler(ActorModelRayActor_Original)
+        CriticModelRayActor = wrap_ray_actor_with_oom_handler(CriticModelRayActor_Original)
+        ReferenceModelRayActor = wrap_ray_actor_with_oom_handler(ReferenceModelRayActor_Original)
+        RewardModelRayActor = wrap_ray_actor_with_oom_handler(RewardModelRayActor_Original)
 
     # configure strategy
     strategy = get_strategy(args)
@@ -480,6 +771,35 @@ def train(args):
     if reward_models is not None:
         all_actor_groups.extend(reward_models)
 
+    # Enable memory profiling on all Ray actors
+    if enable_memory_profiling:
+        print("Enabling memory profiling on all Ray actors...")
+        actor_refs = []
+        actor_id = 0
+        
+        for group in all_actor_groups:
+            if hasattr(group, "_actor_handlers"):
+                for handler in group._actor_handlers:
+                    try:
+                        # Call the remote function on each actor
+                        actor_refs.append(enable_memory_profiling.options(
+                            actor=handler
+                        ).remote(actor_id))
+                        actor_id += 1
+                    except Exception as e:
+                        print(f"Error enabling memory profiling on actor {actor_id}: {e}")
+        
+        if actor_refs:
+            try:
+                # Wait for all actors to enable memory profiling
+                results = ray.get(actor_refs)
+                print(f"Memory profiling enabled on {sum(1 for r in results if r)} out of {len(actor_refs)} Ray actors")
+            except Exception as e:
+                print(f"Error waiting for memory profiling results: {e}")
+                traceback.print_exc()
+        else:
+            print("No Ray actors found to enable memory profiling")
+
     # Take a snapshot after actor creation but before model initialization
     export_memory_snapshot(reason="after_actor_creation")
 
@@ -543,6 +863,58 @@ def train(args):
         # Stop memory monitoring
         stop_memory_monitoring()
 
+# Add a new function to enable memory profiling in Ray actors
+def setup_ray_memory_profiling():
+    """Set up memory profiling for Ray actors."""
+    try:
+        # Define a remote function that will be called on each actor
+        @ray.remote
+        def enable_memory_profiling_on_actor(actor_id=None):
+            """Enable memory profiling on a Ray actor."""
+            try:
+                if hasattr(torch.cuda.memory, "_record_memory_history"):
+                    # Enable memory recording with context
+                    actor_id = actor_id or os.getpid()
+                    torch.cuda.memory._record_memory_history(
+                        max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
+                        enabled=True,
+                        context=f"ray_actor_{actor_id}",
+                        record_context=True,
+                        record_backtraces=RECORD_BACKTRACES
+                    )
+                    
+                    # Create a test allocation to verify recording is working
+                    try:
+                        dummy = torch.ones(1024, 1024, device="cuda:0")
+                        del dummy
+                    except Exception as e:
+                        print(f"Warning: Could not create test allocation: {e}")
+                    
+                    print(f"Memory profiling enabled on actor {actor_id}")
+                    return True
+                return False
+            except Exception as e:
+                print(f"Error enabling memory profiling on actor: {e}")
+                traceback.print_exc()
+                return False
+        
+        # Register this function with Ray to be used later
+        try:
+            ray.register_custom_serializer(
+                torch.Tensor,
+                serializer=lambda t: t.cpu().numpy(),
+                deserializer=lambda arr: torch.tensor(arr)
+            )
+        except Exception as e:
+            print(f"Warning: Could not register custom serializer: {e}")
+        
+        print("Ray memory profiling setup complete")
+        return enable_memory_profiling_on_actor
+    except Exception as e:
+        print(f"Failed to set up Ray memory profiling: {e}")
+        traceback.print_exc()
+        return None
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Memory profiling arguments
@@ -552,6 +924,8 @@ if __name__ == "__main__":
                       help="Memory usage threshold percentage to trigger snapshots (default: 90.0)")
     parser.add_argument("--disable_memory_monitoring", action="store_true", default=False,
                       help="Disable automatic memory monitoring")
+    parser.add_argument("--memory_record_backtraces", action="store_true", default=False,
+                      help="Record backtraces for memory allocations (slower but more detailed)")
     
     # Ray and vLLM
     parser.add_argument("--ref_num_nodes", type=int, default=1, help="number of nodes for reference")
@@ -769,6 +1143,11 @@ if __name__ == "__main__":
         SNAPSHOT_INTERVAL_SECONDS = args.memory_snapshot_interval
         MEMORY_THRESHOLD_PERCENT = args.memory_threshold
 
+    # Set global backtraces flag based on args
+    RECORD_BACKTRACES = args.memory_record_backtraces
+    if RECORD_BACKTRACES:
+        print("Memory backtrace recording enabled - this may slow down execution")
+
     if args.advantage_estimator not in ["gae"]:
         args.critic_pretrain = None
     elif args.critic_pretrain is None:
@@ -847,7 +1226,19 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, handle_exception)
     signal.signal(signal.SIGABRT, handle_exception)  # Often triggered by OOM
     
+    # Start memory recording before initializing Ray
     start_record_memory_history()
+    
+    # Initialize Ray with memory monitoring
+    if not ray.is_initialized():
+        ray.init(
+            # Add runtime env to configure memory monitoring
+            runtime_env={
+                "env_vars": {
+                    "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:128"
+                }
+            }
+        )
 
     try:
         train(args)
