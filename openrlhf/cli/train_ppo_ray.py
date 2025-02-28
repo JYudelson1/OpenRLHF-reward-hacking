@@ -29,11 +29,13 @@ SNAPSHOT_INTERVAL_SECONDS = 300  # 5 minutes between snapshots by default
 MEMORY_THRESHOLD_PERCENT = 80.0  # Take snapshot if memory usage exceeds this percentage
 RECORD_BACKTRACES = False  # Whether to record backtraces in memory snapshots
 TIME_FORMAT_STR = "%Y%m%d_%H%M%S"  # Format for timestamp in filenames
+MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT = 1000000  # Maximum number of memory events to record per snapshot
 
 # Global variables for memory monitoring
 memory_monitor = None
 memory_monitor_thread_obj = None
 all_actor_groups = None  # Will store references to all actor groups for distributed snapshots
+enable_memory_profiling = False  # Whether to enable memory profiling on Ray actors
 
 # NOTE: reward function for multiple reward models, replace this with your own function!
 def reward_fn(rewards: List[torch.Tensor]):
@@ -65,9 +67,12 @@ def start_record_memory_history() -> None:
         # Check if memory recording is available
         if hasattr(torch.cuda.memory, "_record_memory_history"):
             print("Starting CUDA memory history recording...")
+            # Get the max entries value, defaulting to 1000000 if not defined
+            max_entries = globals().get('MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT', 1000000)
+            
             # Enable memory recording with context
             torch.cuda.memory._record_memory_history(
-                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
+                max_entries=max_entries,
                 context=f"main_process_{os.getpid()}",
                 # Important: Set this to True to record all memory allocations
                 record_context=True,
@@ -86,12 +91,13 @@ def start_record_memory_history() -> None:
             print("CUDA memory history recording not available in this PyTorch build")
     except Exception as e:
         print(f"Failed to start memory recording: {e}")
+        traceback.print_exc()
 
 def stop_record_memory_history() -> None:
     try:
         if hasattr(torch.cuda.memory, "_record_memory_history"):
             print("Stopping CUDA memory history recording...")
-            torch.cuda.memory._record_memory_history(enabled=False)
+            torch.cuda.memory._record_memory_history(enabled=None)
         else:
             print("CUDA memory history recording not available in this PyTorch build")
     except Exception as e:
@@ -479,23 +485,11 @@ def take_ray_actor_memory_snapshot(actor_id, reason="ray_actor"):
         snapshot_path = None
         if hasattr(torch.cuda.memory, "_record_memory_history") and hasattr(torch.cuda.memory, "_dump_snapshot"):
             # Start recording with context specific to this actor
-            try:
-                # Try newer API first
-                torch.cuda.memory._record_memory_history(
+            torch.cuda.memory._record_memory_history(
                     max_entries=100000,  # Use a fixed value
-                    enabled=True,
                     context=f"ray_actor_{actor_id}",
                     record_context=True,
                     record_backtraces=True  # Always record backtraces for actor snapshots
-                )
-            except TypeError:
-                # Fall back to older API
-                print(f"Actor {actor_id}: Falling back to legacy memory recording API")
-                torch.cuda.memory._record_memory_history(
-                    enabled=True,
-                    context=f"ray_actor_{actor_id}",
-                    record_context=True,
-                    record_backtraces=True
                 )
             
             # Create some test allocations to ensure recording is working
@@ -549,7 +543,7 @@ def take_ray_actor_memory_snapshot(actor_id, reason="ray_actor"):
                 del tensor
             
             # Stop recording
-            torch.cuda.memory._record_memory_history(enabled=False)
+            torch.cuda.memory._record_memory_history(enabled=None)
         else:
             print(f"Actor {actor_id}: CUDA memory snapshot dumping not available")
             
@@ -1098,7 +1092,7 @@ def setup_actor_memory_monitoring(actor_handle, actor_id):
 
 def train(args):
     """Train PPO with Ray actors."""
-    global SNAPSHOT_INTERVAL_SECONDS, MEMORY_THRESHOLD_PERCENT, RECORD_BACKTRACES, all_actor_groups, memory_monitor
+    global SNAPSHOT_INTERVAL_SECONDS, MEMORY_THRESHOLD_PERCENT, RECORD_BACKTRACES, all_actor_groups, memory_monitor, enable_memory_profiling
     
     _validate_args(args)
     
@@ -1107,6 +1101,7 @@ def train(args):
         SNAPSHOT_INTERVAL_SECONDS = args.memory_snapshot_interval
         MEMORY_THRESHOLD_PERCENT = args.memory_threshold
         RECORD_BACKTRACES = args.memory_record_backtraces
+        enable_memory_profiling = True  # Enable memory profiling when monitoring is enabled
         
         print(f"Memory monitoring configuration:")
         print(f"  Snapshot interval: {SNAPSHOT_INTERVAL_SECONDS} seconds")
@@ -1117,6 +1112,7 @@ def train(args):
             print("Memory backtrace recording enabled - this may slow down execution")
     else:
         print("Memory monitoring is disabled")
+        enable_memory_profiling = False  # Disable memory profiling when monitoring is disabled
 
     # Initialize global variables for memory monitoring
     memory_monitor = None
@@ -1457,8 +1453,11 @@ def train(args):
         if memory_monitor is not None:
             try:
                 print("Stopping Ray memory monitor...")
+                # Take a final memory snapshot before stopping
+                ray.get(memory_monitor.take_memory_snapshot.remote(reason="shutdown"))
+                # Stop the monitoring thread
                 ray.get(memory_monitor.stop_monitoring.remote())
-                print("Stopped Ray memory monitor")
+                print("Memory monitoring stopped")
             except Exception as e:
                 print(f"Error stopping memory monitor: {e}")
                 traceback.print_exc()
@@ -1477,22 +1476,14 @@ def setup_ray_memory_profiling():
                 if hasattr(torch.cuda.memory, "_record_memory_history"):
                     # Enable memory recording with context
                     actor_id = actor_id or os.getpid()
-                    try:
-                        # Try the newer API first
-                        torch.cuda.memory._record_memory_history(
-                            max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
-                            enabled=True,
+                    # Get the max entries value, defaulting to 1000000 if not defined
+                    max_entries = 1000000  # Default value
+                    
+                    torch.cuda.memory._record_memory_history(
+                            max_entries=max_entries,
                             context=f"ray_actor_{actor_id}",
                             record_context=True,
                             record_backtraces=True  # Always record backtraces for actor snapshots
-                        )
-                    except TypeError:
-                        # Fall back to older API if needed
-                        torch.cuda.memory._record_memory_history(
-                            enabled=True,
-                            context=f"ray_actor_{actor_id}",
-                            record_context=True,
-                            record_backtraces=True
                         )
                     
                     # Create a test allocation to verify recording is working
