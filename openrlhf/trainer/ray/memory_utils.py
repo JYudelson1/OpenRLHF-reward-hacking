@@ -102,7 +102,6 @@ class ActorMemoryMonitor:
                     if hasattr(torch.cuda.memory, "_record_memory_history"):
                         torch.cuda.memory._record_memory_history(
                             max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
-                            enabled=True,
                             context=f"actor_{actor_id}_{reason}",
                             record_context=True,
                             record_backtraces=True

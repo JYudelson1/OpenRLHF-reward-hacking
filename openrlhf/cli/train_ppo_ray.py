@@ -65,7 +65,6 @@ def start_record_memory_history() -> None:
             # Enable memory recording with context
             torch.cuda.memory._record_memory_history(
                 max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
-                enabled=True,
                 context=f"main_process_{os.getpid()}",
                 # Important: Set this to True to record all memory allocations
                 record_context=True,
@@ -84,7 +83,6 @@ def start_record_memory_history() -> None:
             print("CUDA memory history recording not available in this PyTorch build")
     except Exception as e:
         print(f"Failed to start memory recording: {e}")
-        traceback.print_exc()
 
 def stop_record_memory_history() -> None:
     try:
@@ -115,8 +113,25 @@ def export_memory_snapshot(reason="periodic") -> None:
             
             snapshot_path = f"{snapshots_dir}/{file_prefix}.pickle"
             print(f"Exporting CUDA memory snapshot to {snapshot_path}...")
-            torch.cuda.memory._dump_snapshot(snapshot_path)
-            print(f"Memory snapshot saved to {snapshot_path}")
+            
+            try:
+                torch.cuda.memory._dump_snapshot(snapshot_path)
+                print(f"Memory snapshot saved to {snapshot_path}")
+            except Exception as e:
+                print(f"Error dumping memory snapshot: {e}")
+                # Create a fallback memory report
+                alt_path = f"{snapshots_dir}/{file_prefix}_fallback.txt"
+                with open(alt_path, 'w') as f:
+                    f.write(f"Fallback memory report at {timestamp} (reason: {reason})\n\n")
+                    f.write(f"Error dumping snapshot: {e}\n\n")
+                    
+                    # Get PyTorch memory stats
+                    f.write("PyTorch Memory Stats:\n")
+                    for i in range(torch.cuda.device_count()):
+                        mem_allocated = torch.cuda.memory_allocated(i) / (1024 ** 3)
+                        mem_reserved = torch.cuda.memory_reserved(i) / (1024 ** 3)
+                        f.write(f"GPU {i}: Allocated: {mem_allocated:.2f} GB, Reserved: {mem_reserved:.2f} GB\n")
+                print(f"Created fallback memory report at {alt_path}")
             
             # Also save basic memory stats in a text file for quick reference
             stats_path = f"{snapshots_dir}/{file_prefix}_stats.txt"
@@ -198,7 +213,37 @@ def export_memory_snapshot(reason="periodic") -> None:
             return snapshot_path
         else:
             print("CUDA memory snapshot dumping not available in this PyTorch build")
-            return None
+            
+            # Create a fallback memory report even if _dump_snapshot is not available
+            cwd = os.getcwd()
+            timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+            file_prefix = f"{timestamp}_{reason}"
+            snapshots_dir = f"{cwd}/memory_snapshots"
+            os.makedirs(snapshots_dir, exist_ok=True)
+            
+            fallback_path = f"{snapshots_dir}/{file_prefix}_fallback.txt"
+            with open(fallback_path, 'w') as f:
+                f.write(f"Fallback memory report at {timestamp} (reason: {reason})\n\n")
+                f.write("PyTorch memory snapshot dumping not available\n\n")
+                
+                # Get PyTorch memory stats
+                f.write("PyTorch Memory Stats:\n")
+                for i in range(torch.cuda.device_count()):
+                    mem_allocated = torch.cuda.memory_allocated(i) / (1024 ** 3)
+                    mem_reserved = torch.cuda.memory_reserved(i) / (1024 ** 3)
+                    f.write(f"GPU {i}: Allocated: {mem_allocated:.2f} GB, Reserved: {mem_reserved:.2f} GB\n")
+                
+                # Try to get nvidia-smi data
+                try:
+                    import subprocess
+                    result = subprocess.run(['nvidia-smi'], stdout=subprocess.PIPE, text=True)
+                    f.write("\nNVIDIA-SMI Output:\n")
+                    f.write(result.stdout)
+                except:
+                    f.write("\nCould not get nvidia-smi output\n")
+            
+            print(f"Created fallback memory report at {fallback_path}")
+            return fallback_path
     except Exception as e:
         print(f"Failed to export memory snapshot: {e}")
         traceback.print_exc()
@@ -282,7 +327,6 @@ def take_ray_actor_memory_snapshot(actor_id, reason="ray_actor"):
             # Start recording with context specific to this actor
             torch.cuda.memory._record_memory_history(
                 max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
-                enabled=True,
                 context=f"ray_actor_{actor_id}",
                 record_context=True,
                 record_backtraces=RECORD_BACKTRACES
@@ -301,7 +345,11 @@ def take_ray_actor_memory_snapshot(actor_id, reason="ray_actor"):
             
             # Take the snapshot
             snapshot_path = f"{snapshots_dir}/{file_prefix}.pickle"
-            torch.cuda.memory._dump_snapshot(snapshot_path)
+            try:
+                torch.cuda.memory._dump_snapshot(snapshot_path)
+            except Exception as e:
+                print(f"Error dumping memory snapshot for actor {actor_id}: {e}")
+                snapshot_path = None
             
             # Stop recording
             torch.cuda.memory._record_memory_history(enabled=False)
@@ -778,10 +826,9 @@ def train(args):
             if hasattr(group, "_actor_handlers"):
                 for handler in group._actor_handlers:
                     try:
-                        # Call the remote function on each actor
-                        actor_refs.append(enable_memory_profiling.options(
-                            actor=handler
-                        ).remote(actor_id))
+                        # Use a different approach - call a method on the actor directly
+                        # This assumes the actor has a setup_memory_monitoring method
+                        actor_refs.append(handler.setup_memory_monitoring.remote(actor_id))
                         actor_id += 1
                     except Exception as e:
                         print(f"Error enabling memory profiling on actor {actor_id}: {e}")
@@ -807,9 +854,13 @@ def train(args):
             if hasattr(group, "_actor_handlers"):
                 for handler in group._actor_handlers:
                     try:
-                        # Set up memory monitoring for this actor
-                        setup_refs.append(handler.setup_memory_monitoring.remote(actor_id))
-                        actor_id += 1
+                        # Check if the actor has the setup_memory_monitoring method
+                        if hasattr(handler, "setup_memory_monitoring"):
+                            # Set up memory monitoring for this actor
+                            setup_refs.append(handler.setup_memory_monitoring.remote(actor_id))
+                            actor_id += 1
+                        else:
+                            print(f"Warning: Actor does not have setup_memory_monitoring method")
                     except Exception as e:
                         print(f"Error setting up memory monitoring for actor {actor_id}: {e}")
         
@@ -821,6 +872,8 @@ def train(args):
             except Exception as e:
                 print(f"Error waiting for memory monitoring setup: {e}")
                 traceback.print_exc()
+        else:
+            print("No Ray actors found for memory monitoring setup")
 
     # Take a snapshot after actor creation but before model initialization
     export_memory_snapshot(reason="after_actor_creation")
@@ -906,13 +959,23 @@ def setup_ray_memory_profiling():
                 if hasattr(torch.cuda.memory, "_record_memory_history"):
                     # Enable memory recording with context
                     actor_id = actor_id or os.getpid()
-                    torch.cuda.memory._record_memory_history(
-                        max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
-                        enabled=True,
-                        context=f"ray_actor_{actor_id}",
-                        record_context=True,
-                        record_backtraces=RECORD_BACKTRACES
-                    )
+                    try:
+                        # Try the newer API first
+                        torch.cuda.memory._record_memory_history(
+                            max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
+                            enabled=True,
+                            context=f"ray_actor_{actor_id}",
+                            record_context=True,
+                            record_backtraces=RECORD_BACKTRACES
+                        )
+                    except TypeError:
+                        # Fall back to older API if needed
+                        torch.cuda.memory._record_memory_history(
+                            enabled=True,
+                            context=f"ray_actor_{actor_id}",
+                            record_context=True,
+                            record_backtraces=RECORD_BACKTRACES
+                        )
                     
                     # Create a test allocation to verify recording is working
                     try:
