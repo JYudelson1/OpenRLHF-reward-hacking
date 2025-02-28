@@ -7,6 +7,10 @@ import torch
 from ray.util.placement_group import placement_group
 import os, sys
 import signal
+import threading
+import time
+import gc
+import traceback
 
 from openrlhf.trainer.ray import (
     ActorModelRayActor,
@@ -44,8 +48,317 @@ def _validate_args(args):
         ), f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
 
 
+TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
+
+# Keep a max of 100,000 alloc/free events in the recorded history
+# leading up to the snapshot.
+MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
+# Take a snapshot every 5 minutes by default
+SNAPSHOT_INTERVAL_SECONDS: int = 300
+# Memory threshold for triggering snapshots (90% GPU memory usage)
+MEMORY_THRESHOLD_PERCENT: float = 90.0
+# Global flag to control memory monitoring thread
+_memory_monitor_running = False
+# Global flag to indicate if we're in the process of handling OOM
+_handling_oom = False
+
+def start_record_memory_history() -> None:
+    try:
+        # Check if memory recording is available
+        if hasattr(torch.cuda.memory, "_record_memory_history"):
+            print("Starting CUDA memory history recording...")
+            torch.cuda.memory._record_memory_history(
+                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
+            )
+        else:
+            print("CUDA memory history recording not available in this PyTorch build")
+    except Exception as e:
+        print(f"Failed to start memory recording: {e}")
+
+def stop_record_memory_history() -> None:
+    try:
+        if hasattr(torch.cuda.memory, "_record_memory_history"):
+            print("Stopping CUDA memory history recording...")
+            torch.cuda.memory._record_memory_history(enabled=None)
+        else:
+            print("CUDA memory history recording not available in this PyTorch build")
+    except Exception as e:
+        print(f"Failed to stop memory recording: {e}")
+
+def export_memory_snapshot(reason="periodic") -> None:
+    try:
+        if hasattr(torch.cuda.memory, "_dump_snapshot"):
+            
+            # Get the current working directory 
+            cwd = os.getcwd()
+            
+            # Prefix for file names.
+            timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+            file_prefix = f"{timestamp}_{reason}"
+            
+            # Create memory_snapshots directory if it doesn't exist
+            snapshots_dir = f"{cwd}/memory_snapshots"
+            os.makedirs(snapshots_dir, exist_ok=True)
+            
+            snapshot_path = f"{snapshots_dir}/{file_prefix}.pickle"
+            print(f"Exporting CUDA memory snapshot to {snapshot_path}...")
+            torch.cuda.memory._dump_snapshot(snapshot_path)
+            print(f"Memory snapshot saved to {snapshot_path}")
+            
+            # Also save basic memory stats in a text file for quick reference
+            stats_path = f"{snapshots_dir}/{file_prefix}_stats.txt"
+            with open(stats_path, 'w') as f:
+                f.write(f"Memory snapshot taken at {timestamp} due to: {reason}\n\n")
+                f.write("GPU Memory Summary:\n")
+                for i in range(torch.cuda.device_count()):
+                    mem_allocated = torch.cuda.memory_allocated(i) / (1024 ** 3)
+                    mem_reserved = torch.cuda.memory_reserved(i) / (1024 ** 3)
+                    f.write(f"GPU {i}: Allocated: {mem_allocated:.2f} GB, Reserved: {mem_reserved:.2f} GB\n")
+                
+                f.write("\nLargest Tensor Allocations:\n")
+                # This is a simple approach - for more detailed analysis, use the pickle file
+                for obj in gc.get_objects():
+                    try:
+                        if torch.is_tensor(obj) and obj.device.type == 'cuda':
+                            size_mb = obj.element_size() * obj.nelement() / (1024 ** 2)
+                            if size_mb > 100:  # Only show tensors larger than 100MB
+                                f.write(f"Size: {size_mb:.2f} MB, Shape: {obj.shape}, Type: {obj.dtype}\n")
+                    except:
+                        pass
+            
+            return snapshot_path
+        else:
+            print("CUDA memory snapshot dumping not available in this PyTorch build")
+            return None
+    except Exception as e:
+        print(f"Failed to export memory snapshot: {e}")
+        return None
+
+def get_gpu_memory_usage():
+    """Get current GPU memory usage as a percentage."""
+    try:
+        memory_used = []
+        for i in range(torch.cuda.device_count()):
+            allocated = torch.cuda.memory_allocated(i)
+            total = torch.cuda.get_device_properties(i).total_memory
+            memory_used.append((allocated / total) * 100)
+        return memory_used
+    except Exception as e:
+        print(f"Error getting GPU memory usage: {e}")
+        return []
+
+def memory_monitor_thread():
+    """Thread function to periodically check memory usage and take snapshots."""
+    global _memory_monitor_running
+    last_snapshot_time = time.time()
+    
+    while _memory_monitor_running:
+        try:
+            current_time = time.time()
+            memory_usage = get_gpu_memory_usage()
+            
+            # Take a snapshot if memory usage is high or if it's time for a periodic snapshot
+            if any(usage > MEMORY_THRESHOLD_PERCENT for usage in memory_usage):
+                print(f"High memory usage detected: {memory_usage}%. Taking snapshot...")
+                export_memory_snapshot(reason="high_memory")
+                last_snapshot_time = current_time
+            elif current_time - last_snapshot_time > SNAPSHOT_INTERVAL_SECONDS:
+                print(f"Taking periodic memory snapshot...")
+                export_memory_snapshot(reason="periodic")
+                last_snapshot_time = current_time
+                
+            # Sleep for a short time before checking again
+            time.sleep(10)
+        except Exception as e:
+            print(f"Error in memory monitor thread: {e}")
+            time.sleep(30)  # Sleep longer if there was an error
+
+def start_memory_monitoring():
+    """Start the memory monitoring thread."""
+    global _memory_monitor_running
+    if _memory_monitor_running:
+        return
+    
+    _memory_monitor_running = True
+    monitor_thread = threading.Thread(target=memory_monitor_thread, daemon=True)
+    monitor_thread.start()
+    print("Started memory monitoring thread")
+
+def stop_memory_monitoring():
+    """Stop the memory monitoring thread."""
+    global _memory_monitor_running
+    _memory_monitor_running = False
+    print("Stopped memory monitoring thread")
+
+@ray.remote
+def take_ray_actor_memory_snapshot(actor_id, reason="ray_actor"):
+    """Remote function to take a memory snapshot on a specific Ray actor."""
+    try:
+        # Force garbage collection to get accurate memory usage
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        # Get memory stats
+        device_count = torch.cuda.device_count()
+        memory_stats = {}
+        
+        for i in range(device_count):
+            memory_stats[f"gpu_{i}_allocated"] = torch.cuda.memory_allocated(i) / (1024 ** 3)  # GB
+            memory_stats[f"gpu_{i}_reserved"] = torch.cuda.memory_reserved(i) / (1024 ** 3)  # GB
+        
+        # Take a snapshot if PyTorch supports it
+        snapshot_path = None
+        if hasattr(torch.cuda.memory, "_record_memory_history") and hasattr(torch.cuda.memory, "_dump_snapshot"):
+            # Start recording
+            torch.cuda.memory._record_memory_history(max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT)
+            
+            # Get the current working directory
+            cwd = os.getcwd()
+            timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+            file_prefix = f"{timestamp}_actor_{actor_id}_{reason}"
+            
+            # Create memory_snapshots directory if it doesn't exist
+            snapshots_dir = f"{cwd}/memory_snapshots"
+            os.makedirs(snapshots_dir, exist_ok=True)
+            
+            snapshot_path = f"{snapshots_dir}/{file_prefix}.pickle"
+            torch.cuda.memory._dump_snapshot(snapshot_path)
+            
+            # Stop recording
+            torch.cuda.memory._record_memory_history(enabled=None)
+        
+        return {
+            "actor_id": actor_id,
+            "memory_stats": memory_stats,
+            "snapshot_path": snapshot_path
+        }
+    except Exception as e:
+        return {
+            "actor_id": actor_id,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+def take_distributed_memory_snapshots(actor_groups, reason="distributed"):
+    """Take memory snapshots across all Ray actors."""
+    try:
+        all_actors = []
+        
+        # Collect all actor handlers from the actor groups
+        for group in actor_groups:
+            if hasattr(group, "_actor_handlers"):
+                all_actors.extend(group._actor_handlers)
+        
+        if not all_actors:
+            print("No Ray actors found for distributed memory profiling")
+            return
+        
+        print(f"Taking distributed memory snapshots across {len(all_actors)} Ray actors...")
+        
+        # Take snapshots on all actors
+        snapshot_refs = [take_ray_actor_memory_snapshot.remote(i, reason) for i, _ in enumerate(all_actors)]
+        results = ray.get(snapshot_refs)
+        
+        # Summarize results
+        timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+        summary_path = f"memory_snapshots/{timestamp}_distributed_summary.txt"
+        
+        with open(summary_path, 'w') as f:
+            f.write(f"Distributed Memory Snapshot Summary ({reason})\n")
+            f.write(f"Timestamp: {datetime.now()}\n")
+            f.write(f"Number of actors: {len(results)}\n\n")
+            
+            for result in results:
+                f.write(f"Actor {result.get('actor_id')}:\n")
+                if 'error' in result:
+                    f.write(f"  Error: {result['error']}\n")
+                else:
+                    for key, value in result.get('memory_stats', {}).items():
+                        f.write(f"  {key}: {value:.2f} GB\n")
+                    if result.get('snapshot_path'):
+                        f.write(f"  Snapshot: {result['snapshot_path']}\n")
+                f.write("\n")
+        
+        print(f"Distributed memory snapshot summary saved to {summary_path}")
+    except Exception as e:
+        print(f"Error taking distributed memory snapshots: {e}")
+        traceback.print_exc()
+
+def handle_oom_error():
+    """Handle OOM error by taking memory snapshots and collecting diagnostics."""
+    global _handling_oom
+    
+    # Prevent recursive OOM handling
+    if _handling_oom:
+        return
+    
+    _handling_oom = True
+    
+    try:
+        print("OOM detected! Collecting memory diagnostics...")
+        
+        # Force garbage collection
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        # Take a memory snapshot
+        export_memory_snapshot(reason="oom")
+        
+        # Print memory statistics
+        print("\nGPU Memory Statistics at OOM:")
+        for i in range(torch.cuda.device_count()):
+            allocated = torch.cuda.memory_allocated(i) / (1024 ** 3)
+            reserved = torch.cuda.memory_reserved(i) / (1024 ** 3)
+            total = torch.cuda.get_device_properties(i).total_memory / (1024 ** 3)
+            print(f"GPU {i}: Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB, Total: {total:.2f} GB")
+        
+        # Try to identify large tensors
+        print("\nLargest CUDA Tensors:")
+        large_tensors = []
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) and obj.device.type == 'cuda':
+                    size_mb = obj.element_size() * obj.nelement() / (1024 ** 2)
+                    large_tensors.append((size_mb, obj.shape, obj.dtype))
+            except:
+                pass
+        
+        # Sort by size and print the largest ones
+        large_tensors.sort(reverse=True)
+        for i, (size_mb, shape, dtype) in enumerate(large_tensors[:20]):
+            print(f"{i+1}. Size: {size_mb:.2f} MB, Shape: {shape}, Type: {dtype}")
+    
+    except Exception as e:
+        print(f"Error during OOM handling: {e}")
+    
+    finally:
+        _handling_oom = False
+
+def handle_exception(sig, frame):
+    """Signal handler for exceptions."""
+    global _handling_oom
+    
+    print(f"Caught signal {sig}, collecting diagnostics before exit...")
+    
+    # Check if this might be an OOM error
+    if sig == signal.SIGABRT:
+        handle_oom_error()
+    else:
+        # For other signals, just take a regular snapshot
+        export_memory_snapshot(reason=f"signal_{sig}")
+    
+    stop_record_memory_history()
+    stop_memory_monitoring()
+    
+    # Re-raise the signal after saving the snapshot
+    signal.signal(sig, signal.SIG_DFL)
+    os.kill(os.getpid(), sig)
+
 def train(args):
     _validate_args(args)
+
+    # Start memory monitoring
+    start_memory_monitoring()
 
     # configure strategy
     strategy = get_strategy(args)
@@ -60,6 +373,9 @@ def train(args):
         bundles = [{"GPU": 1, "CPU": 4} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
+
+    # Take a baseline memory snapshot before model initialization
+    export_memory_snapshot(reason="baseline")
 
     # init vLLM engine for text generation
     vllm_engines = None
@@ -155,6 +471,18 @@ def train(args):
     else:
         reward_models = None
 
+    # Collect all actor groups for distributed memory profiling
+    all_actor_groups = [actor_model]
+    if ref_model is not None:
+        all_actor_groups.append(ref_model)
+    if critic_model is not None:
+        all_actor_groups.append(critic_model)
+    if reward_models is not None:
+        all_actor_groups.extend(reward_models)
+
+    # Take a snapshot after actor creation but before model initialization
+    export_memory_snapshot(reason="after_actor_creation")
+
     # init reference/reward/actor model
     refs = []
     if ref_model is not None:
@@ -166,6 +494,12 @@ def train(args):
 
     ray.get(refs)
 
+    # Take a snapshot after model initialization
+    export_memory_snapshot(reason="after_model_init")
+    
+    # Take distributed memory snapshots across all Ray actors
+    take_distributed_memory_snapshots(all_actor_groups, reason="after_model_init")
+
     if args.critic_pretrain:
         # critic scheduler initialization depends on max_step, so we have to init critic after actor
         # TODO: use first reward model as critic model
@@ -173,75 +507,52 @@ def train(args):
         refs.extend(critic_model.async_init_model_from_pretrained(strategy, args.critic_pretrain, max_steps))
         ray.get(refs)
 
-    # train actor and critic mdoel
-    refs = actor_model.async_fit_actor_model(
-        critic_model, ref_model, reward_models, args.remote_rm_url, reward_fn=reward_fn, vllm_engines=vllm_engines, using_env=args.env_file is not None
-    )
-    ray.get(refs)
+    # Take a snapshot after critic initialization
+    if args.critic_pretrain:
+        export_memory_snapshot(reason="after_critic_init")
+        take_distributed_memory_snapshots(all_actor_groups, reason="after_critic_init")
 
-    # save model
-    ray.get(actor_model.async_save_model())
-
-    if args.critic_pretrain and args.save_value_network:
-        ray.get(critic_model.async_save_model())
-
-TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
-
-# Keep a max of 100,000 alloc/free events in the recorded history
-# leading up to the snapshot.
-MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
-
-def start_record_memory_history() -> None:
     try:
-        # Check if memory recording is available
-        if hasattr(torch.cuda.memory, "_record_memory_history"):
-            print("Starting CUDA memory history recording...")
-            torch.cuda.memory._record_memory_history(
-                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
-            )
-        else:
-            print("CUDA memory history recording not available in this PyTorch build")
+        # train actor and critic model
+        refs = actor_model.async_fit_actor_model(
+            critic_model, ref_model, reward_models, args.remote_rm_url, reward_fn=reward_fn, vllm_engines=vllm_engines, using_env=args.env_file is not None
+        )
+        ray.get(refs)
+
+        # Take a snapshot after training
+        export_memory_snapshot(reason="after_training")
+        take_distributed_memory_snapshots(all_actor_groups, reason="after_training")
+
+        # save model
+        ray.get(actor_model.async_save_model())
+
+        if args.critic_pretrain and args.save_value_network:
+            ray.get(critic_model.async_save_model())
+            
     except Exception as e:
-        print(f"Failed to start memory recording: {e}")
-
-def stop_record_memory_history() -> None:
-    try:
-        if hasattr(torch.cuda.memory, "_record_memory_history"):
-            print("Stopping CUDA memory history recording...")
-            torch.cuda.memory._record_memory_history(enabled=None)
-        else:
-            print("CUDA memory history recording not available in this PyTorch build")
-    except Exception as e:
-        print(f"Failed to stop memory recording: {e}")
-
-def export_memory_snapshot() -> None:
-    try:
-        if hasattr(torch.cuda.memory, "_dump_snapshot"):
-            
-            # Get the current working directory 
-            cwd = os.getcwd()
-            
-            # Prefix for file names.
-            timestamp = datetime.now().strftime(TIME_FORMAT_STR)
-            file_prefix = f"{timestamp}"
-            
-            # Create memory_snapshots directory if it doesn't exist
-            snapshots_dir = f"{cwd}/memory_snapshots"
-            os.makedirs(snapshots_dir, exist_ok=True)
-            
-            snapshot_path = f"{snapshots_dir}/{file_prefix}.pickle"
-            print(f"Exporting CUDA memory snapshot to {snapshot_path}...")
-            torch.cuda.memory._dump_snapshot(snapshot_path)
-            print(f"Memory snapshot saved to {snapshot_path}")
-        else:
-            print("CUDA memory snapshot dumping not available in this PyTorch build")
-    except Exception as e:
-        print(f"Failed to export memory snapshot: {e}")
-
-
+        print(f"Error during training: {e}")
+        traceback.print_exc()
+        
+        # Take a snapshot on error
+        export_memory_snapshot(reason="training_error")
+        take_distributed_memory_snapshots(all_actor_groups, reason="training_error")
+        
+        # Re-raise the exception
+        raise
+    finally:
+        # Stop memory monitoring
+        stop_memory_monitoring()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # Memory profiling arguments
+    parser.add_argument("--memory_snapshot_interval", type=int, default=300,
+                      help="Interval in seconds between memory snapshots (default: 300)")
+    parser.add_argument("--memory_threshold", type=float, default=90.0,
+                      help="Memory usage threshold percentage to trigger snapshots (default: 90.0)")
+    parser.add_argument("--disable_memory_monitoring", action="store_true", default=False,
+                      help="Disable automatic memory monitoring")
+    
     # Ray and vLLM
     parser.add_argument("--ref_num_nodes", type=int, default=1, help="number of nodes for reference")
     parser.add_argument("--ref_num_gpus_per_node", type=int, default=8, help="number of gpus per node for reference")
@@ -453,6 +764,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Update memory monitoring settings from args
+    if not args.disable_memory_monitoring:
+        SNAPSHOT_INTERVAL_SECONDS = args.memory_snapshot_interval
+        MEMORY_THRESHOLD_PERCENT = args.memory_threshold
+
     if args.advantage_estimator not in ["gae"]:
         args.critic_pretrain = None
     elif args.critic_pretrain is None:
@@ -526,18 +842,10 @@ if __name__ == "__main__":
         # Patch hub to download models from modelscope to speed up.
         patch_hub()
         
-    # Add a signal handler to capture OOM errors
-    def handle_exception(sig, frame):
-        print("Caught signal, exporting memory snapshot before exit...")
-        export_memory_snapshot()
-        stop_record_memory_history()
-        # Re-raise the signal after saving the snapshot
-        signal.signal(sig, signal.SIG_DFL)
-        os.kill(os.getpid(), sig)
-    
     # Register signal handlers for common termination signals
     signal.signal(signal.SIGTERM, handle_exception)
     signal.signal(signal.SIGINT, handle_exception)
+    signal.signal(signal.SIGABRT, handle_exception)  # Often triggered by OOM
     
     start_record_memory_history()
 
@@ -545,6 +853,9 @@ if __name__ == "__main__":
         train(args)
     except Exception as e:
         print(f"Error during training: {e}")
+        traceback.print_exc()
+        export_memory_snapshot(reason="exception")
     finally:
-        export_memory_snapshot()
+        export_memory_snapshot(reason="cleanup")
         stop_record_memory_history()
+        stop_memory_monitoring()
