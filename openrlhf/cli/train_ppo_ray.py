@@ -545,10 +545,6 @@ if __name__ == "__main__":
         train(args)
     except Exception as e:
         print(f"Error during training: {e}")
-        # Make sure to export snapshot on any exception
-        export_memory_snapshot()
-        stop_record_memory_history()
-        raise
     finally:
         export_memory_snapshot()
         stop_record_memory_history()
