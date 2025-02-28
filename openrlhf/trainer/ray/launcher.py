@@ -33,6 +33,10 @@ class DistributedTorchRayActor:
         # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set, so
         # set local rank to 0 when the flag is not applicable.
         os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0]) if ray_noset_visible_devices() else "0"
+        
+        # Initialize memory monitoring attributes
+        self.actor_id = None
+        self.original_excepthook = None
 
     @staticmethod
     def _get_current_node_ip():
@@ -48,6 +52,44 @@ class DistributedTorchRayActor:
 
     def get_master_addr_port(self):
         return self._master_addr, self._master_port
+        
+    def setup_memory_monitoring(self, actor_id):
+        """Set up memory monitoring for this Ray actor."""
+        try:
+            # Import the memory monitoring utilities
+            from openrlhf.trainer.ray.memory_utils import ActorMemoryMonitor
+            
+            # Set up memory monitoring
+            return ActorMemoryMonitor.setup_memory_monitoring(self, actor_id)
+        except Exception as e:
+            import traceback
+            print(f"Error setting up memory monitoring for actor {actor_id}: {e}")
+            traceback.print_exc()
+            return False
+            
+    def get_memory_usage(self):
+        """Get current GPU memory usage for this actor."""
+        try:
+            # Import the memory monitoring utilities
+            from openrlhf.trainer.ray.memory_utils import ActorMemoryMonitor
+            
+            # Get memory usage
+            return ActorMemoryMonitor.get_memory_usage(self)
+        except Exception as e:
+            print(f"Error getting memory usage for actor {getattr(self, 'actor_id', 'unknown')}: {e}")
+            return [0.0]  # Return a default value on error
+            
+    def take_memory_snapshot(self, reason="periodic"):
+        """Take a memory snapshot for this actor."""
+        try:
+            # Import the memory monitoring utilities
+            from openrlhf.trainer.ray.memory_utils import ActorMemoryMonitor
+            
+            # Take a memory snapshot
+            return ActorMemoryMonitor.take_memory_snapshot(self, reason)
+        except Exception as e:
+            print(f"Error taking memory snapshot for actor {getattr(self, 'actor_id', 'unknown')}: {e}")
+            return False
 
 
 class BasePPORole(DistributedTorchRayActor):

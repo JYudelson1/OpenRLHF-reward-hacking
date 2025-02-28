@@ -463,170 +463,147 @@ def handle_exception(sig, frame):
     signal.signal(sig, signal.SIG_DFL)
     os.kill(os.getpid(), sig)
 
-# Add a Ray actor wrapper to catch OOM errors
-def wrap_ray_actor_with_oom_handler(actor_class):
-    """Wrap a Ray actor class to catch OOM errors and take memory snapshots."""
+def wrap_ray_actor_with_oom_handler(actor_class_original):
+    """
+    This function is no longer used. We're using a different approach with remote memory monitoring.
+    """
+    print(f"Warning: wrap_ray_actor_with_oom_handler is deprecated and will be removed.")
+    return actor_class_original
+
+# Add a new Ray remote function for memory monitoring
+@ray.remote(num_cpus=0.1)
+class RayMemoryMonitor:
+    """A standalone Ray actor that monitors memory usage of other Ray actors."""
     
-    # Create a new class that inherits from the original actor class
-    class OOMHandlingActor(actor_class):
-        def __init__(self, *args, **kwargs):
-            # Initialize the parent class
-            super().__init__(*args, **kwargs)
-            self.actor_id = os.getpid()
-            print(f"OOM handler initialized for actor {self.actor_id}")
-            
-            # Set up a custom exception hook to catch OOM errors
-            self.original_excepthook = sys.excepthook
-            sys.excepthook = self._handle_exception
-            
-            # Start a thread for periodic memory snapshots
-            self.snapshot_interval = SNAPSHOT_INTERVAL_SECONDS
-            self.memory_threshold = MEMORY_THRESHOLD_PERCENT
-            self.should_monitor = True
-            self.monitor_thread = threading.Thread(target=self._memory_monitor, daemon=True)
-            self.monitor_thread.start()
+    def __init__(self, snapshot_interval=300, memory_threshold=90.0, record_backtraces=False):
+        self.snapshot_interval = snapshot_interval
+        self.memory_threshold = memory_threshold
+        self.record_backtraces = record_backtraces
+        self.monitored_actors = {}
+        self.running = False
+        self.monitor_thread = None
+        self.max_entries = MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
         
-        def _memory_monitor(self):
-            """Thread function to periodically check memory usage and take snapshots."""
-            last_snapshot_time = time.time()
+    def start_monitoring(self):
+        """Start the memory monitoring thread."""
+        if self.running:
+            return
+        
+        self.running = True
+        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.monitor_thread.start()
+        return True
+        
+    def stop_monitoring(self):
+        """Stop the memory monitoring thread."""
+        self.running = False
+        if self.monitor_thread:
+            self.monitor_thread.join(timeout=2.0)
+        return True
+        
+    def register_actor(self, actor_handle, actor_id):
+        """Register a Ray actor for memory monitoring."""
+        self.monitored_actors[actor_id] = actor_handle
+        print(f"Registered actor {actor_id} for memory monitoring")
+        return True
+        
+    def _monitor_loop(self):
+        """Main monitoring loop that periodically checks memory usage."""
+        last_snapshot_time = time.time()
+        
+        while self.running:
+            try:
+                current_time = time.time()
+                
+                # Take periodic snapshots
+                if current_time - last_snapshot_time > self.snapshot_interval:
+                    print(f"Taking periodic memory snapshots of {len(self.monitored_actors)} actors...")
+                    self._take_snapshots("periodic")
+                    last_snapshot_time = current_time
+                
+                # Check for high memory usage
+                self._check_high_memory()
+                
+                # Sleep for a bit
+                time.sleep(30)
+            except Exception as e:
+                print(f"Error in memory monitor loop: {e}")
+                traceback.print_exc()
+                time.sleep(60)  # Sleep longer if there was an error
+    
+    def _check_high_memory(self):
+        """Check if any actors have high memory usage and take snapshots if needed."""
+        try:
+            # Get memory usage from all actors
+            memory_refs = []
+            for actor_id, actor in self.monitored_actors.items():
+                memory_refs.append((actor_id, actor.get_memory_usage.remote()))
             
-            while self.should_monitor:
+            # Check results
+            for actor_id, ref in memory_refs:
                 try:
-                    current_time = time.time()
-                    
-                    # Get current GPU memory usage
-                    memory_usage = []
-                    for i in range(torch.cuda.device_count()):
-                        allocated = torch.cuda.memory_allocated(i)
-                        total = torch.cuda.get_device_properties(i).total_memory
-                        memory_usage.append((allocated / total) * 100)
-                    
-                    # Take a snapshot if memory usage is high or if it's time for a periodic snapshot
+                    memory_usage = ray.get(ref, timeout=5.0)
                     if any(usage > self.memory_threshold for usage in memory_usage):
-                        print(f"Actor {self.actor_id}: High memory usage detected: {max(memory_usage):.1f}%. Taking snapshot...")
-                        self._take_memory_snapshot("high_memory")
-                        last_snapshot_time = current_time
-                    elif current_time - last_snapshot_time > self.snapshot_interval:
-                        print(f"Actor {self.actor_id}: Taking periodic memory snapshot...")
-                        self._take_memory_snapshot("periodic")
-                        last_snapshot_time = current_time
-                    
-                    # Sleep for a short time before checking again
-                    time.sleep(30)
+                        print(f"Actor {actor_id}: High memory usage detected: {max(memory_usage):.1f}%. Taking snapshot...")
+                        self._take_snapshot(actor_id, "high_memory")
                 except Exception as e:
-                    print(f"Error in actor {self.actor_id} memory monitor thread: {e}")
-                    time.sleep(60)  # Sleep longer if there was an error
-        
-        def _take_memory_snapshot(self, reason):
-            """Take a memory snapshot for this actor."""
-            try:
-                # Force garbage collection
-                gc.collect()
-                torch.cuda.empty_cache()
-                
-                # Take a memory snapshot
-                cwd = os.getcwd()
-                timestamp = datetime.now().strftime(TIME_FORMAT_STR)
-                snapshots_dir = f"{cwd}/memory_snapshots"
-                os.makedirs(snapshots_dir, exist_ok=True)
-                
-                # Create a detailed report
-                report_path = f"{snapshots_dir}/{timestamp}_actor_{self.actor_id}_{reason}.txt"
-                with open(report_path, 'w') as f:
-                    f.write(f"Memory Report for Ray Actor {self.actor_id}\n")
-                    f.write(f"Timestamp: {datetime.now()}\n")
-                    f.write(f"Reason: {reason}\n\n")
-                    
-                    # Memory stats
-                    f.write("GPU Memory Stats:\n")
-                    for i in range(torch.cuda.device_count()):
-                        allocated = torch.cuda.memory_allocated(i) / (1024 ** 3)
-                        reserved = torch.cuda.memory_reserved(i) / (1024 ** 3)
-                        f.write(f"GPU {i}: Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB\n")
-                    
-                    # Try to get large tensors
-                    f.write("\nLarge Tensors:\n")
-                    large_tensors = []
-                    for obj in gc.get_objects():
-                        try:
-                            if torch.is_tensor(obj) and obj.device.type == 'cuda':
-                                size_mb = obj.element_size() * obj.nelement() / (1024 ** 2)
-                                if size_mb > 100:  # Only show tensors larger than 100MB
-                                    large_tensors.append((size_mb, obj.shape, obj.dtype))
-                        except:
-                            pass
-                    
-                    large_tensors.sort(reverse=True)
-                    for i, (size_mb, shape, dtype) in enumerate(large_tensors[:20]):
-                        f.write(f"{i+1}. Size: {size_mb:.2f} MB, Shape: {shape}, Type: {dtype}\n")
-                
-                # Try to take a memory snapshot if available
-                if hasattr(torch.cuda.memory, "_dump_snapshot"):
-                    snapshot_path = f"{snapshots_dir}/{timestamp}_actor_{self.actor_id}_{reason}.pickle"
-                    try:
-                        # Start recording memory history
-                        if hasattr(torch.cuda.memory, "_record_memory_history"):
-                            torch.cuda.memory._record_memory_history(
-                                max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
-                                enabled=True,
-                                context=f"actor_{self.actor_id}_{reason}",
-                                record_context=True,
-                                record_backtraces=RECORD_BACKTRACES
-                            )
-                        
-                        # Create some test allocations
-                        dummy_tensors = []
-                        for i in range(torch.cuda.device_count()):
-                            try:
-                                dummy_tensors.append(torch.ones(1024, 1024, device=f"cuda:{i}"))
-                            except Exception:
-                                pass
-                        
-                        # Take the snapshot
-                        torch.cuda.memory._dump_snapshot(snapshot_path)
-                        
-                        # Clean up
-                        for tensor in dummy_tensors:
-                            del tensor
-                        
-                        # Stop recording
-                        if hasattr(torch.cuda.memory, "_record_memory_history"):
-                            torch.cuda.memory._record_memory_history(enabled=False)
-                        
-                        print(f"Actor {self.actor_id}: Memory snapshot saved to {snapshot_path}")
-                    except Exception as e:
-                        print(f"Actor {self.actor_id}: Failed to save memory snapshot: {e}")
-            except Exception as e:
-                print(f"Actor {self.actor_id}: Error taking memory snapshot: {e}")
-        
-        def _handle_exception(self, exc_type, exc_value, exc_traceback):
-            """Custom exception hook to catch OOM errors."""
-            try:
-                # Check if this is an OOM error
-                is_oom = False
-                if exc_type is RuntimeError:
-                    error_msg = str(exc_value).lower()
-                    is_oom = "out of memory" in error_msg or "cuda out of memory" in error_msg
-                
-                if is_oom:
-                    print(f"OOM detected in Ray actor {self.actor_id}! Taking memory snapshot...")
-                    self._take_memory_snapshot("oom")
-            except Exception as e:
-                print(f"Error in OOM handler: {e}")
-            
-            # Call the original exception hook
-            self.original_excepthook(exc_type, exc_value, exc_traceback)
-        
-        def __del__(self):
-            """Clean up when the actor is destroyed."""
-            try:
-                self.should_monitor = False
-                if hasattr(self, 'monitor_thread') and self.monitor_thread.is_alive():
-                    self.monitor_thread.join(timeout=1.0)
-            except:
-                pass
+                    print(f"Error getting memory usage from actor {actor_id}: {e}")
+        except Exception as e:
+            print(f"Error checking high memory usage: {e}")
     
-    return OOMHandlingActor
+    def _take_snapshots(self, reason):
+        """Take memory snapshots of all registered actors."""
+        snapshot_refs = []
+        for actor_id, actor in self.monitored_actors.items():
+            snapshot_refs.append((actor_id, actor.take_memory_snapshot.remote(reason)))
+        
+        # Wait for all snapshots to complete
+        for actor_id, ref in snapshot_refs:
+            try:
+                result = ray.get(ref, timeout=30.0)
+                if result:
+                    print(f"Actor {actor_id}: Memory snapshot taken successfully")
+                else:
+                    print(f"Actor {actor_id}: Failed to take memory snapshot")
+            except Exception as e:
+                print(f"Error taking memory snapshot from actor {actor_id}: {e}")
+    
+    def _take_snapshot(self, actor_id, reason):
+        """Take a memory snapshot of a specific actor."""
+        if actor_id not in self.monitored_actors:
+            return False
+        
+        try:
+            result = ray.get(self.monitored_actors[actor_id].take_memory_snapshot.remote(reason), timeout=30.0)
+            return result
+        except Exception as e:
+            print(f"Error taking memory snapshot from actor {actor_id}: {e}")
+            return False
+    
+    def handle_oom(self, actor_id):
+        """Handle OOM error from a specific actor."""
+        if actor_id not in self.monitored_actors:
+            return False
+        
+        try:
+            print(f"OOM detected in actor {actor_id}! Taking memory snapshot...")
+            return ray.get(self.monitored_actors[actor_id].take_memory_snapshot.remote("oom"), timeout=30.0)
+        except Exception as e:
+            print(f"Error handling OOM for actor {actor_id}: {e}")
+            return False
+
+# Add memory monitoring methods to Ray actors
+@ray.remote
+def setup_actor_memory_monitoring(actor_handle, actor_id):
+    """Set up memory monitoring for a Ray actor."""
+    try:
+        # Add memory monitoring methods to the actor
+        ray.get(actor_handle.setup_memory_monitoring.remote(actor_id))
+        return True
+    except Exception as e:
+        print(f"Error setting up memory monitoring for actor {actor_id}: {e}")
+        traceback.print_exc()
+        return False
 
 def train(args):
     _validate_args(args)
@@ -646,21 +623,16 @@ def train(args):
     # Set up Ray memory profiling
     enable_memory_profiling = setup_ray_memory_profiling()
     
-    # Store original classes before wrapping
-    ActorModelRayActor_Original = ActorModelRayActor
-    CriticModelRayActor_Original = CriticModelRayActor
-    ReferenceModelRayActor_Original = ReferenceModelRayActor
-    RewardModelRayActor_Original = RewardModelRayActor
-    
-    # Wrap actor classes with OOM handlers if memory profiling is enabled
+    # Create a memory monitor if memory monitoring is enabled
+    memory_monitor = None
     if not args.disable_memory_monitoring:
-        print("Wrapping Ray actor classes with OOM handlers...")
-        
-        # Replace the original classes with wrapped versions
-        ActorModelRayActor = wrap_ray_actor_with_oom_handler(ActorModelRayActor_Original)
-        CriticModelRayActor = wrap_ray_actor_with_oom_handler(CriticModelRayActor_Original)
-        ReferenceModelRayActor = wrap_ray_actor_with_oom_handler(ReferenceModelRayActor_Original)
-        RewardModelRayActor = wrap_ray_actor_with_oom_handler(RewardModelRayActor_Original)
+        print("Setting up Ray memory monitoring...")
+        memory_monitor = RayMemoryMonitor.remote(
+            snapshot_interval=SNAPSHOT_INTERVAL_SECONDS,
+            memory_threshold=MEMORY_THRESHOLD_PERCENT,
+            record_backtraces=RECORD_BACKTRACES
+        )
+        ray.get(memory_monitor.start_monitoring.remote())
 
     # configure strategy
     strategy = get_strategy(args)
@@ -782,6 +754,20 @@ def train(args):
     if reward_models is not None:
         all_actor_groups.extend(reward_models)
 
+    # Register actors with memory monitor if enabled
+    if memory_monitor is not None:
+        print("Registering Ray actors with memory monitor...")
+        actor_id = 0
+        for group in all_actor_groups:
+            if hasattr(group, "_actor_handlers"):
+                for handler in group._actor_handlers:
+                    try:
+                        # Register the actor with the memory monitor
+                        ray.get(memory_monitor.register_actor.remote(handler, actor_id))
+                        actor_id += 1
+                    except Exception as e:
+                        print(f"Error registering actor {actor_id} with memory monitor: {e}")
+
     # Enable memory profiling on all Ray actors
     if enable_memory_profiling:
         print("Enabling memory profiling on all Ray actors...")
@@ -810,6 +796,31 @@ def train(args):
                 traceback.print_exc()
         else:
             print("No Ray actors found to enable memory profiling")
+
+    # Set up memory monitoring for each actor if enabled
+    if memory_monitor is not None:
+        print("Setting up memory monitoring for Ray actors...")
+        setup_refs = []
+        actor_id = 0
+        
+        for group in all_actor_groups:
+            if hasattr(group, "_actor_handlers"):
+                for handler in group._actor_handlers:
+                    try:
+                        # Set up memory monitoring for this actor
+                        setup_refs.append(handler.setup_memory_monitoring.remote(actor_id))
+                        actor_id += 1
+                    except Exception as e:
+                        print(f"Error setting up memory monitoring for actor {actor_id}: {e}")
+        
+        if setup_refs:
+            try:
+                # Wait for all actors to set up memory monitoring
+                results = ray.get(setup_refs)
+                print(f"Memory monitoring set up on {sum(1 for r in results if r)} out of {len(setup_refs)} Ray actors")
+            except Exception as e:
+                print(f"Error waiting for memory monitoring setup: {e}")
+                traceback.print_exc()
 
     # Take a snapshot after actor creation but before model initialization
     export_memory_snapshot(reason="after_actor_creation")
@@ -873,6 +884,15 @@ def train(args):
     finally:
         # Stop memory monitoring
         stop_memory_monitoring()
+        
+        # Stop the memory monitor if it was created
+        if memory_monitor is not None:
+            try:
+                ray.get(memory_monitor.stop_monitoring.remote())
+                print("Stopped Ray memory monitor")
+            except Exception as e:
+                print(f"Error stopping Ray memory monitor: {e}")
+                traceback.print_exc()
 
 # Add a new function to enable memory profiling in Ray actors
 def setup_ray_memory_profiling():
