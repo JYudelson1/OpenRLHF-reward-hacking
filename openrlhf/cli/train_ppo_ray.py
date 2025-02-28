@@ -601,9 +601,9 @@ def take_distributed_memory_snapshots(actor_groups, reason="periodic"):
         snapshot_refs = []
         actor_ids = []
         
-        for actor in all_actors:
+        for i, actor in enumerate(all_actors):
             try:
-                actor_id = actor._actor_id.hex()
+                actor_id = f"actor_{i}"
                 actor_ids.append(actor_id)
                 snapshot_ref = take_ray_actor_memory_snapshot.remote(actor_id, reason)
                 snapshot_refs.append(snapshot_ref)
