@@ -209,25 +209,12 @@ class ActorMemoryMonitor:
                     torch.cuda.empty_cache()
                     
                     # Start recording memory history with backtraces
-                    try:
-                        # Try newer API first (PyTorch 2.1+)
-                        torch.cuda.memory._record_memory_history(
-                            max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
-                            enabled=True,
-                            context=f"actor_{actor_id}_{reason}",
-                            record_context=True,
-                            record_backtraces=True
-                        )
-                        print(f"Actor {actor_id}: Using newer memory recording API")
-                    except TypeError:
-                        # Fall back to older API (PyTorch 2.0)
-                        print(f"Actor {actor_id}: Falling back to legacy memory recording API")
-                        torch.cuda.memory._record_memory_history(
-                            enabled=True,
-                            context=f"actor_{actor_id}_{reason}",
-                            record_context=True,
-                            record_backtraces=True
-                        )
+                    # Try newer API first (PyTorch 2.1+)
+                    torch.cuda.memory._record_memory_history(
+                        max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT,
+                    )
+                    print(f"Actor {actor_id}: Using newer memory recording API")
+
                     
                     # Create test allocations of different sizes to ensure recording is working
                     dummy_tensors = []

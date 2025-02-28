@@ -72,12 +72,7 @@ def start_record_memory_history() -> None:
             
             # Enable memory recording with context
             torch.cuda.memory._record_memory_history(
-                max_entries=max_entries,
-                context=f"main_process_{os.getpid()}",
-                # Important: Set this to True to record all memory allocations
-                record_context=True,
-                # Set to True to record backtraces for each allocation if enabled
-                record_backtraces=RECORD_BACKTRACES
+                max_entries=max_entries, 
             )
             
             # Force some allocations to ensure recording is working
@@ -487,9 +482,6 @@ def take_ray_actor_memory_snapshot(actor_id, reason="ray_actor"):
             # Start recording with context specific to this actor
             torch.cuda.memory._record_memory_history(
                     max_entries=100000,  # Use a fixed value
-                    context=f"ray_actor_{actor_id}",
-                    record_context=True,
-                    record_backtraces=True  # Always record backtraces for actor snapshots
                 )
             
             # Create some test allocations to ensure recording is working
@@ -1481,9 +1473,6 @@ def setup_ray_memory_profiling():
                     
                     torch.cuda.memory._record_memory_history(
                             max_entries=max_entries,
-                            context=f"ray_actor_{actor_id}",
-                            record_context=True,
-                            record_backtraces=True  # Always record backtraces for actor snapshots
                         )
                     
                     # Create a test allocation to verify recording is working
