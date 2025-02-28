@@ -63,7 +63,7 @@ class AgentInterface(ABC):
                 raise
 
             active_conversations = []
-            for i, idx in enumerate(active_indices):
+            for i, idx in reversed(list(enumerate(active_indices))):
                 result = all_prompts_and_states[i]
                 if result is None:
                     logger.error(f"Error in get_next_prompt for environment {idx}")
