@@ -1762,14 +1762,14 @@ if __name__ == "__main__":
         print(f"  Record backtraces: {RECORD_BACKTRACES}")
         
         if RECORD_BACKTRACES:
-            print("Memory backtrace recording enabled - this may slow down execution")
-    else:
-        print("Memory monitoring is disabled")
 
-    # Initialize global variables for memory monitoring
-    memory_monitor = None
-    memory_monitor_thread_obj = None
-    all_actor_groups = None
+    # Set global backtraces flag based on args
+    RECORD_BACKTRACES = args.memory_record_backtraces
+
+    # Set global backtraces flag based on args
+    RECORD_BACKTRACES = args.memory_record_backtraces
+    if RECORD_BACKTRACES:
+        print("Memory backtrace recording enabled - this may slow down execution")
 
     if args.advantage_estimator not in ["gae"]:
         args.critic_pretrain = None
