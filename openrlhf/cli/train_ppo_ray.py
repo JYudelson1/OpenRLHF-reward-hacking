@@ -631,19 +631,30 @@ def wrap_ray_actor_with_oom_handler(actor_class):
 def train(args):
     _validate_args(args)
 
+    # Import the Ray actor classes at the beginning of the function to ensure they're in scope
+    from openrlhf.trainer.ray import (
+        ActorModelRayActor,
+        CriticModelRayActor,
+        PPORayActorGroup,
+        ReferenceModelRayActor,
+        RewardModelRayActor,
+    )
+
     # Start memory monitoring
     start_memory_monitoring()
     
     # Set up Ray memory profiling
     enable_memory_profiling = setup_ray_memory_profiling()
     
+    # Store original classes before wrapping
+    ActorModelRayActor_Original = ActorModelRayActor
+    CriticModelRayActor_Original = CriticModelRayActor
+    ReferenceModelRayActor_Original = ReferenceModelRayActor
+    RewardModelRayActor_Original = RewardModelRayActor
+    
     # Wrap actor classes with OOM handlers if memory profiling is enabled
     if not args.disable_memory_monitoring:
         print("Wrapping Ray actor classes with OOM handlers...")
-        ActorModelRayActor_Original = ActorModelRayActor
-        CriticModelRayActor_Original = CriticModelRayActor
-        ReferenceModelRayActor_Original = ReferenceModelRayActor
-        RewardModelRayActor_Original = RewardModelRayActor
         
         # Replace the original classes with wrapped versions
         ActorModelRayActor = wrap_ray_actor_with_oom_handler(ActorModelRayActor_Original)
