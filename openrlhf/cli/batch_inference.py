@@ -67,7 +67,9 @@ def batch_generate_vllm(args):
         prompts_data = prompts_data.select(range(start_idx, min(end_idx, len(prompts_data))))
 
     prompts_dataset = PromptDataset(prompts_data, tokenizer, dummy_strategy, input_template=args.input_template)
-    prompts = list(prompts_dataset)
+    prompts = []
+    for prompt, _ in prompts_dataset:
+        prompts.append(prompt)
 
     # Conditional SFT inference
     if args.enable_csft:
@@ -150,7 +152,7 @@ def batch_generate(args):
     N = args.best_of_n
     output_dataset = []
 
-    for prompts in pbar:
+    for prompts, _ in pbar:
         # Conditional SFT inference
         if args.enable_csft:
             for i in range(len(prompts)):
@@ -164,7 +166,7 @@ def batch_generate(args):
                 max_new_tokens=args.max_new_tokens,
                 do_sample=not args.greedy_sampling,
                 top_p=args.top_p,
-                early_stopping=True,
+                early_stopping=False,
                 num_beams=1,
                 temperature=args.temperature,
                 repetition_penalty=args.repetition_penalty,
@@ -354,6 +356,9 @@ if __name__ == "__main__":
     parser.add_argument("--enable_csft", action="store_true", default=False)
     parser.add_argument("--csft_prompt", type=str, default="<rm_score>: 5.00", help="Conditional SFT prompt")
 
+    # ModelScope parameters
+    parser.add_argument("--use_ms", action="store_true", default=False)
+
     args = parser.parse_args()
     if args.eval_task and args.eval_task == "generate":
         batch_generate(args)
@@ -363,3 +368,9 @@ if __name__ == "__main__":
         batch_rm_inference(args)
     else:
         print("Invalid or missing '--eval_task' argument. Please specify either 'generate' or 'rm'.")
+
+    if args.use_ms:
+        from modelscope.utils.hf_util import patch_hub
+
+        # Patch hub to download models from modelscope to speed up.
+        patch_hub()

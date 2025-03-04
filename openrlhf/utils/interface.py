@@ -12,10 +12,11 @@ Message = Dict[str, str]
 Reward = float
 AgentState = Any  # State needed to track conversation progress
 
+#TODO: Think more strongly about whether this should be updated in light of the fact that we often e.g. truncate reasoning
 @dataclass
 class AgentConversation:
     messages: List[Message]
-    tokens_by_turn: List[Dict[str, Any]]
+    # tokens_by_turn: List[Dict[str, Any]]
     first_prompt_tokens: List[int]
     all_output_tokens: List[int]
 
@@ -41,7 +42,7 @@ class AgentInterface(ABC):
         all_messages = [list() for _ in range(self.num_envs)]
         active_indices = list(range(self.num_envs))
         
-        tokens_by_turn = [list() for _ in range(self.num_envs)]
+        # tokens_by_turn = [list() for _ in range(self.num_envs)]
         total_tokens = [0 for _ in range(self.num_envs)]
         first_prompt_tokens = [None for _ in range(self.num_envs)]
         all_output_tokens = [[] for _ in range(self.num_envs)]
@@ -55,7 +56,7 @@ class AgentInterface(ABC):
                 all_prompts_and_states = ray.get([
                     get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
                     for idx in active_indices
-                ], timeout=30)
+                ])
                 self.vllm_engine = vllm_engine
             except Exception as e:
                 self.vllm_engine = vllm_engine  # Restore in case of error
@@ -63,6 +64,7 @@ class AgentInterface(ABC):
                 raise
 
             active_conversations = []
+            indices_to_remove = []
             for i, idx in enumerate(active_indices):
                 result = all_prompts_and_states[i]
                 if result is None:
@@ -73,10 +75,14 @@ class AgentInterface(ABC):
                 prompt, states[idx] = result
                 if prompt is None or states[idx] is None:
                     # The environment is done, so we don't need to generate any more prompts
-                    active_indices.remove(idx)
+                    # active_indices.remove(idx)
+                    indices_to_remove.append(idx)
                     continue
                 all_messages[idx].append(prompt)
                 active_conversations.append(all_messages[idx])
+                
+            for idx in indices_to_remove:
+                active_indices.remove(idx)
 
             # Leave the loop if all conversations are done
             if len(active_conversations) == 0:
@@ -108,10 +114,10 @@ class AgentInterface(ABC):
                 output_message = {"role": "assistant", "content": output.outputs[0].text}
 
                 all_messages[real_idx].append(output_message)
-                tokens_by_turn[real_idx].append({
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens
-                })
+                # tokens_by_turn[real_idx].append({
+                #     "input_tokens": input_tokens,
+                #     "output_tokens": output_tokens
+                # })
                 total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
                 
                 all_output_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
@@ -130,9 +136,9 @@ class AgentInterface(ABC):
             for idx in range(self.num_envs)
         ])
         self.vllm_engine = vllm_engine
-        for i, (messages, tokens_by_turn_one_env, fpt, aot) in enumerate(zip(all_messages, tokens_by_turn, first_prompt_tokens, all_output_tokens)):
+        for i, (messages, fpt, aot) in enumerate(zip(all_messages, first_prompt_tokens, all_output_tokens)):
             reward = all_rewards[i]
-            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn_one_env, first_prompt_tokens=fpt, all_output_tokens=aot)
+            conversation = AgentConversation(messages=messages, first_prompt_tokens=fpt, all_output_tokens=aot)
             results.append((conversation, reward))
         
         return results
