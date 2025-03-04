@@ -228,6 +228,7 @@ class NaiveExperienceMaker(ABC):
                 experience.advantages, experience.returns = self.get_advantages_and_returns(
                     experience.values,
                     reward,
+                    experience.action_mask,
                     generate_kwargs["gamma"],
                     generate_kwargs["lambd"],
                 )
