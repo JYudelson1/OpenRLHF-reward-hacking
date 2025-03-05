@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import *
 import vllm
+from openai import OpenAI
+from anthropic import Anthropic
 from vllm import SamplingParams
 from dataclasses import dataclass
 
@@ -97,6 +99,70 @@ class AgentInterface(ABC):
             results.append((conversation, reward))
 
         return results
+
+    def run_agent_loops_with_anthropic_or_openai(
+        self,
+        client: OpenAI | Anthropic,
+        verbose: bool = True,
+        **api_kwargs
+    ) -> List[Tuple[List[Message], Reward]]:
+        # if you were to parallelize those calls, use ray's way of doing parallelization (defining functions with @ray.remote, calling them with .remote to get ray refs, and gay.get'ing those refs)
+        # normal ways of parallelizing this (async, multithreading) will crash
+
+        all_messages_and_rewards = []
+
+        for datapoint in self.full_data:
+            state = self.init_state(datapoint)
+            messages = []
+
+            while True:
+                next_message, state = self.get_next_prompt(messages, state)
+                if next_message is None:
+                    break
+                messages.append(next_message)
+
+                completion = self.openai_or_anthropic_completion(
+                    client=client, messages=messages, **api_kwargs
+                )
+                messages.append({"role": "assistant", "content": completion})
+
+            reward = self.get_reward(messages, state)            
+            all_messages_and_rewards.append((messages, reward))
+
+            if verbose:
+                self.print_messages(messages)
+                print("=" * 100)
+                print(f"REWARD FOR THE CONVERSATION ABOVE:", reward)
+
+        return all_messages_and_rewards
+
+    def print_messages(self, messages: list[Message]) -> None:
+        print("+" * 100)
+        print("+" * 100)
+        print("+" * 100)
+        print("FINISHED EXECUTING AGENT LOOP")
+        for message in messages:
+            print("=" * 100)
+            for field, value in message.items():
+                if field == "content":
+                    continue
+                print(field.upper(), value)
+            print("CONTENT:", message["content"])
+    
+    def openai_or_anthropic_completion(
+        self, client: OpenAI | Anthropic, messages: AgentConversation, **api_kwargs
+    ) -> list[str]:
+        if isinstance(client, OpenAI):
+            return client.chat.completions.create(
+                messages=messages, **api_kwargs
+            ).choices[0].message.content
+
+        if isinstance(client, Anthropic):
+            return client.messages.create(
+                messages=messages, **api_kwargs
+            ).content[0].text
+
+        assert False, f"client should be of type OpenAI or Anthropic, but is of type {type(self.llm_engine)}"
 
     @abstractmethod
     def init_state(self, data: dict) -> AgentState:

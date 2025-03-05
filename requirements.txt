@@ -19,3 +19,5 @@ transformers==4.46.3
 transformers_stream_generator
 wandb
 wheel
+openai
+anthropic
