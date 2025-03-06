@@ -5,6 +5,10 @@ from vllm import SamplingParams
 from dataclasses import dataclass
 import ray
 import logging
+import os
+import pymongo
+from pymongo import MongoClient
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,10 @@ class AgentInterface(ABC):
         self.full_data = full_data
         self.sampling_params = sampling_params
         self.vllm_engine = vllm_engine
+        
+        # Log an error message if MONGODB_URI is not set
+        if not os.environ.get("MONGODB_URI"):
+            logger.error("MONGODB_URI is not set. Please set it to your MongoDB URI.")
         
         # As an example of full_data, for a given swe_bench task, it is a list of dicts, each with the following keys:
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
@@ -130,10 +138,41 @@ class AgentInterface(ABC):
             for idx in range(self.num_envs)
         ])
         self.vllm_engine = vllm_engine
+        
+        # Create results list
+        results_data = []
         for i, (messages, tokens_by_turn_one_env, fpt, aot) in enumerate(zip(all_messages, tokens_by_turn, first_prompt_tokens, all_output_tokens)):
             reward = all_rewards[i]
             conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn_one_env, first_prompt_tokens=fpt, all_output_tokens=aot)
             results.append((conversation, reward))
+            
+            # Prepare data for MongoDB upload
+            results_data.append({
+                "messages": messages,
+                "output_tokens": [int(token) for token in aot] if aot else [],
+                "reward": float(reward),
+                "task_prompt": messages[0]["content"],
+            })
+        
+        # Upload results to MongoDB after all processing is complete
+        mongo_uri = os.environ.get("MONGODB_URI")
+        if mongo_uri:
+            try:
+                # Connect to MongoDB
+                mongo_client = MongoClient(mongo_uri)
+                mongo_db = mongo_client["reward_hacking"]
+                mongo_collection = mongo_db["trajectories_test"]
+                
+                # Upload all results
+                for i, data in enumerate(results_data):
+                    # Add timestamp at upload time
+                    data["timestamp"] = datetime.utcnow()
+                    mongo_collection.insert_one(data)
+                
+                logger.info(f"Uploaded {len(results_data)} conversations to MongoDB")
+                mongo_client.close()
+            except Exception as e:
+                logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
         
         return results
 
