@@ -53,6 +53,7 @@ class AgentInterface(ABC):
         total_tokens = [0 for _ in range(self.num_envs)]
         first_prompt_tokens = [None for _ in range(self.num_envs)]
         all_output_tokens = [[] for _ in range(self.num_envs)]
+        all_output_tokens_text = [[] for _ in range(self.num_envs)]
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
@@ -123,7 +124,7 @@ class AgentInterface(ABC):
                 total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
                 
                 all_output_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-    
+                all_output_tokens_text[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].text)
                 if not all_is_done[i]:
                     new_active_indices.append(real_idx)
             
@@ -149,7 +150,7 @@ class AgentInterface(ABC):
             # Prepare data for MongoDB upload
             results_data.append({
                 "messages": messages,
-                "output_tokens": [int(token) for token in aot] if aot else [],
+                "output_tokens_text": all_output_tokens_text[i],
                 "reward": float(reward),
                 "task_prompt": messages[0]["content"],
             })
