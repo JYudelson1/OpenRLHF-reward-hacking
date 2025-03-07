@@ -98,6 +98,8 @@ class SFTDataset(Dataset):
             apply_chat_template = self.apply_chat_template
             response_ranges = []
             for idx, message in enumerate(data[input_key]):
+                print(f"Index: {idx}")
+                print(f"Message: {message}")
                 if message['role'] == 'assistant':
                     prompt = apply_chat_template(data[input_key][: idx], tokenize=False, add_generation_prompt=True)
                     response = apply_chat_template(data[input_key][: idx + 1], tokenize=False)[len(prompt):]
