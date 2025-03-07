@@ -17,6 +17,9 @@ def preprocess_data(data, input_template=None, input_key="input", output_key=Non
                 prompt_message = [{"role": "user", "content": prompt_message}]
                 response_message = [{"role": "assistant", "content": response_message}]
 
+            print("Data\n", data)
+            print("Prompt:\n", prompt_message)
+            print("Response:\n", response_message)
             prompt = apply_chat_template(prompt_message, tokenize=False, add_generation_prompt=True)
             response = apply_chat_template(prompt_message + response_message, tokenize=False)[len(prompt) :]
         else:
@@ -98,8 +101,6 @@ class SFTDataset(Dataset):
             apply_chat_template = self.apply_chat_template
             response_ranges = []
             for idx, message in enumerate(data[input_key]):
-                print(f"Index: {idx}")
-                print(f"Message: {message}")
                 if message['role'] == 'assistant':
                     prompt = apply_chat_template(data[input_key][: idx], tokenize=False, add_generation_prompt=True)
                     response = apply_chat_template(data[input_key][: idx + 1], tokenize=False)[len(prompt):]
