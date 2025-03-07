@@ -44,7 +44,7 @@ def train(args):
     optim = strategy.create_optimizer(model, lr=args.learning_rate, betas=args.adam_betas, weight_decay=args.l2)
 
     # prepare for data and dataset
-    train_data, eval_data = blending_datasets(
+    out = blending_datasets(
         args.dataset,
         args.dataset_probs,
         strategy,
@@ -52,7 +52,10 @@ def train(args):
         max_count=args.max_samples,
         train_split=args.train_split,
         eval_split=args.eval_split,
+        return_eval=True
     )
+    train_data = out["train"]
+    eval_data = out["validation"]
     print("Train:\n", train_data)
     print("Eval:\n", eval_data)
     print(f"{len(train_data)} samples in Train")
