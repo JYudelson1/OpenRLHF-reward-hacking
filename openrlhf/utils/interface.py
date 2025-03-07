@@ -117,7 +117,7 @@ class AgentInterface(ABC):
                 
                 generation_starter_text = output.prompt[-10:]
                 if "think" in generation_starter_text.lower():
-                    output_message = {"role": "assistant", "content": generation_starter_text + output.outputs[0].text}
+                    output_message = {"role": "assistant", "content": "<think>" + output.outputs[0].text}
                 else:
                     output_message = {"role": "assistant", "content": output.outputs[0].text}
 
