@@ -36,9 +36,9 @@ class AgentInterface(ABC):
         self.sampling_params = sampling_params
         self.vllm_engine = vllm_engine
         
-        # Log an error message if MONGODB_URI is not set
-        if not os.environ.get("MONGODB_URI"):
-            logger.error("MONGODB_URI is not set. Please set it to your MongoDB URI.")
+        # Log an error message if MONGO_URI is not set
+        if not os.environ.get("MONGO_URI"):
+            logger.error("MONGO_URI is not set. Please set it to your MongoDB URI.")
         
         # As an example of full_data, for a given swe_bench task, it is a list of dicts, each with the following keys:
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
@@ -155,7 +155,7 @@ class AgentInterface(ABC):
             })
         
         # Upload results to MongoDB after all processing is complete
-        mongo_uri = os.environ.get("MONGODB_URI")
+        mongo_uri = os.environ.get("MONGO_URI")
         if mongo_uri:
             try:
                 # Connect to MongoDB
