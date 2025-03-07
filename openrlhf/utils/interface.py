@@ -63,7 +63,8 @@ class AgentInterface(ABC):
                 raise
 
             active_conversations = []
-            for i, idx in reversed(list(enumerate(active_indices))):
+            indices_to_remove = []
+            for i, idx in enumerate(active_indices):
                 result = all_prompts_and_states[i]
                 if result is None:
                     logger.error(f"Error in get_next_prompt for environment {idx}")
@@ -73,10 +74,14 @@ class AgentInterface(ABC):
                 prompt, states[idx] = result
                 if prompt is None or states[idx] is None:
                     # The environment is done, so we don't need to generate any more prompts
-                    active_indices.remove(idx)
+                    # active_indices.remove(idx)
+                    indices_to_remove.append(idx)
                     continue
                 all_messages[idx].append(prompt)
                 active_conversations.append(all_messages[idx])
+                
+            for idx in indices_to_remove:
+                active_indices.remove(idx)
 
             # Leave the loop if all conversations are done
             if len(active_conversations) == 0:
