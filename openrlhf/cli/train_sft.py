@@ -53,6 +53,10 @@ def train(args):
         train_split=args.train_split,
         eval_split=args.eval_split,
     )
+    print("Train:\n", train_data)
+    print("Eval:\n", eval_data)
+    print(f"{len(train_data)} samples in Train")
+    print(f"{len(eval_data)} samples in Eval")
     train_data = train_data.select(range(min(args.max_samples, len(train_data))))
     eval_data = eval_data.select(range(min(args.max_samples, len(eval_data))))
     train_dataset = SFTDataset(
