@@ -115,8 +115,7 @@ class AgentInterface(ABC):
                 input_tokens = output.prompt_token_ids[total_tokens[real_idx]:]
                 output_tokens = output.outputs[0].token_ids
                 
-                generation_starter = output.prompt[-1]
-                generation_starter_text = self.vllm_engine.tokenizer.decode(generation_starter)
+                generation_starter_text = output.prompt[-10:]
                 if "think" in generation_starter_text.lower():
                     output_message = {"role": "assistant", "content": generation_starter_text + output.outputs[0].text}
                 else:
