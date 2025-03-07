@@ -20,6 +20,8 @@ def preprocess_data(data, input_template=None, input_key="input", output_key=Non
             print("Data\n", data)
             print("Prompt:\n", prompt_message)
             print("Response:\n", response_message)
+            if isinstance(response_message, dict):
+                response_message = [response_message]
             prompt = apply_chat_template(prompt_message, tokenize=False, add_generation_prompt=True)
             response = apply_chat_template(prompt_message + response_message, tokenize=False)[len(prompt) :]
         else:
