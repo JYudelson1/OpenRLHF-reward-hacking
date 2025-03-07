@@ -114,7 +114,13 @@ class AgentInterface(ABC):
 
                 input_tokens = output.prompt_token_ids[total_tokens[real_idx]:]
                 output_tokens = output.outputs[0].token_ids
-                output_message = {"role": "assistant", "content": output.outputs[0].text}
+                
+                generation_starter = output.prompt[-1]
+                generation_starter_text = self.vllm_engine.tokenizer.decode(generation_starter)
+                if "think" in generation_starter_text.lower():
+                    output_message = {"role": "assistant", "content": generation_starter_text + output.outputs[0].text}
+                else:
+                    output_message = {"role": "assistant", "content": output.outputs[0].text}
 
                 all_messages[real_idx].append(output_message)
                 tokens_by_turn[real_idx].append({
@@ -124,7 +130,7 @@ class AgentInterface(ABC):
                 total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
                 
                 all_output_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-                all_output_tokens_text[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].text)
+                all_output_tokens_text[real_idx] = output.outputs[0].text
                 if not all_is_done[i]:
                     new_active_indices.append(real_idx)
             
