@@ -91,6 +91,9 @@ def train(args):
             pg if args.colocate_all_models else None,
             args.vllm_gpu_memory_utilization,
             args.vllm_enable_sleep,
+            args.mongo_uri,
+            args.mongo_db_name,
+            args.mongo_collection_name,
         )
 
     actor_model = PPORayActorGroup(
@@ -381,6 +384,11 @@ if __name__ == "__main__":
         type=str,
         default="ppo_%s" % datetime.now().strftime("%m%dT%H:%M"),
     )
+    
+    # MongoDB parameters
+    parser.add_argument("--mongo_uri", type=str, default=None, help="MongoDB connection URI")
+    parser.add_argument("--mongo_db_name", type=str, default=None, help="MongoDB database name")
+    parser.add_argument("--mongo_collection_name", type=str, default=None, help="MongoDB collection name")
     
     # RL environment paramaters
     # Multiturn RL only

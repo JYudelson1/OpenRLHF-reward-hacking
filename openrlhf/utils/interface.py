@@ -29,16 +29,24 @@ class AgentInterface(ABC):
         full_data: List[dict],
         sampling_params: SamplingParams, 
         vllm_engine: vllm.LLM, 
+        mongo_uri: Optional[str] = None,
+        mongo_db_name: Optional[str] = None,
+        mongo_collection_name: Optional[str] = None,
         **kwargs
     ):
         self.num_envs = len(full_data)
         self.full_data = full_data
         self.sampling_params = sampling_params
         self.vllm_engine = vllm_engine
+        self.mongo_uri = mongo_uri
+        self.mongo_db_name = mongo_db_name
+        self.mongo_collection_name = mongo_collection_name
         
-        # Log an error message if MONGO_URI is not set
-        if not os.environ.get("MONGO_URI"):
-            logger.error("MONGO_URI is not set. Please set it to your MongoDB URI.")
+        # Check if MongoDB configuration is partially provided
+        mongo_params = [mongo_uri, mongo_db_name, mongo_collection_name]
+        if any(mongo_params) and not all(mongo_params):
+            logger.error("MongoDB configuration is incomplete. Please provide all three parameters: "
+                         "mongo_uri, mongo_db_name, and mongo_collection_name.")
         
         # As an example of full_data, for a given swe_bench task, it is a list of dicts, each with the following keys:
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
@@ -161,13 +169,13 @@ class AgentInterface(ABC):
             })
         
         # Upload results to MongoDB after all processing is complete
-        mongo_uri = os.environ.get("MONGO_URI")
-        if mongo_uri:
+        mongo_params = [self.mongo_uri, self.mongo_db_name, self.mongo_collection_name]
+        if all(mongo_params):
             try:
                 # Connect to MongoDB
-                mongo_client = MongoClient(mongo_uri)
-                mongo_db = mongo_client["reward_hacking"]
-                mongo_collection = mongo_db["trajectories_test"]
+                mongo_client = MongoClient(self.mongo_uri)
+                mongo_db = mongo_client[self.mongo_db_name]
+                mongo_collection = mongo_db[self.mongo_collection_name]
                 
                 # Upload all results
                 for i, data in enumerate(results_data):
