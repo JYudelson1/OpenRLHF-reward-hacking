@@ -73,6 +73,52 @@ class LLMRayActor:
         self.llm.wake_up()
 
     def add_requests(self, actor_rank, *, sampling_params, prompt_token_ids, multiturn=False, env_maker=None, full_data=None):
+        # """
+        # Save the requests from actors and generate responses when all actors have sent their requests
+        # """
+        # start_time = time.time()
+        # logger.info(f"Engine {id(self)} received request from actor {actor_rank}, counter={self.actor_counter}/{self.num_actors}")
+        
+        # self.requests[actor_rank] = prompt_token_ids
+        # self.full_data[actor_rank] = full_data
+        # self.actor_counter += 1
+        # if self.actor_counter == self.num_actors:
+        #     start_time = time.time()
+        #     logger.info(f"Engine {id(self)} starting generation for all actors at {start_time}")
+        #     assert len(self.requests) == self.num_actors
+        #     num_requests = []
+        #     requests = []
+            
+        #     if not multiturn:
+        #         for actor_rank, request in self.requests.items():
+        #             num_requests.append((actor_rank, len(request)))
+        #             requests.extend(request)
+        #     else:
+        #         for actor_rank, data in self.full_data.items():
+        #             num_requests.append((actor_rank, len(data)))
+        #             requests.extend(data)
+
+        #     if len(requests) > 0:
+        #         # For now we assume that all requests have the same sampling params
+        #         if not multiturn:
+        #             responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=requests)
+        #         else:
+        #             env = env_maker(full_data=requests, sampling_params=sampling_params, vllm_engine=self.llm)
+        #             responses = env.generate_many()
+        #     else:
+        #         responses = []
+                
+        #     logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")    
+
+        #     offset = 0
+        #     self.responses = {}
+        #     for actor_rank, num in num_requests:
+        #         self.responses[actor_rank] = responses[offset : offset + num]
+        #         offset += num
+
+        #     self.actor_counter = 0
+        #     self.requests = {}
+        
         """
         Process the request immediately and return the results.
         No actor counting or waiting for multiple actors - just direct processing.
