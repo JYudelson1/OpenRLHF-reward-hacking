@@ -206,13 +206,13 @@ class AgentInterface(ABC):
         pass
 
     @abstractmethod
-    def get_next_prompt(self, messages: List[Message], state: AgentState) -> Optional[Tuple[Message, AgentState]]:
+    def get_next_prompt(self, messages: List[Message], state: AgentState) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
         """Input:
         - messages: the messages in the conversation
         - state: the state of the environment
         
         Output:
-        - next_prompt: the next prompt to send to the model
+        - next_prompt: the next prompt to send to the model (can be a list of prompts)
         - next_state: the updated state of the environment
         
         Note: an output of None means that the environment is done and the agent should stop generating.
@@ -241,5 +241,5 @@ def is_done_remote(agent: AgentInterface, messages: List[Message], state: AgentS
     return agent.is_done(messages, state)
 
 @ray.remote
-def get_next_prompt_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Optional[Tuple[Message, AgentState]]:
+def get_next_prompt_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
     return agent.get_next_prompt(messages, state)
