@@ -41,6 +41,9 @@ def _validate_args(args):
         assert (
             actor_world_size % critic_world_size == 0
         ), f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
+        
+    if args.mongo_uri:
+        args.mongo_uri = args.mongo_uri.replace("%26", "&")
 
 
 def train(args):
