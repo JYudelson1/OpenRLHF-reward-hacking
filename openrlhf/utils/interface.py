@@ -94,7 +94,12 @@ class AgentInterface(ABC):
                     # active_indices.remove(idx)
                     indices_to_remove.append(idx)
                     continue
-                all_messages[idx].append(prompt)
+                if isinstance(prompt, list):
+                    all_messages[idx].extend(prompt)
+                elif isinstance(prompt, dict):  
+                    all_messages[idx].append(prompt)
+                else:
+                    raise ValueError(f"Invalid prompt type: {type(prompt)}")
                 active_conversations.append(all_messages[idx])
                 
             for idx in indices_to_remove:
