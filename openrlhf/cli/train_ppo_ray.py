@@ -41,6 +41,9 @@ def _validate_args(args):
         assert (
             actor_world_size % critic_world_size == 0
         ), f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
+        
+    if args.mongo_uri:
+        args.mongo_uri = args.mongo_uri.replace("%26", "&")
 
 
 def train(args):
@@ -91,6 +94,9 @@ def train(args):
             pg if args.colocate_all_models else None,
             args.vllm_gpu_memory_utilization,
             args.vllm_enable_sleep,
+            args.mongo_uri,
+            args.mongo_db_name,
+            args.mongo_collection_name,
         )
 
     actor_model = PPORayActorGroup(
@@ -381,6 +387,11 @@ if __name__ == "__main__":
         type=str,
         default="ppo_%s" % datetime.now().strftime("%m%dT%H:%M"),
     )
+    
+    # MongoDB parameters
+    parser.add_argument("--mongo_uri", type=str, default=None, help="MongoDB connection URI")
+    parser.add_argument("--mongo_db_name", type=str, default=None, help="MongoDB database name")
+    parser.add_argument("--mongo_collection_name", type=str, default=None, help="MongoDB collection name")
     
     # RL environment paramaters
     # Multiturn RL only

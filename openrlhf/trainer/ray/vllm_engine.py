@@ -43,6 +43,11 @@ class LLMRayActor:
         self.requests = {}
         self.responses = {}
         self.full_data = {}
+        
+        # Extract MongoDB configuration
+        self.mongo_uri = kwargs.pop("mongo_uri", None)
+        self.mongo_db_name = kwargs.pop("mongo_db_name", None)
+        self.mongo_collection_name = kwargs.pop("mongo_collection_name", None)
 
         self.llm = LLM(*args, **kwargs)
 
@@ -125,7 +130,15 @@ class LLMRayActor:
         if not multiturn:
             responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
         else:
-            env = env_maker(full_data=full_data, sampling_params=sampling_params, vllm_engine=self.llm)
+            # Pass MongoDB configuration to the environment
+            env = env_maker(
+                full_data=full_data, 
+                sampling_params=sampling_params, 
+                vllm_engine=self.llm,
+                mongo_uri=self.mongo_uri,
+                mongo_db_name=self.mongo_db_name,
+                mongo_collection_name=self.mongo_collection_name
+            )
             responses = env.generate_many()
             
         logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")
@@ -152,6 +165,9 @@ def create_vllm_engines(
     shared_pg=None,
     gpu_memory_utilization=None,
     vllm_enable_sleep=False,
+    mongo_uri=None,
+    mongo_db_name=None,
+    mongo_collection_name=None,
 ):
     import vllm
 
@@ -215,6 +231,9 @@ def create_vllm_engines(
                 gpu_memory_utilization=gpu_memory_utilization,
                 bundle_indices=bundle_indices if shared_pg else None,
                 enable_sleep_mode=vllm_enable_sleep,
+                mongo_uri=mongo_uri,
+                mongo_db_name=mongo_db_name,
+                mongo_collection_name=mongo_collection_name,
             )
         )
 

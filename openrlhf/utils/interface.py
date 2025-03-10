@@ -5,6 +5,10 @@ from vllm import SamplingParams
 from dataclasses import dataclass
 import ray
 import logging
+import os
+import pymongo
+from pymongo import MongoClient
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +29,24 @@ class AgentInterface(ABC):
         full_data: List[dict],
         sampling_params: SamplingParams, 
         vllm_engine: vllm.LLM, 
+        mongo_uri: Optional[str] = None,
+        mongo_db_name: Optional[str] = None,
+        mongo_collection_name: Optional[str] = None,
         **kwargs
     ):
         self.num_envs = len(full_data)
         self.full_data = full_data
         self.sampling_params = sampling_params
         self.vllm_engine = vllm_engine
+        self.mongo_uri = mongo_uri
+        self.mongo_db_name = mongo_db_name
+        self.mongo_collection_name = mongo_collection_name
+        
+        # Check if MongoDB configuration is partially provided
+        mongo_params = [mongo_uri, mongo_db_name, mongo_collection_name]
+        if any(mongo_params) and not all(mongo_params):
+            logger.error("MongoDB configuration is incomplete. Please provide all three parameters: "
+                         "mongo_uri, mongo_db_name, and mongo_collection_name.")
         
         # As an example of full_data, for a given swe_bench task, it is a list of dicts, each with the following keys:
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
@@ -45,6 +61,7 @@ class AgentInterface(ABC):
         total_tokens = [0 for _ in range(self.num_envs)]
         first_prompt_tokens = [None for _ in range(self.num_envs)]
         all_output_tokens = [[] for _ in range(self.num_envs)]
+        all_output_tokens_text = [[] for _ in range(self.num_envs)]
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
@@ -77,7 +94,12 @@ class AgentInterface(ABC):
                     # active_indices.remove(idx)
                     indices_to_remove.append(idx)
                     continue
-                all_messages[idx].append(prompt)
+                if isinstance(prompt, list):
+                    all_messages[idx].extend(prompt)
+                elif isinstance(prompt, dict):  
+                    all_messages[idx].append(prompt)
+                else:
+                    raise ValueError(f"Invalid prompt type: {type(prompt)}")
                 active_conversations.append(all_messages[idx])
                 
             for idx in indices_to_remove:
@@ -110,7 +132,12 @@ class AgentInterface(ABC):
 
                 input_tokens = output.prompt_token_ids[total_tokens[real_idx]:]
                 output_tokens = output.outputs[0].token_ids
-                output_message = {"role": "assistant", "content": output.outputs[0].text}
+                
+                generation_starter_text = output.prompt[-10:]
+                if "think" in generation_starter_text.lower():
+                    output_message = {"role": "assistant", "content": "<think>" + output.outputs[0].text}
+                else:
+                    output_message = {"role": "assistant", "content": output.outputs[0].text}
 
                 all_messages[real_idx].append(output_message)
                 tokens_by_turn[real_idx].append({
@@ -120,7 +147,7 @@ class AgentInterface(ABC):
                 total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
                 
                 all_output_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-    
+                all_output_tokens_text[real_idx] = output.prompt + output.outputs[0].text
                 if not all_is_done[i]:
                     new_active_indices.append(real_idx)
             
@@ -135,10 +162,41 @@ class AgentInterface(ABC):
             for idx in range(self.num_envs)
         ])
         self.vllm_engine = vllm_engine
+        
+        # Create results list
+        results_data = []
         for i, (messages, tokens_by_turn_one_env, fpt, aot) in enumerate(zip(all_messages, tokens_by_turn, first_prompt_tokens, all_output_tokens)):
             reward = all_rewards[i]
             conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn_one_env, first_prompt_tokens=fpt, all_output_tokens=aot)
             results.append((conversation, reward))
+            
+            # Prepare data for MongoDB upload
+            results_data.append({
+                "messages": messages,
+                "all_text": all_output_tokens_text[i],
+                "reward": float(reward),
+                "task_prompt": messages[0]["content"],
+            })
+        
+        # Upload results to MongoDB after all processing is complete
+        mongo_params = [self.mongo_uri, self.mongo_db_name, self.mongo_collection_name]
+        if all(mongo_params):
+            try:
+                # Connect to MongoDB
+                mongo_client = MongoClient(self.mongo_uri)
+                mongo_db = mongo_client[self.mongo_db_name]
+                mongo_collection = mongo_db[self.mongo_collection_name]
+                
+                # Upload all results
+                for i, data in enumerate(results_data):
+                    # Add timestamp at upload time
+                    data["timestamp"] = datetime.utcnow()
+                    mongo_collection.insert_one(data)
+                
+                logger.info(f"Uploaded {len(results_data)} conversations to MongoDB")
+                mongo_client.close()
+            except Exception as e:
+                logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
         
         return results
 
@@ -148,13 +206,13 @@ class AgentInterface(ABC):
         pass
 
     @abstractmethod
-    def get_next_prompt(self, messages: List[Message], state: AgentState) -> Optional[Tuple[Message, AgentState]]:
+    def get_next_prompt(self, messages: List[Message], state: AgentState) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
         """Input:
         - messages: the messages in the conversation
         - state: the state of the environment
         
         Output:
-        - next_prompt: the next prompt to send to the model
+        - next_prompt: the next prompt to send to the model (can be a list of prompts)
         - next_state: the updated state of the environment
         
         Note: an output of None means that the environment is done and the agent should stop generating.
@@ -183,5 +241,5 @@ def is_done_remote(agent: AgentInterface, messages: List[Message], state: AgentS
     return agent.is_done(messages, state)
 
 @ray.remote
-def get_next_prompt_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Optional[Tuple[Message, AgentState]]:
+def get_next_prompt_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
     return agent.get_next_prompt(messages, state)
