@@ -396,10 +396,11 @@ class NaiveExperienceMaker(ABC):
         elif args.advantage_estimator == "grpo":
             if not multi_reasoning:
                 rewards = [experience.info["reward"] for experience in experiences]
+                rewards = torch.cat(rewards)
             else:
                 rewards = [experience.info["reward"][0] for experience in experiences]
+                rewards = torch.tensor(rewards)
             
-            rewards = torch.cat(rewards)
             rewards = rewards.reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             mean_rewards = rewards.mean(-1, keepdim=True)
             std_devs = rewards.std(-1, keepdim=True)
