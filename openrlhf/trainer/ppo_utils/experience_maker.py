@@ -409,9 +409,12 @@ class NaiveExperienceMaker(ABC):
             
             if multi_reasoning:
                 # Expand out the rewards
+                print([experience.info["reward"] for experience in experiences])
+                print(grpo_advantage)
                 zero_rewards = [torch.zeros_like(experience.info["reward"]) for experience in experiences]
                 grpo_advantage = [zero_rewards[i] + grpo_advantage[i] for i in range(len(experiences))]
                 grpo_advantage = torch.cat(grpo_advantage)
+                print(grpo_advantage)
             
             return experiences, grpo_advantage
         # default rewards
