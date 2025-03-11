@@ -406,6 +406,13 @@ class NaiveExperienceMaker(ABC):
             std_devs = rewards.std(-1, keepdim=True)
             grpo_advantage = (rewards - mean_rewards) / (std_devs + 1.0e-6)
             grpo_advantage = grpo_advantage.reshape(-1).to(device="cpu").chunk(len(experiences))
+            
+            if multi_reasoning:
+                # Expand out the rewards
+                zero_rewards = [torch.zeros_like(experience.info["reward"]) for experience in experiences]
+                grpo_advantage = [zero_rewards[i] + grpo_advantage[i] for i in range(len(experiences))]
+                grpo_advantage = torch.cat(grpo_advantage)
+            
             return experiences, grpo_advantage
         # default rewards
         return experiences, [experience.info["reward"] for experience in experiences]
