@@ -157,16 +157,28 @@ class AgentInterface(ABC):
         results = []
         vllm_engine = self.vllm_engine
         self.vllm_engine = None
-        all_rewards = ray.get([
-            get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
+        
+        # First, try getting public/private reward
+        public_private_rewards: List[Optional[Tuple[Reward, Reward]]] = ray.get([
+            get_public_private_reward_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
             for idx in range(self.num_envs)
         ])
+        
+        # Then, if they're all None, get the single reward
+        if all(public_private_reward is None for public_private_reward in public_private_rewards):
+            all_rewards = ray.get([
+                get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
+                for idx in range(self.num_envs)
+            ])
         self.vllm_engine = vllm_engine
         
         # Create results list
         results_data = []
         for i, (messages, tokens_by_turn_one_env, fpt, aot) in enumerate(zip(all_messages, tokens_by_turn, first_prompt_tokens, all_tokens)):
-            reward = all_rewards[i]
+            if public_private_rewards[i] is not None:
+                reward = public_private_rewards[i][0]
+            else:
+                reward = all_rewards[i]
             conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn_one_env, first_prompt_tokens=fpt, all_tokens=aot)
             results.append((conversation, reward))
             
@@ -176,6 +188,8 @@ class AgentInterface(ABC):
                 "all_text": all_tokens_text[i],
                 "reward": float(reward),
                 "task_prompt": messages[0]["content"],
+                "public_reward": float(public_private_rewards[i][0]),
+                "private_reward": float(public_private_rewards[i][1]),
             })
         
         # Upload results to MongoDB after all processing is complete
@@ -231,10 +245,20 @@ class AgentInterface(ABC):
     @abstractmethod
     def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
         pass
+    
+    def get_public_private_reward(self, messages: List[Message], state: AgentState) -> Optional[Tuple[Reward, Reward]]:
+        """
+        Get the public and private rewards for the conversation.
+        """
+        return None
 
 @ray.remote
 def get_reward_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Reward:
     return agent.get_reward(messages, state)
+
+@ray.remote
+def get_public_private_reward_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Tuple[Reward, Reward]:
+    return agent.get_public_private_reward(messages, state)
 
 @ray.remote
 def is_done_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> bool:
