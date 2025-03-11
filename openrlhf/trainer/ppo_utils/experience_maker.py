@@ -45,7 +45,6 @@ class Experience:
     attention_mask: (B, S)
     action_mask: (B, A)
     kl: (B, A)
-
     "A" is the number of actions.
     """
 
@@ -372,10 +371,11 @@ class NaiveExperienceMaker(ABC):
             action_mask,
             info,
             kl,
+            samples.is_canonical,
         )
 
     @torch.no_grad()
-    def process_experiences(self, experiences: List[Experience]) -> Tuple[List[Experience], List[torch.Tensor]]:
+    def process_experiences(self, experiences: List[Experience], multi_reasoning: bool = False) -> Tuple[List[Experience], List[torch.Tensor]]:
         """
         Process experiences, this can be used to filter out some experiences or do some processing on the rewards.
 
@@ -393,7 +393,12 @@ class NaiveExperienceMaker(ABC):
             rewards = rewards.flatten().to(device="cpu").chunk(len(experiences))
             return experiences, rewards
         elif args.advantage_estimator == "grpo":
-            rewards = torch.cat([experience.info["reward"] for experience in experiences])
+            if not multi_reasoning:
+                rewards = [experience.info["reward"] for experience in experiences]
+            else:
+                rewards = [experience.info["reward"][0] for experience in experiences]
+            
+            rewards = torch.cat(rewards)
             rewards = rewards.reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             mean_rewards = rewards.mean(-1, keepdim=True)
             std_devs = rewards.std(-1, keepdim=True)
