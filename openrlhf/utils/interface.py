@@ -21,7 +21,7 @@ class AgentConversation:
     messages: List[Message]
     tokens_by_turn: List[Dict[str, Any]]
     first_prompt_tokens: List[int]
-    all_output_tokens: List[int]
+    all_tokens: List[int]
 
 class AgentInterface(ABC):
     def __init__(
@@ -60,8 +60,8 @@ class AgentInterface(ABC):
         tokens_by_turn = [list() for _ in range(self.num_envs)]
         total_tokens = [0 for _ in range(self.num_envs)]
         first_prompt_tokens = [None for _ in range(self.num_envs)]
-        all_output_tokens = [[] for _ in range(self.num_envs)]
-        all_output_tokens_text = [[] for _ in range(self.num_envs)]
+        all_tokens = [[] for _ in range(self.num_envs)]
+        all_tokens_text = [[] for _ in range(self.num_envs)]
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
@@ -146,8 +146,8 @@ class AgentInterface(ABC):
                 })
                 total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
                 
-                all_output_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-                all_output_tokens_text[real_idx] = output.prompt + output.outputs[0].text
+                all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
+                all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
                 if not all_is_done[i]:
                     new_active_indices.append(real_idx)
             
@@ -165,15 +165,15 @@ class AgentInterface(ABC):
         
         # Create results list
         results_data = []
-        for i, (messages, tokens_by_turn_one_env, fpt, aot) in enumerate(zip(all_messages, tokens_by_turn, first_prompt_tokens, all_output_tokens)):
+        for i, (messages, tokens_by_turn_one_env, fpt, aot) in enumerate(zip(all_messages, tokens_by_turn, first_prompt_tokens, all_tokens)):
             reward = all_rewards[i]
-            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn_one_env, first_prompt_tokens=fpt, all_output_tokens=aot)
+            conversation = AgentConversation(messages=messages, tokens_by_turn=tokens_by_turn_one_env, first_prompt_tokens=fpt, all_tokens=aot)
             results.append((conversation, reward))
             
             # Prepare data for MongoDB upload
             results_data.append({
                 "messages": messages,
-                "all_text": all_output_tokens_text[i],
+                "all_text": all_tokens_text[i],
                 "reward": float(reward),
                 "task_prompt": messages[0]["content"],
             })
