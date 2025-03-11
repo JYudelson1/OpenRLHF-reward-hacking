@@ -45,7 +45,6 @@ class Experience:
     attention_mask: (B, S)
     action_mask: (B, A)
     kl: (B, A)
-
     "A" is the number of actions.
     """
 
@@ -207,7 +206,8 @@ class NaiveExperienceMaker(ABC):
         ):
             experiences.append(self.make_experience(samples).to_device("cpu"))
 
-        experiences, rewards = self.process_experiences(experiences)
+        multi_reasoning = args.env_maker is not None
+        experiences, rewards = self.process_experiences(experiences, multi_reasoning)
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards):
@@ -372,10 +372,11 @@ class NaiveExperienceMaker(ABC):
             action_mask,
             info,
             kl,
+            samples.is_canonical,
         )
 
     @torch.no_grad()
-    def process_experiences(self, experiences: List[Experience]) -> Tuple[List[Experience], List[torch.Tensor]]:
+    def process_experiences(self, experiences: List[Experience], multi_reasoning: bool = False) -> Tuple[List[Experience], List[torch.Tensor]]:
         """
         Process experiences, this can be used to filter out some experiences or do some processing on the rewards.
 
@@ -393,12 +394,27 @@ class NaiveExperienceMaker(ABC):
             rewards = rewards.flatten().to(device="cpu").chunk(len(experiences))
             return experiences, rewards
         elif args.advantage_estimator == "grpo":
-            rewards = torch.cat([experience.info["reward"] for experience in experiences])
+            if not multi_reasoning:
+                rewards = [experience.info["reward"] for experience in experiences]
+                rewards = torch.cat(rewards)
+            else:
+                rewards = [experience.info["reward"][0] for experience in experiences]
+                rewards = torch.tensor(rewards)
+            
             rewards = rewards.reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             mean_rewards = rewards.mean(-1, keepdim=True)
             std_devs = rewards.std(-1, keepdim=True)
             grpo_advantage = (rewards - mean_rewards) / (std_devs + 1.0e-6)
             grpo_advantage = grpo_advantage.reshape(-1).to(device="cpu").chunk(len(experiences))
+            
+            if multi_reasoning:
+                # Expand out the rewards
+                print([experience.info["reward"] for experience in experiences])
+                print(grpo_advantage)
+                zero_rewards = [torch.zeros_like(experience.info["reward"]) for experience in experiences]
+                grpo_advantage = [zero_rewards[i] + grpo_advantage[i] for i in range(len(experiences))]
+                print(grpo_advantage)
+            
             return experiences, grpo_advantage
         # default rewards
         return experiences, [experience.info["reward"] for experience in experiences]
@@ -900,16 +916,40 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                     #     num_actions.append(sum(current_action_mask))  # Total response tokens
                     # action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
                     action_mask = None
-                    rewards = []
-                    for i, (conversation, reward) in enumerate(outputs):
-                        input_len = len(conversation.first_prompt_tokens)
-                        total_len = len(conversation.all_tokens)
-                        packed_seq_lens.append(total_len)
-                        sequences.extend(conversation.all_tokens)
-                        attention_mask.extend([i + 1] * total_len)
+                    for conversation, reward in outputs:
+                        sequences = []
+                        packed_seq_lens = []
+                        attention_mask = []  # For sequence identification
+                        num_actions = []
+                        rewards = []
+                        
+                        for (i, segment) in enumerate(conversation.tokens_by_turn):
+                            input_len = len(conversation.first_prompt_tokens)
+                            total_len = len(segment)
+                            packed_seq_lens.append(total_len)
+                            sequences.extend(segment)
+                            attention_mask.extend([i + 1] * total_len)
+                            num_actions.append(max(1, total_len - input_len))
+                            rewards.append(reward)
+                        
+                        sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
+                        attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
 
-                        num_actions.append(max(1, total_len - input_len))
-                        rewards.append(reward)
+                        response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
+                        total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
+                        samples_list.append(
+                            Samples(
+                                sequences=sequences,
+                                attention_mask=attention_mask,
+                                action_mask=action_mask,
+                                num_actions=num_actions,
+                                packed_seq_lens=packed_seq_lens,
+                                response_length=response_length,
+                                total_length=total_length,
+                                reward=rewards,
+                                solutions=solutions.copy() if solutions[0] is not None else None,
+                            )
+                        )
                 else:
                     # Sequence packing with single turn
                     action_mask = None
@@ -923,24 +963,24 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
                         num_actions.append(max(1, output_len))
                 
-                sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
-                attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
+                    sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
+                    attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
 
-                response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
-                total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
-                samples_list.append(
-                    Samples(
-                        sequences=sequences,
-                        attention_mask=attention_mask,
-                        action_mask=action_mask,
-                        num_actions=num_actions,
-                        packed_seq_lens=packed_seq_lens,
-                        response_length=response_length,
-                        total_length=total_length,
-                        reward=rewards,
-                        solutions=solutions.copy() if solutions[0] is not None else None,
+                    response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
+                    total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
+                    samples_list.append(
+                        Samples(
+                            sequences=sequences,
+                            attention_mask=attention_mask,
+                            action_mask=action_mask,
+                            num_actions=num_actions,
+                            packed_seq_lens=packed_seq_lens,
+                            response_length=response_length,
+                            total_length=total_length,
+                            reward=rewards,
+                            solutions=solutions.copy() if solutions[0] is not None else None,
+                        )
                     )
-                )
         return samples_list
 
     def flush(self):
