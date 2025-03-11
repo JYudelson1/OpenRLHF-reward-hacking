@@ -206,7 +206,8 @@ class NaiveExperienceMaker(ABC):
         ):
             experiences.append(self.make_experience(samples).to_device("cpu"))
 
-        experiences, rewards = self.process_experiences(experiences)
+        multi_reasoning = args.env_maker is not None
+        experiences, rewards = self.process_experiences(experiences, multi_reasoning)
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards):
