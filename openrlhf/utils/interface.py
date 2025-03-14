@@ -84,7 +84,6 @@ class AgentInterface(ABC):
             for i, idx in enumerate(active_indices):
                 result = all_prompts_and_states[i]
                 if result is None:
-                    logger.error(f"Error in get_next_prompt for environment {idx}")
                     active_indices.remove(idx)
                     continue
                     
