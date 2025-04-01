@@ -48,6 +48,8 @@ class AgentInterface(ABC):
             logger.error("MongoDB configuration is incomplete. Please provide all three parameters: "
                          "mongo_uri, mongo_db_name, and mongo_collection_name.")
         
+        logger.info(f"Starting {self.__class__.__name__} with {self.num_envs} environments")
+        
         # As an example of full_data, for a given swe_bench task, it is a list of dicts, each with the following keys:
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
     
