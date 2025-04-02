@@ -234,10 +234,6 @@ def create_vllm_engines(
                 mongo_uri=mongo_uri,
                 mongo_db_name=mongo_db_name,
                 mongo_collection_name=mongo_collection_name,
-                speculative_config={
-                    "model": "Qwen/Qwen2.5-Coder-1.5B",
-                    "num_speculative_tokens": 5,
-                }
             )
         )
 
