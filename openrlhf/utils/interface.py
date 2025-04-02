@@ -53,7 +53,7 @@ class AgentInterface(ABC):
     
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
         # Initialize states for all conversations
-        states = [self.init_state(data) for data in self.full_data]
+        states = ray.get([init_state_remote.remote(self, data) for data in self.full_data])
         all_messages = [list() for _ in range(self.num_envs)]
         active_indices = list(range(self.num_envs))
         
@@ -230,6 +230,10 @@ class AgentInterface(ABC):
     @abstractmethod
     def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
         pass
+
+@ray.remote
+def init_state_remote(agent: AgentInterface, data: dict) -> AgentState:
+    return agent.init_state(data)
 
 @ray.remote
 def get_reward_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Reward:
