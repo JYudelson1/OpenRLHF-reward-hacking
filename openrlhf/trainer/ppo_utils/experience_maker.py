@@ -801,7 +801,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 refs.append(
                     llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
                 )
-        all_outputs = ray.get(refs)
+        if vars(self.strategy.args).get("env_file", False):
+            all_outputs = sum(ray.get(refs), [])
+        else:
+            all_outputs = ray.get(refs)
 
         # Waiting for all requests to be sent
         if self.strategy.ring_attn_group is not None:
