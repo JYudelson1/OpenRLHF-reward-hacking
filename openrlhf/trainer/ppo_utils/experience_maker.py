@@ -319,7 +319,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         r_refs = []
         if pre_calc_rewards_list[0] is not None:
             print("Using environment rewards...")
-            r_refs = [ray.put(torch.tensor(pre_calc_reward)) for pre_calc_reward in pre_calc_rewards_list]
+            r_refs.append(ray.put([torch.tensor(pre_calc_reward) for pre_calc_reward in pre_calc_rewards_list]))
         elif not self.remote_rm_url:
             for rm in self.reward_model:
                 r_refs.append(
@@ -414,7 +414,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     dist.broadcast_object_list(
                         rewards, src=self.strategy.ring_attn_ranks[0], group=self.strategy.ring_attn_group
                     )
-            r = rewards[0].to(device)
+            rewards = [r.to(device) for r in rewards]
+            r = torch.stack(rewards).sum(dim=0) if len(rewards) > 0 else rewards[0]
 
             if (self.initial_model is not None) and (not args.use_kl_loss):
                 kl = compute_approx_kl(
