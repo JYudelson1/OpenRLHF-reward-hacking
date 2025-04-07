@@ -922,41 +922,16 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     #     num_actions.append(sum(current_action_mask))  # Total response tokens
                     # action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
                     action_mask = None
-                    for conversation, reward in outputs:
-                        sequences = []
-                        packed_seq_lens = []
-                        attention_mask = []  # For sequence identification
-                        num_actions = []
-                        rewards = []
-                        
-                        for (i, segment) in enumerate(conversation.tokens_by_turn):
-                            input_len = len(conversation.first_prompt_tokens)
-                            total_len = len(segment)
-                            packed_seq_lens.append(total_len)
-                            sequences.extend(segment)
-                            attention_mask.extend([i + 1] * total_len)
-                            num_actions.append(max(1, total_len - input_len))
-                            rewards.append(reward)
-                        
-                        sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
-                        attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
+                    rewards = []
+                    for i, (conversation, reward) in enumerate(outputs):
+                        input_len = len(conversation.first_prompt_tokens)
+                        total_len = len(conversation.all_tokens)
+                        packed_seq_lens.append(total_len)
+                        sequences.extend(conversation.all_tokens)
+                        attention_mask.extend([i + 1] * total_len)
 
-                        response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
-                        total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
-                        samples_list.append(
-                            Samples(
-                                sequences=sequences,
-                                attention_mask=attention_mask,
-                                action_mask=action_mask,
-                                num_actions=num_actions,
-                                packed_seq_lens=packed_seq_lens,
-                                response_length=response_length,
-                                total_length=total_length,
-                                reward=rewards,
-                                solutions=solutions.copy() if solutions[0] is not None else None,
-                                pad_len=None,
-                            )
-                        )
+                        num_actions.append(max(1, total_len - input_len))
+                        rewards.append(reward)
                 else:
                     # Sequence packing with single turn
                     action_mask = None
