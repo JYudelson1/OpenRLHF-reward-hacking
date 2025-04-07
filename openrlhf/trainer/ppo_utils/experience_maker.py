@@ -802,7 +802,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
                 )
         if vars(self.strategy.args).get("env_file", False):
-            all_outputs = sum(ray.get(refs), [])
+            outputs = ray.get(refs)
+            all_outputs = sum(outputs, [])
         else:
             all_outputs = ray.get(refs)
 
