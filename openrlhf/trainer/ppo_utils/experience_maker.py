@@ -826,7 +826,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         for i in range(0, len(all_outputs), args.micro_rollout_batch_size):
             outputs = all_outputs[i : i + args.micro_rollout_batch_size]
             solutions = all_solutions[i : i + args.micro_rollout_batch_size]
-            assert len(outputs) == len(solutions)
+            assert len(outputs) == len(solutions) or solutions[0] is None
             if not self.packing_samples:
                 # NOTE: concat all outputs to following format:
                 #
