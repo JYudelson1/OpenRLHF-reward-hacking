@@ -278,7 +278,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         attention_mask_list = [s.attention_mask for s in samples_list]
         num_actions_list = [s.num_actions for s in samples_list]
         packed_seq_lens_list = [s.packed_seq_lens for s in samples_list]
-        solutions_list = [sln for s in samples_list for sln in s.solutions]
+        solutions_list = [s.solutions for s in samples_list]
         pre_calc_rewards_list = [s.reward for s in samples_list]
 
         # Move data to CPU for remote processing
