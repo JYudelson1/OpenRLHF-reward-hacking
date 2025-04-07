@@ -266,7 +266,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         """
         Turn samples into experience by calculating logprobs, values, rewards, and kl divergence.
         """
-        assert not getattr(self, "packing_samples", False)
+        
         args = self.strategy.args
         self.actor.eval()
         device = torch.cuda.current_device()
