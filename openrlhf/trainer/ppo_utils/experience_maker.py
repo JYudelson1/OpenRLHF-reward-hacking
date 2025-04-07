@@ -224,7 +224,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if self.strategy.ring_attn_group is not None:
             # Only rank 0 in the ring attention group executes the generation function, and then broadcasts it to all other ranks.
             if self.strategy.ring_attn_rank == 0:
-                samples_list = self.generate_samples(all_prompts, all_labels, **generate_kwargs)
+                samples_list = self.generate_samples(all_prompts, **generate_kwargs)
 
                 dist.broadcast_object_list(samples_list, src=dist.get_rank(), group=self.strategy.ring_attn_group)
             else:
@@ -236,7 +236,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     samples_list, src=self.strategy.ring_attn_ranks[0], group=self.strategy.ring_attn_group
                 )
         else:
-            samples_list = self.generate_samples(all_prompts, all_labels, **generate_kwargs)
+            samples_list = self.generate_samples(all_prompts, **generate_kwargs)
 
         # vLLM offload when vllm_enable_sleep
         if self.strategy.args.vllm_enable_sleep:
@@ -279,7 +279,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         num_actions_list = [s.num_actions for s in samples_list]
         packed_seq_lens_list = [s.packed_seq_lens for s in samples_list]
         prompts_list = [p for s in samples_list for p in s.prompts]
-        labels_list = [l for s in samples_list for l in s.labels]
+        solutions_list = [sln for s in samples_list for sln in s.solutions]
 
         # Move data to CPU for remote processing
         sequences_cpu_list = [seq.to("cpu") for seq in sequences_list]
@@ -344,14 +344,16 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     queries_list.extend(queries)
 
                 if self.custom_reward_func:
-                    r = self.custom_reward_func.remote(queries_list, prompts_list, labels_list)
+                    r = self.custom_reward_func.remote(queries_list, prompts_list, solutions_list)
                 else:
                     rank = torch.distributed.get_rank() // self.strategy.ring_attn_size
                     rm = self.remote_rm_url[rank % len(self.remote_rm_url)]
-                    r = remote_rm_fn_ray.remote(rm, queries=queries_list, prompts=prompts_list, labels=labels_list)
+                    r = remote_rm_fn_ray.remote(rm, queries=queries_list, prompts=prompts_list, labels=solutions_list)
                 r_refs.append(r)
             else:
                 r_refs.append(ray.put([None] * len(samples_list)))
+
+        start_time = time.time()
 
         if args.colocate_all_models and not self.remote_rm_url:
             ray.get(r_refs)
@@ -704,13 +706,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         in which actor will be used to generate samples.
         """
         if self.vllm_engines is None:
-            return self._generate_with_hf(all_prompts, all_labels, **generate_kwargs)
+            return self._generate_with_hf(all_prompts, **generate_kwargs)
 
         # vLLM generation
-        return self._generate_vllm(all_prompts, all_labels, **generate_kwargs)
+        return self._generate_vllm(all_prompts, **generate_kwargs)
 
     @torch.no_grad()
-    def _generate_with_hf(self, all_prompts: List[str], all_labels, **generate_kwargs) -> List[Samples]:
+    def _generate_with_hf(self, all_examples: List[dict], **generate_kwargs) -> List[Samples]:
         """
         Generate samples and return in batches.
         """
@@ -718,13 +720,15 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         args = self.strategy.args
         self.actor.eval()
         # sample multiple response
+        all_prompts = [example["prompts"] for example in all_examples]
+        full_data = [example.get("full_data", None) for example in all_examples]
+        all_solutions = [example.get("solution", None) for example in all_examples]
+        
         all_prompts = sum([[prompt] * args.n_samples_per_prompt for prompt in all_prompts], [])
-        all_labels = sum([[label] * args.n_samples_per_prompt for label in all_labels], [])
+        all_solutions = sum([[solution] * args.n_samples_per_prompt for solution in all_solutions], [])
         samples_list = []
         for i in range(0, len(all_prompts), args.micro_rollout_batch_size):
             prompts = all_prompts[i : i + args.micro_rollout_batch_size]
-            labels = all_labels[i : i + args.micro_rollout_batch_size]
-            solutions = all_solutions[i : i + args.micro_rollout_batch_size]
             inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
             sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
             samples = Samples(
@@ -736,7 +740,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 response_length=action_mask.float().sum(dim=-1),
                 total_length=attention_mask.float().sum(dim=-1),
                 prompts=prompts,
-                labels=labels,
                 pad_len=None,
             )
             samples_list.append(samples)
@@ -798,7 +801,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 refs.append(
                     llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
                 )
-        ray.get(refs)
+        all_outputs = ray.get(refs)
 
         # Waiting for all requests to be sent
         if self.strategy.ring_attn_group is not None:
@@ -951,6 +954,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                                 total_length=total_length,
                                 reward=rewards,
                                 solutions=solutions.copy() if solutions[0] is not None else None,
+                                pad_len=None,
                             )
                         )
                 else:
