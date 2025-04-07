@@ -388,7 +388,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if self.remote_rm_url is not None and isinstance(rewards_list, torch.Tensor):
             rewards_list = rewards_list.chunk(len(samples_list))
             
-        print(f"{rewards_list=}")
 
         # Avoid CUDA OOM when colocate models
         if args.colocate_actor_ref or args.colocate_all_models:
@@ -406,7 +405,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             # Broadcast rewards to all ring attention ranks when using remote RM
             rewards = [rewards]
-            print(f"The rewards are {rewards}")
             if self.remote_rm_url and self.strategy.ring_attn_group is not None:
                 if self.strategy.ring_attn_rank == 0:
                     dist.broadcast_object_list(rewards, src=dist.get_rank(), group=self.strategy.ring_attn_group)
@@ -543,6 +541,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 action_mask=experience.action_mask,
                 num_actions=num_actions,
                 reward_clip_range=args.reward_clip_range,
+                sample_packing=args.get("packing_samples", False)
             )
 
             if self.advantage_estimator == "gae":
