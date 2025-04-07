@@ -977,7 +977,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             total_length=total_length,
                             reward=rewards,
                             solutions=solutions.copy() if solutions[0] is not None else None,
-                        pad_len=pad_len,
+                            pad_len=pad_len,
                         )
                     )
                 else:
@@ -997,6 +997,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             total_length=total_length,
                             reward=rewards,
                             solutions=solutions.copy() if solutions[0] is not None else None,
+                            pad_len=None
                         )
                     )
         return samples_list
