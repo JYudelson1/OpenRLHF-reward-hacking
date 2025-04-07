@@ -318,6 +318,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Batch call reward model
         r_refs = []
         if pre_calc_rewards_list[0] is not None:
+            print("Using environment rewards...")
             r_refs = [ray.put(torch.tensor(pre_calc_reward)) for pre_calc_reward in pre_calc_rewards_list]
         elif not self.remote_rm_url:
             for rm in self.reward_model:
@@ -403,6 +404,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             # Broadcast rewards to all ring attention ranks when using remote RM
             rewards = [rewards]
+            print(f"The rewards are {rewards}")
             if self.remote_rm_url and self.strategy.ring_attn_group is not None:
                 if self.strategy.ring_attn_rank == 0:
                     dist.broadcast_object_list(rewards, src=dist.get_rank(), group=self.strategy.ring_attn_group)
