@@ -279,7 +279,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         num_actions_list = [s.num_actions for s in samples_list]
         packed_seq_lens_list = [s.packed_seq_lens for s in samples_list]
         solutions_list = [sln for s in samples_list for sln in s.solutions]
-        rewards_list = [s.reward for s in samples_list]
+        pre_calc_rewards_list = [s.reward for s in samples_list]
 
         # Move data to CPU for remote processing
         sequences_cpu_list = [seq.to("cpu") for seq in sequences_list]
@@ -317,7 +317,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # Batch call reward model
         r_refs = []
-        if not self.remote_rm_url:
+        if pre_calc_rewards_list[0] is not None:
+            r_refs = [ray.put(torch.tensor(pre_calc_reward)) for pre_calc_reward in pre_calc_rewards_list]
+        elif not self.remote_rm_url:
             for rm in self.reward_model:
                 r_refs.append(
                     rm.forward_batch.remote(
@@ -355,7 +357,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         start_time = time.time()
 
-        if args.colocate_all_models and not self.remote_rm_url:
+        if args.colocate_all_models and not self.remote_rm_url and pre_calc_rewards_list[0] is None:
             ray.get(r_refs)
             ray.get([self.reward_model[0].empty_cache.remote()])
 
