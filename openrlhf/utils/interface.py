@@ -53,7 +53,11 @@ class AgentInterface(ABC):
     
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
         # Initialize states for all conversations
+        vllm_engine = self.vllm_engine
+        self.vllm_engine = None
         states = ray.get([init_state_remote.remote(self, data) for data in self.full_data])
+        self.vllm_engine = vllm_engine
+        
         all_messages = [list() for _ in range(self.num_envs)]
         active_indices = list(range(self.num_envs))
         
