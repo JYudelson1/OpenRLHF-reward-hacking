@@ -387,6 +387,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         base_action_log_probs_list, value_list, rewards_list = ref_values[0], ref_values[1], ref_values[2]
         if self.remote_rm_url is not None and isinstance(rewards_list, torch.Tensor):
             rewards_list = rewards_list.chunk(len(samples_list))
+            
+        print(f"{rewards_list=}")
 
         # Avoid CUDA OOM when colocate models
         if args.colocate_actor_ref or args.colocate_all_models:
