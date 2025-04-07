@@ -976,6 +976,25 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         pad_len=pad_len,
                         )
                     )
+                else:
+                    sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
+                    attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
+
+                    response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
+                    total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
+                    samples_list.append(
+                        Samples(
+                            sequences=sequences,
+                            attention_mask=attention_mask,
+                            action_mask=action_mask,
+                            num_actions=num_actions,
+                            packed_seq_lens=packed_seq_lens,
+                            response_length=response_length,
+                            total_length=total_length,
+                            reward=rewards,
+                            solutions=solutions.copy() if solutions[0] is not None else None,
+                        )
+                    )
         return samples_list
 
     def flush(self):
