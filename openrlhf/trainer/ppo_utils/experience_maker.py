@@ -278,8 +278,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         attention_mask_list = [s.attention_mask for s in samples_list]
         num_actions_list = [s.num_actions for s in samples_list]
         packed_seq_lens_list = [s.packed_seq_lens for s in samples_list]
-        prompts_list = [p for s in samples_list for p in s.prompts]
         solutions_list = [sln for s in samples_list for sln in s.solutions]
+        rewards_list = [s.reward for s in samples_list]
 
         # Move data to CPU for remote processing
         sequences_cpu_list = [seq.to("cpu") for seq in sequences_list]
@@ -344,11 +344,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     queries_list.extend(queries)
 
                 if self.custom_reward_func:
-                    r = self.custom_reward_func.remote(queries_list, prompts_list, solutions_list)
+                    r = self.custom_reward_func.remote(queries_list, solutions_list)
                 else:
                     rank = torch.distributed.get_rank() // self.strategy.ring_attn_size
                     rm = self.remote_rm_url[rank % len(self.remote_rm_url)]
-                    r = remote_rm_fn_ray.remote(rm, queries=queries_list, prompts=prompts_list, labels=solutions_list)
+                    r = remote_rm_fn_ray.remote(rm, queries=queries_list, labels=solutions_list)
                 r_refs.append(r)
             else:
                 r_refs.append(ray.put([None] * len(samples_list)))
