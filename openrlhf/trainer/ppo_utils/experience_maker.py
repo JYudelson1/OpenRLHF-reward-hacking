@@ -120,7 +120,8 @@ class Samples:
     response_length: torch.Tensor
     total_length: torch.Tensor
     reward: Optional[List[float]]
-    solutions: Optional[List[str]]    pad_len: Optional[int]
+    solutions: Optional[List[str]]    
+    pad_len: Optional[int]
 
     
 class BaseExperienceMaker(ABC):
