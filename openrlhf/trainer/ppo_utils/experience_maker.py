@@ -565,7 +565,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
                 experience.returns = self.get_cumulative_returns(
                     reward,
-                    experience.action_mask,
                     kwargs["gamma"],
                 )
                 experience.advantages = deepcopy(experience.returns)
@@ -657,7 +656,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         Input:
         - rewards: Tensor of shape (batch_size, response_size)
-        - action_mask: Tensor of shape (batch_size, response_size), binary mask
         - gamma: discount factor
 
         Output:
