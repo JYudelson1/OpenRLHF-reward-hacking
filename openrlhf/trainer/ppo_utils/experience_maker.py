@@ -541,7 +541,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 action_mask=experience.action_mask,
                 num_actions=num_actions,
                 reward_clip_range=args.reward_clip_range,
-                sample_packing=args.get("packing_samples", False)
+                sample_packing=args.packing_samples
             )
 
             if self.advantage_estimator == "gae":
