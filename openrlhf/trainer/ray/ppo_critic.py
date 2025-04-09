@@ -9,15 +9,18 @@ from tqdm import tqdm
 from transformers.trainer import get_scheduler
 
 from openrlhf.models import get_llm_for_sequence_regression
-from openrlhf.trainer import PPOTrainer
+from openrlhf.models.ring_attn_utils import pad_sequences, unpad_sequences
+from openrlhf.models.utils import masked_mean
+from openrlhf.trainer import BasePPOTrainer
 from openrlhf.trainer.ppo_utils import Experience
 from openrlhf.utils import get_tokenizer
 from openrlhf.utils.deepspeed import DeepspeedStrategy
+from openrlhf.utils.deepspeed.deepspeed_utils import offload_deepspeed_states, reload_deepspeed_states
 
 from .launcher import BasePPORole
 
 
-class CriticPPOTrainer(PPOTrainer):
+class CriticPPOTrainer(BasePPOTrainer):
     def ppo_train(self):
         # replay buffer may be empty at first, we should rebuild at each training
         dataloader = DataLoader(
@@ -58,7 +61,78 @@ class CriticPPOTrainer(PPOTrainer):
         return status_mean
 
     def training_step(self, experience: Experience) -> Dict[str, float]:
-        return self.training_step_critic(experience)
+        self.critic.train()
+
+        # TODO: this is a bad indicator to say that data is packed...
+        if isinstance(experience.sequences, list):
+            sequences = torch.cat(experience.sequences, dim=0).unsqueeze(0)
+            old_values = torch.cat(experience.values, dim=0).unsqueeze(0)
+            returns = torch.cat(experience.returns, dim=0).unsqueeze(0)
+            num_actions = [v.numel() for v in experience.advantages]
+            packed_seq_lens = [s.numel() for s in experience.sequences]
+            attention_mask = torch.cat(
+                [torch.full_like(s, i + 1) for i, s in enumerate(experience.sequences)], dim=0
+            ).unsqueeze(0)
+            # pad seq makes the sequence len a multiple of ring_attention_size.
+            if self.strategy.ring_attn_group is not None:
+                pad_len, sequences, attention_mask, num_actions, packed_seq_lens = pad_sequences(
+                    sequences, attention_mask, num_actions, packed_seq_lens, self.strategy.ring_attn_group
+                )
+
+        else:
+            sequences = experience.sequences
+            old_values = experience.values
+            returns = experience.returns
+            num_actions = experience.action_mask.size(1)
+            packed_seq_lens = None
+            attention_mask = experience.attention_mask
+
+        # critic loss
+        values, output = self.critic(
+            sequences,
+            num_actions=num_actions,
+            attention_mask=attention_mask,
+            return_output=True,
+            ring_attn_group=self.strategy.ring_attn_group,
+            values_allgather=True,
+            packed_seq_lens=packed_seq_lens,
+        )
+        # unpad sequence ensures that pad tokens do not contribute to the loss calculation
+        if self.strategy.ring_attn_group is not None:
+            assert pad_len is not None
+            sequences, attention_mask, num_actions, packed_seq_lens, _, values, _ = unpad_sequences(
+                pad_len=pad_len,
+                sequences=sequences,
+                attention_mask=attention_mask,
+                num_actions=num_actions,
+                packed_seq_lens=packed_seq_lens,
+                values=values,
+                ring_attn_group=self.strategy.ring_attn_group,
+            )
+
+        # loss function
+        critic_loss = self.critic_loss_fn(
+            values,
+            old_values,
+            returns,
+            action_mask=experience.action_mask,
+        )
+        # mixtral
+        if self.aux_loss:
+            aux_loss = output.aux_loss
+        else:
+            aux_loss = 0
+        loss = critic_loss + aux_loss * self.args.aux_loss_coef
+        self.strategy.backward(loss, self.critic, self.critic_optim)
+        self.strategy.optimizer_step(self.critic_optim, self.critic, self.critic_scheduler, name="critic")
+
+        # status
+        status = {
+            "critic_loss": critic_loss.item(),
+            "values": masked_mean(values, experience.action_mask).item(),
+            "critic_lr": self.critic_scheduler.get_last_lr()[0],
+        }
+        return status
 
 
 @ray.remote(num_gpus=1)
@@ -124,9 +198,11 @@ class CriticModelRayActor(BasePPORole):
             strategy.load_ckpt(self.critic, ckpt_path)
             strategy.print(f"Loaded the checkpoint: {ckpt_path}")
 
+        # initial offload
+        if strategy.args.deepspeed_enable_sleep:
+            self.offload_states()
+
         # configure Trainer
-        # only use wandb at actor model
-        strategy.args.use_wandb = False
         self.trainer = CriticPPOTrainer(
             strategy,
             actor=None,
@@ -159,7 +235,12 @@ class CriticModelRayActor(BasePPORole):
         self.critic.eval()
         with torch.no_grad():
             value = self.critic(
-                sequences.to(device), num_actions, attention_mask.to(device), packed_seq_lens=packed_seq_lens
+                sequences.to(device),
+                num_actions,
+                attention_mask.to(device),
+                ring_attn_group=self.strategy.ring_attn_group,
+                values_allgather=True,
+                packed_seq_lens=packed_seq_lens,
             )
         self.critic.train()  # reset model state
         return value.to("cpu")
@@ -178,6 +259,7 @@ class CriticModelRayActor(BasePPORole):
         return status
 
     def empty_cache(self) -> None:
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
     def save_model(self):
@@ -195,3 +277,9 @@ class CriticModelRayActor(BasePPORole):
         self.strategy.save_ckpt(
             self.critic, os.path.join(args.ckpt_path, "_critic"), tag, args.max_ckpt_num, args.max_ckpt_mem
         )
+
+    def reload_states(self):
+        reload_deepspeed_states(self.critic)
+
+    def offload_states(self):
+        offload_deepspeed_states(self.critic)
