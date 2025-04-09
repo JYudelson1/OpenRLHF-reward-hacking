@@ -1,4 +1,5 @@
 import time
+from time import perf_counter
 from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
@@ -210,6 +211,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         Then, if we need certain processing for the rewards or do certain filtering, we can process the rollout as a whole.
         After that, we will calculate the advantages and returns for each experience.
         """
+        with open("/root/batching.log", "a") as f:
+            f.write(f"time {int(perf_counter())}: RemoteExperienceMaker.make_experience_list called with {len(all_prompts)=}\n")
+
         args = self.strategy.args
 
         # vLLM wakeup when vllm_enable_sleep
@@ -221,6 +225,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             torch.cuda.synchronize()
 
         # generate responses
+        with open("/root/batching.log", "a") as f:
+            f.write(f"{self.strategy.ring_attn_group=}\n")
+
         if self.strategy.ring_attn_group is not None:
             # Only rank 0 in the ring attention group executes the generation function, and then broadcasts it to all other ranks.
             if self.strategy.ring_attn_rank == 0:
@@ -750,6 +757,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         return samples_list
 
     def _generate_vllm(self, all_examples: List[dict], **kwargs) -> List[Samples]:
+        with open("/root/batching.log", "a") as f:
+            f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm called with {len(all_examples)=}\n")
+
         from vllm import SamplingParams
         
         all_prompts = [example["prompts"] for example in all_examples]
@@ -798,18 +808,44 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             if vars(self.strategy.args).get("env_file", False):
                 datum = all_full_data[i * batch_size : (i + 1) * batch_size]
+                with open("/root/batching.log", "a") as f:
+                    f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.add_requests.remote i_llm={i} {rank=} {len(datum)=}\n")
                 refs.append(
                     llm.add_requests.remote(rank, sampling_params=sampling_params, multiturn=True, full_data=datum, env_maker=self.strategy.args.env_maker, prompt_token_ids=None)
                 )
             else:
+                with open("/root/batching.log", "a") as f:
+                    f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.add_requests.remote i_llm={i} {rank=} {len(datum)=}\n")
                 refs.append(
                     llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
                 )
+
+        ray.get(refs)
+
+        for i, llm in enumerate(llms):
+            prompt_token_ids = all_prompt_token_ids[i * batch_size : (i + 1) * batch_size]
+
+            if vars(self.strategy.args).get("env_file", False):
+                datum = all_full_data[i * batch_size : (i + 1) * batch_size]
+                with open("/root/batching.log", "a") as f:
+                    f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.get_responses.remote i_llm={i} {rank=}\n")
+                refs.append(
+                    llm.get_responses.remote(rank, sampling_params=sampling_params)
+                )
+            else:
+                with open("/root/batching.log", "a") as f:
+                    f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.get_responses.remote i_llm={i} {rank=}\n")
+                refs.append(
+                    llm.get_responses.remote(rank, sampling_params=sampling_params)
+                )
+
         if vars(self.strategy.args).get("env_file", False):
             outputs = ray.get(refs)
             all_outputs = sum(outputs, [])
         else:
             all_outputs = ray.get(refs)
+        with open("/root/batching.log", "a") as f:
+            f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: done getting llm.add_requests {rank=} {len(outputs)=}\n")
 
         # Waiting for all requests to be sent
         if self.strategy.ring_attn_group is not None:

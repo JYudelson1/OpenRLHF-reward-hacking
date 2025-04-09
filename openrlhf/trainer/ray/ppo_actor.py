@@ -1,3 +1,5 @@
+from time import perf_counter
+from hashlib import sha256
 import itertools
 import math
 import os
@@ -199,7 +201,9 @@ class ActorPPOTrainer(BasePPOTrainer):
                 disable=not self.strategy.is_rank_0(),
             )
 
-            for rand_prompts in self.prompts_dataloader:
+            for i_rand_prompts, rand_prompts in enumerate(self.prompts_dataloader):
+                with open("/root/batching.log", "a") as f:
+                    f.write(f"time {int(perf_counter())}: ActorPPOTrainer.fit: iteration {i_rand_prompts} over self.prompts_dataloader {len(rand_prompts)=} rand_prompts hash ={sha256(str(rand_prompts).encode()).hexdigest()[:4]}\n")
                 for i, experience in enumerate(
                     self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
                 ):

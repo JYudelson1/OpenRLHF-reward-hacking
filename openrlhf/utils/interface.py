@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import *
+from time import perf_counter
 import vllm
 from vllm import SamplingParams
 from dataclasses import dataclass
@@ -52,15 +53,26 @@ class AgentInterface(ABC):
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
     
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
+        everything_start_time = perf_counter()
+
         # Initialize states for all conversations
         vllm_engine = self.vllm_engine
         self.vllm_engine = None
+
+        init_start_time = perf_counter()
         states = ray.get([init_state_remote.remote(self, data) for data in self.full_data])
+        init_end_time = perf_counter()
+        time_intitializing_states = init_end_time - init_start_time
+
         self.vllm_engine = vllm_engine
         
         all_messages = [list() for _ in range(self.num_envs)]
         active_indices = list(range(self.num_envs))
         
+        times_generating_completions = []
+        times_doing_environment_steps = []
+        times_evaluating_is_done = []
+
         tokens_by_turn = [list() for _ in range(self.num_envs)]
         total_tokens = [0 for _ in range(self.num_envs)]
         first_prompt_tokens = [None for _ in range(self.num_envs)]
@@ -73,10 +85,15 @@ class AgentInterface(ABC):
                 # Temporarily remove vllm engine before sending through Ray
                 vllm_engine = self.vllm_engine
                 self.vllm_engine = None
+                
+                step_start_time = perf_counter()
                 all_prompts_and_states = ray.get([
                     get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
                     for idx in active_indices
                 ])
+                step_end_time = perf_counter()
+                times_doing_environment_steps.append(step_end_time - step_start_time)
+
                 self.vllm_engine = vllm_engine
             except Exception as e:
                 self.vllm_engine = vllm_engine  # Restore in case of error
@@ -114,18 +131,27 @@ class AgentInterface(ABC):
 
             # Batch generate responses
             # TODO: Maybe use their tool API instead of handrolling?
+            completion_start_time = perf_counter()
             outputs = self.vllm_engine.chat(
                 messages=active_conversations,
                 sampling_params=self.sampling_params
             )
+            completion_end_time = perf_counter()
+            times_generating_completions.append(completion_end_time - completion_start_time)
             
             # Process outputs and update states
             vllm_engine = self.vllm_engine
             self.vllm_engine = None
+
+            is_done_start_time = perf_counter()
             all_is_done = ray.get([
                 is_done_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
                 for idx in active_indices
             ])
+            is_done_end_time = perf_counter()
+            times_evaluating_is_done.append(is_done_end_time - is_done_start_time)
+
+
             self.vllm_engine = vllm_engine
             new_active_indices = []
             for i, output in enumerate(outputs):
@@ -160,10 +186,16 @@ class AgentInterface(ABC):
         results = []
         vllm_engine = self.vllm_engine
         self.vllm_engine = None
+
+        reward_start_time = perf_counter()
         all_rewards = ray.get([
             get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx]) 
             for idx in range(self.num_envs)
         ])
+        reward_end_time = perf_counter()
+        time_computing_reward = reward_end_time - reward_start_time
+
+
         self.vllm_engine = vllm_engine
         
         # Create results list
@@ -201,6 +233,19 @@ class AgentInterface(ABC):
             except Exception as e:
                 logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
         
+        everything_end_time = perf_counter()
+        total_time = everything_end_time - everything_start_time
+
+        with open("/root/rollout.log", "a") as f:
+            f.write(f"Rollout completed in {int(total_time)} seconds. Breakdown of time spent:\n")
+            f.write(f"Generating completions with vllm: {int(sum(times_generating_completions))} seconds ({sum(times_generating_completions) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_generating_completions)})\n")
+            f.write(f"Initializing environments: {int(time_intitializing_states)} seconds ({time_intitializing_states / total_time:.0%})\n")
+            f.write(f"Doing environment steps: {int(sum(times_doing_environment_steps))} seconds ({sum(times_doing_environment_steps) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_doing_environment_steps)})\n")
+            f.write(f"Evaluating whether environments are done: {int(sum(times_evaluating_is_done))} seconds ({sum(times_evaluating_is_done) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_evaluating_is_done)})\n")
+            f.write(f"Computing rewards: {int(time_computing_reward)} ({time_computing_reward / total_time:.0%})\n")
+            unaccounted_for_time = total_time - sum(times_generating_completions) - time_intitializing_states - sum(times_doing_environment_steps) - sum(times_evaluating_is_done) - time_computing_reward
+            f.write(f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / total_time:.0%})\n")
+
         return results
 
     @abstractmethod

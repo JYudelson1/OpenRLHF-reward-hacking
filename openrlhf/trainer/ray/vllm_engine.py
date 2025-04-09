@@ -1,5 +1,7 @@
 import os
+from hashlib import sha256
 import time
+from time import perf_counter
 import queue
 from collections import defaultdict
 from typing import Any, List
@@ -16,6 +18,10 @@ from .utils import ray_noset_visible_devices
 from openrlhf.rl_envs import SweBenchEnv, DummyEnv
 
 logger = init_logger(__name__)
+
+
+def chunked(xs, batch_size):
+    return [xs[i:i+batch_size] for i in range(0, len(xs), batch_size)]
 
 
 @ray.remote
@@ -69,6 +75,8 @@ class LLMRayActor:
             os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
         self.llm = vllm.LLM(*args, **kwargs)
+
+        self.all_full_data = []
 
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray):
         return self.llm.collective_rpc(
@@ -142,6 +150,21 @@ class LLMRayActor:
         Process the request immediately and return the results.
         No actor counting or waiting for multiple actors - just direct processing.
         """
+
+        with open("/root/vllm-engine.log", "a")  as f:
+            f.write(f"time {int(perf_counter())}: LLMRayActor.add_request called {actor_rank=} {self=} {id(self)=} {self.llm=} {type(prompt_token_ids)=} {type(full_data)=} {len(full_data)=} full_data hash = {sha256(str(full_data).encode()).hexdigest()[:4]}")
+
+        assert multiturn
+        assert prompt_token_ids is None
+        
+        while len(self.all_full_data) <= actor_rank:
+            self.all_full_data.append(None)
+        
+        self.all_full_data[actor_rank] = full_data
+        self.all_responses = None
+
+        return
+
         start_time = time.time()
         logger.info(f"Engine {id(self)} processing request from actor {actor_rank}")
 
@@ -165,11 +188,28 @@ class LLMRayActor:
         # Return the responses directly
         return responses
 
-    def get_responses(self, actor_rank):
+    def get_responses(self, actor_rank, sampling_params):
         """
         Return the responses for the actor with the given rank
         """
-        return self.responses.pop(actor_rank)
+
+        f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses called {actor_rank=} {self=} {id(self)=} {self.llm=}")
+
+        if self.all_responses is None:
+            env = env_maker(
+                full_data=sum(self.all_full_data, []),
+                sampling_params=sampling_params, 
+                vllm_engine=self.llm,
+                mongo_uri=self.mongo_uri,
+                mongo_db_name=self.mongo_db_name,
+                mongo_collection_name=self.mongo_collection_name
+            )
+            responses = env.generate_many()
+            self.all_responses = list(chunked(responses, len(self.all_full_data)))
+
+        return self.all_responses[actor_rank]
+
+        # return self.responses.pop(actor_rank)
 
 
 def create_vllm_engines(
