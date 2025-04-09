@@ -823,14 +823,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         ray.get(refs)
 
         for i, llm in enumerate(llms):
-            prompt_token_ids = all_prompt_token_ids[i * batch_size : (i + 1) * batch_size]
-
             if vars(self.strategy.args).get("env_file", False):
-                datum = all_full_data[i * batch_size : (i + 1) * batch_size]
                 with open("/root/batching.log", "a") as f:
                     f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.get_responses.remote i_llm={i} {rank=}\n")
                 refs.append(
-                    llm.get_responses.remote(rank, sampling_params=sampling_params)
+                    llm.get_responses.remote(rank, sampling_params=sampling_params, env_maker=self.strategy.args.env_maker)
                 )
             else:
                 with open("/root/batching.log", "a") as f:

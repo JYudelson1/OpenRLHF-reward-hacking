@@ -152,7 +152,7 @@ class LLMRayActor:
         """
 
         with open("/root/vllm-engine.log", "a")  as f:
-            f.write(f"time {int(perf_counter())}: LLMRayActor.add_request called {actor_rank=} {self=} {id(self)=} {self.llm=} {type(prompt_token_ids)=} {type(full_data)=} {len(full_data)=} full_data hash = {sha256(str(full_data).encode()).hexdigest()[:4]}")
+            f.write(f"time {int(perf_counter())}: LLMRayActor.add_request called {actor_rank=} {self=} {id(self)=} {self.llm=} {type(prompt_token_ids)=} {type(full_data)=} {len(full_data)=} full_data hash = {sha256(str(full_data).encode()).hexdigest()[:4]} {env_maker=}\n")
 
         assert multiturn
         assert prompt_token_ids is None
@@ -188,13 +188,13 @@ class LLMRayActor:
         # Return the responses directly
         return responses
 
-    def get_responses(self, actor_rank, sampling_params):
+    def get_responses(self, actor_rank, sampling_params, env_maker=None):
         """
         Return the responses for the actor with the given rank
         """
 
         with open("/root/vllm-engine.log", "a") as f:
-            f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses called {actor_rank=} {self=} {id(self)=} {self.llm=}")
+            f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses called {actor_rank=} {self=} {id(self)=} {self.llm=} {env_maker=}\n")
 
         if self.all_responses is None:
             env = env_maker(
