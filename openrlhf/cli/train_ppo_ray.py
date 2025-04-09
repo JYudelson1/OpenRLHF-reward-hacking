@@ -69,7 +69,7 @@ def train(args):
                 and args.actor_num_gpus_per_node == args.ref_num_gpus_per_node
             ), f"num_nodes and num_gpus_per_node must be the same when colocate actor and ref model."
 
-        bundles = [{"GPU": 1, "CPU": 8} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)]
+        bundles = [{"GPU": 1, "CPU": 4} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
