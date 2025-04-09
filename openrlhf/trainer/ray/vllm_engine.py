@@ -163,6 +163,9 @@ class LLMRayActor:
         self.all_full_data[actor_rank] = full_data
         self.all_responses = None
 
+        with open("/root/vllm-engine.log", "a")  as f:
+            f.write(f"time {int(perf_counter())}: LLMRayActor.add_request finished {actor_rank=}")
+        
         return
 
         start_time = time.time()
