@@ -193,7 +193,8 @@ class LLMRayActor:
         Return the responses for the actor with the given rank
         """
 
-        f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses called {actor_rank=} {self=} {id(self)=} {self.llm=}")
+        with open("/root/vllm-engine.log", "a") as f:
+            f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses called {actor_rank=} {self=} {id(self)=} {self.llm=}")
 
         if self.all_responses is None:
             env = env_maker(
