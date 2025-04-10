@@ -841,7 +841,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if vars(self.strategy.args).get("env_file", False):
             outputs = ray.get(refs)
             with open("vllm-engine.log", "a") as f:
-                f.write(f"RemoteExperienceMaker._generate_vllm: outputs = {type(outputs)} = {', '.join(f'{type(o)}' for o in all_outputs)}")
+                f.write(f"RemoteExperienceMaker._generate_vllm: outputs = {type(outputs)} = {', '.join(f'{type(o)}' for o in outputs)}")
             all_outputs = sum(outputs, [])
         else:
             all_outputs = ray.get(refs)
