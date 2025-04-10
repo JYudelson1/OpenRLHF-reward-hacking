@@ -209,8 +209,12 @@ class LLMRayActor:
                 mongo_collection_name=self.mongo_collection_name
             )
             responses = env.generate_many()
-            self.all_responses = list(chunked(responses, len(self.all_full_data)))
+            self.all_responses = list(chunked(responses, len(self.all_full_data[0])))
+            with open("/root/vllm-engine.log", "a") as f:
+                f.write(f"LLMRayActor.get_responses: {actor_rank=} set LLMRayActor.all_responses to {type(self.all_responses)} = [{', '.join(f'{type(r)}' for r in self.all_responses)}]\n")
 
+        with open("/root/vllm-engine.log", "a") as f:
+            f.write(f"LLMRayActor.get_responses: returning {actor_rank}th item of LLMRayActor.all_responses = {type(self.all_responses)} = [{', '.join(f'{type(r)}' for r in self.all_responses)}]\n")
         return self.all_responses[actor_rank]
 
         # return self.responses.pop(actor_rank)
