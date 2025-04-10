@@ -19,6 +19,8 @@ Message = Dict[str, str]
 Reward = float
 AgentState = Any  # State needed to track conversation progress
 
+f
+
 
 @dataclass
 class DelayedFunction:
@@ -353,11 +355,13 @@ class AgentInterface(ABC):
 
     def run_environment_calls_in_parallel(self, calls: Iterable[DelayedFunction]) -> list[Any]:
         if self.environment_parallelism == "ray":
-            return ray.get([call.remote_function.remote(**call.kwargs) for call in calls])
+            return ray.get([call.remote_function.remote(*call.args, **call.kwargs) for call in calls])
 
         if self.environment_parallelism == "threading":
             with ThreadPoolExecutor() as executor:
-                futures = [executor.submit(lambda call: call.function(**call.kwargs), call) for call in calls]
+                futures = [
+                    executor.submit(lambda call: call.function(*call.args, **call.kwargs), call) for call in calls
+                ]
                 results = []
                 for future in futures:
                     results.append(future.result())
