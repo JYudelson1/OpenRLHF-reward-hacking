@@ -141,6 +141,8 @@ class LLMRayActor:
 
         self.env_data_for_rollout = [None] * len(self.env_data_for_rollout)
 
+        return self.rollouts[rank]
+
     def get_responses(self, actor_rank):
         """
         Return the responses for the actor with the given rank

@@ -268,22 +268,22 @@ class AgentInterface(ABC):
                 logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
 
         everything_end_time = perf_counter()
-        total_time = everything_start_time - everything_end_time
+        total_time = everything_end_time - everything_start_time
 
-        logger.info(f"Rollout completed in {int(total_time)} seconds. Breakdown of time spent:\n")
+        logger.info(f"Rollout completed in {int(total_time)} seconds. Breakdown of time spent:")
         logger.info(
-            f"Generating completions with vllm: {int(sum(times_generating_completions))} seconds ({sum(times_generating_completions) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_generating_completions)})\n"
+            f"Generating completions with vllm: {int(sum(times_generating_completions))} seconds ({sum(times_generating_completions) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_generating_completions)})"
         )
         logger.info(
-            f"Initializing environments: {int(time_initializing_environments)} seconds ({time_initializing_environments / total_time:.0%})\n"
+            f"Initializing environments: {int(time_initializing_environments)} seconds ({time_initializing_environments / total_time:.0%})"
         )
         logger.info(
-            f"Doing environment steps: {int(sum(times_doing_environment_steps))} seconds ({sum(times_doing_environment_steps) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_doing_environment_steps)})\n"
+            f"Doing environment steps: {int(sum(times_doing_environment_steps))} seconds ({sum(times_doing_environment_steps) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_doing_environment_steps)})"
         )
         logger.info(
-            f"Evaluating whether environments are done: {int(sum(times_evaluating_is_done))} seconds ({sum(times_evaluating_is_done) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_evaluating_is_done)})\n"
+            f"Evaluating whether environments are done: {int(sum(times_evaluating_is_done))} seconds ({sum(times_evaluating_is_done) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_evaluating_is_done)})"
         )
-        logger.info(f"Computing rewards: {int(time_computing_rewards)} ({time_computing_rewards / total_time:.0%})\n")
+        logger.info(f"Computing rewards: {int(time_computing_rewards)} ({time_computing_rewards / total_time:.0%})")
         unaccounted_for_time = (
             total_time
             - sum(times_generating_completions)
@@ -293,7 +293,7 @@ class AgentInterface(ABC):
             - time_computing_rewards
         )
         logger.info(
-            f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / total_time:.0%})\n"
+            f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / total_time:.0%})"
         )
 
         return results
