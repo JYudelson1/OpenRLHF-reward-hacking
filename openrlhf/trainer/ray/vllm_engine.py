@@ -116,7 +116,7 @@ class LLMRayActor:
         if self.rollouts is not None:
             return self.rollouts[rank]
 
-        assert hasattr(self, "data_remembered_for_rollout"), (
+        assert hasattr(self, "env_data_for_rollout"), (
             "You must call LLMRayActor.reset_rollout_cache before calling LLMRayActor.generate_env_rollout"
         )
         assert all(data_for_rank is not None for data_for_rank in self.env_data_for_rollout), (
