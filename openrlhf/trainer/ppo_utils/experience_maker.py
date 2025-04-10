@@ -822,6 +822,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         ray.get(refs)
 
+        refs = []
+        
         for i, llm in enumerate(llms):
             if vars(self.strategy.args).get("env_file", False):
                 with open("/root/batching.log", "a") as f:
