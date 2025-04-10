@@ -19,8 +19,6 @@ Message = Dict[str, str]
 Reward = float
 AgentState = Any  # State needed to track conversation progress
 
-f
-
 
 @dataclass
 class DelayedFunction:
