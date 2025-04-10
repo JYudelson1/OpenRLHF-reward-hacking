@@ -211,7 +211,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         Then, if we need certain processing for the rewards or do certain filtering, we can process the rollout as a whole.
         After that, we will calculate the advantages and returns for each experience.
         """
-        with open("/root/batching.log", "a") as f:
+        with open("logs/batching.log", "a") as f:
             f.write(f"time {int(perf_counter())}: RemoteExperienceMaker.make_experience_list called with {len(all_prompts)=}\n")
 
         args = self.strategy.args
@@ -225,7 +225,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             torch.cuda.synchronize()
 
         # generate responses
-        with open("/root/batching.log", "a") as f:
+        with open("logs/batching.log", "a") as f:
             f.write(f"{self.strategy.ring_attn_group=}\n")
 
         if self.strategy.ring_attn_group is not None:
@@ -757,7 +757,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         return samples_list
 
     def _generate_vllm(self, all_examples: List[dict], **kwargs) -> List[Samples]:
-        with open("/root/batching.log", "a") as f:
+        with open("logs/batching.log", "a") as f:
             f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm called with {len(all_examples)=}\n")
 
         from vllm import SamplingParams
@@ -808,13 +808,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             if vars(self.strategy.args).get("env_file", False):
                 datum = all_full_data[i * batch_size : (i + 1) * batch_size]
-                with open("/root/batching.log", "a") as f:
+                with open("logs/batching.log", "a") as f:
                     f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.add_requests.remote i_llm={i} {rank=} {len(datum)=}\n")
                 refs.append(
                     llm.add_requests.remote(rank, sampling_params=sampling_params, multiturn=True, full_data=datum, env_maker=self.strategy.args.env_maker, prompt_token_ids=None)
                 )
             else:
-                with open("/root/batching.log", "a") as f:
+                with open("logs/batching.log", "a") as f:
                     f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.add_requests.remote i_llm={i} {rank=} {len(datum)=}\n")
                 refs.append(
                     llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
@@ -828,13 +828,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         
         for i, llm in enumerate(llms):
             if vars(self.strategy.args).get("env_file", False):
-                with open("/root/batching.log", "a") as f:
+                with open("logs/batching.log", "a") as f:
                     f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.get_responses.remote i_llm={i} {rank=}\n")
                 refs.append(
                     llm.get_responses.remote(rank, sampling_params=sampling_params, env_maker=self.strategy.args.env_maker)
                 )
             else:
-                with open("/root/batching.log", "a") as f:
+                with open("logs/batching.log", "a") as f:
                     f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: calling llm.get_responses.remote i_llm={i} {rank=}\n")
                 refs.append(
                     llm.get_responses.remote(rank, sampling_params=sampling_params)
@@ -847,7 +847,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             all_outputs = sum(outputs, [])
         else:
             all_outputs = ray.get(refs)
-        with open("/root/batching.log", "a") as f:
+        with open("logs/batching.log", "a") as f:
             f.write(f"time {int(perf_counter())}: RemoteExperienceMaker._generate_vllm: done getting llm.add_requests {rank=} {len(outputs)=}\n")
 
         # Waiting for all requests to be sent

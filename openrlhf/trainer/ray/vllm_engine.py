@@ -151,7 +151,7 @@ class LLMRayActor:
         No actor counting or waiting for multiple actors - just direct processing.
         """
 
-        with open("/root/vllm-engine.log", "a")  as f:
+        with open("logs/vllm-engine.log", "a")  as f:
             f.write(f"time {int(perf_counter())}: LLMRayActor.add_request called {actor_rank=} {self=} {id(self)=} {self.llm=} {type(prompt_token_ids)=} {type(full_data)=} {len(full_data)=} full_data hash = {sha256(str(full_data).encode()).hexdigest()[:4]} {env_maker=}\n")
 
         assert multiturn
@@ -165,7 +165,7 @@ class LLMRayActor:
         self.all_full_data[actor_rank] = full_data
         self.all_responses = None
 
-        with open("/root/vllm-engine.log", "a")  as f:
+        with open("logs/vllm-engine.log", "a")  as f:
             f.write(f"time {int(perf_counter())}: LLMRayActor.add_request finished {actor_rank=}\n")
         
         return
@@ -198,15 +198,15 @@ class LLMRayActor:
         Return the responses for the actor with the given rank
         """
         
-        with open("/root/vllm-engine.log", "a") as f:
+        with open("logs/vllm-engine.log", "a") as f:
             f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses called {actor_rank=} {self=} {id(self)=} {self.llm=} {env_maker=}\n")
 
         if self.all_responses is None:
-            with open("/root/vllm-engine.log", "a") as f:
+            with open("logs/vllm-engine.log", "a") as f:
                 f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses starting waiting {actor_rank=} {self=} {id(self)=} {self.llm=} {env_maker=}\n")
             while len(self.all_full_data) < 8 or any(d is None for d in self.all_full_data):
                 time.sleep(0.1)
-            with open("/root/vllm-engine.log", "a") as f:
+            with open("logs/vllm-engine.log", "a") as f:
                 f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses finished waiting {actor_rank=} {self=} {id(self)=} {self.llm=} {env_maker=}\n")
             
             env = env_maker(
@@ -219,12 +219,12 @@ class LLMRayActor:
             )
             responses = env.generate_many()
             self.all_responses = list(chunked(responses, len(self.all_full_data[0])))
-            with open("/root/vllm-engine.log", "a") as f:
+            with open("logs/vllm-engine.log", "a") as f:
                 f.write(f"LLMRayActor.get_responses: {actor_rank=} set LLMRayActor.all_responses to {type(self.all_responses)} = [{', '.join(f'{type(r)}' for r in self.all_responses)}]\n")
 
             self.all_full_data = []
 
-        with open("/root/vllm-engine.log", "a") as f:
+        with open("logs/vllm-engine.log", "a") as f:
             f.write(f"LLMRayActor.get_responses: returning {actor_rank}th item {type(self.all_responses[actor_rank])} = {', '.join(f'{type(r)}' for r in self.all_responses[actor_rank])} of LLMRayActor.all_responses = {type(self.all_responses)} = [{', '.join(f'{type(r)}' for r in self.all_responses)}]\n")
         return self.all_responses[actor_rank]
 

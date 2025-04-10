@@ -236,7 +236,7 @@ class AgentInterface(ABC):
         everything_end_time = perf_counter()
         total_time = everything_end_time - everything_start_time
 
-        with open("/root/rollout.log", "a") as f:
+        with open("logs/rollout.log", "a") as f:
             f.write(f"Rollout completed in {int(total_time)} seconds. Breakdown of time spent:\n")
             f.write(f"Generating completions with vllm: {int(sum(times_generating_completions))} seconds ({sum(times_generating_completions) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_generating_completions)})\n")
             f.write(f"Initializing environments: {int(time_intitializing_states)} seconds ({time_intitializing_states / total_time:.0%})\n")
