@@ -343,7 +343,7 @@ class AgentInterface(ABC):
                 ]
                 results = []
                 for future in futures:
-                    results.append(future.result)
+                    results.append(future.result())
             return results
 
         raise ValueError(
