@@ -995,14 +995,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
 
         if has_environment:
-            ray.get([llm.reset_data_remembered_for_env_maker.remote(world_size=world_size) for llm in llms])
+            ray.get([llm.reset_rollout_cache.remote(world_size=world_size) for llm in llms])
 
             torch.distributed.barrier()
             torch.cuda.synchronize()
 
             ray.get(
                 [
-                    llm.remember_data_for_rollout_with_env_maker.remote(
+                    llm.remember_env_data_for_rollout.remote(
                         rank=rank, data_for_rank=all_full_data[i_llm * batch_size : (i_llm + 1) * batch_size]
                     )
                     for i_llm, llm in enumerate(llms)
@@ -1014,7 +1014,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             outputs = ray.get(
                 [
-                    llm.rollout_with_env_maker.remote(
+                    llm.generate_env_rollout.remote(
                         rank=rank, sampling_params=sampling_params, env_maker=self.strategy.args.env_maker
                     )
                     for llm in llms
