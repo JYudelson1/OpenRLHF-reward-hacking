@@ -822,6 +822,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         ray.get(refs)
 
+        time.sleep(1)
+
         refs = []
         
         for i, llm in enumerate(llms):
