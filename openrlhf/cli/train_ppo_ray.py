@@ -69,7 +69,13 @@ def train(args):
                 and args.actor_num_gpus_per_node == args.ref_num_gpus_per_node
             ), f"num_nodes and num_gpus_per_node must be the same when colocate actor and ref model."
 
-        bundles = [{"GPU": 1, "CPU": 4} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)]
+        optimal_cpu_amt = args.rollout_batch_size * args.n_samples_per_prompt
+        if args.max_cpus > 0:
+            optimal_cpu_amt = min(optimal_cpu_amt, args.max_cpus)
+        
+        cpu_per_actor = optimal_cpu_amt / (args.actor_num_nodes * args.actor_num_gpus_per_node)
+
+        bundles = [{"GPU": 1, "CPU": cpu_per_actor} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
@@ -447,6 +453,9 @@ if __name__ == "__main__":
 
     # ModelScope parameters
     parser.add_argument("--use_ms", action="store_true", default=False)
+    
+    # Cpus for multiple environments running
+    parser.add_argument("--max_cpus", type=int, default=-1, help="Maximum number of CPUs to use for multiple environments running")
 
     args = parser.parse_args()
 
