@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 from typing import *
+import ray.remote_function
 import vllm
 from vllm import SamplingParams
 import ray
@@ -21,12 +22,12 @@ AgentState = Any  # State needed to track conversation progress
 
 class DelayedFunction:
     function: Callable
-    args: tuple[Any, ...]
+    remote_function: ray.remote_function.RemoteFunction
     kwargs: dict[str, Any]
 
-    def __init__(self, function: Callable, *args, **kwargs):
+    def __init__(self, function: Callable, remote_function: ray.remote_function.RemoteFunction, **kwargs):
         self.function = function
-        self.args = args
+        self.remote_function = remote_function
         self.kwargs = kwargs
 
 
@@ -84,7 +85,10 @@ class AgentInterface(ABC):
         init_env_start_time = perf_counter()
         # states = ray.get([init_state_remote.remote(self, data) for data in self.full_data])
         states = self.run_environment_calls_in_parallel(
-            DelayedFunction(init_state_remote, self, data) for data in self.full_data
+            DelayedFunction(
+                function=self.__class__.init_state, remote_function=init_state_remote, agent=self, data=data
+            )
+            for data in self.full_data
         )
         init_env_end_time = perf_counter()
         time_initializing_environments = init_env_end_time - init_env_start_time
@@ -115,7 +119,13 @@ class AgentInterface(ABC):
                 #     ]
                 # )
                 all_prompts_and_states = self.run_environment_calls_in_parallel(
-                    DelayedFunction(get_next_prompt_remote, self, messages=all_messages[idx], state=states[idx])
+                    DelayedFunction(
+                        function=self.__class__.get_next_prompt,
+                        remote_function=get_next_prompt_remote,
+                        agent=self,
+                        messages=all_messages[idx],
+                        state=states[idx],
+                    )
                     for idx in active_indices
                 )
                 env_step_end_time = perf_counter()
@@ -172,7 +182,13 @@ class AgentInterface(ABC):
             #     [is_done_remote.remote(self, messages=all_messages[idx], state=states[idx]) for idx in active_indices]
             # )
             all_is_done = self.run_environment_calls_in_parallel(
-                DelayedFunction(is_done_remote, self, messages=all_messages[idx], state=states[idx])
+                DelayedFunction(
+                    function=self.__class__.is_done,
+                    remote_function=is_done_remote,
+                    agent=self,
+                    messages=all_messages[idx],
+                    state=states[idx],
+                )
                 for idx in active_indices
             )
             is_done_end_time = perf_counter()
@@ -218,7 +234,13 @@ class AgentInterface(ABC):
         #     ]
         # )
         all_rewards = self.run_environment_calls_in_parallel(
-            DelayedFunction(get_reward_remote, self, messages=all_messages[idx], state=states[idx])
+            DelayedFunction(
+                function=self.__class__.get_reward,
+                remote_function=get_reward_remote,
+                agent=self,
+                messages=all_messages[idx],
+                state=states[idx],
+            )
             for idx in range(self.num_envs)
         )
         rewards_end_time = perf_counter()
@@ -334,13 +356,11 @@ class AgentInterface(ABC):
 
     def run_environment_calls_in_parallel(self, calls: Iterable[DelayedFunction]) -> list[Any]:
         if self.environment_parallelism == "ray":
-            return ray.get([call.function.remote(*call.args, **call.kwargs) for call in calls])
+            return ray.get([call.remote_function.remote(**call.kwargs) for call in calls])
 
         if self.environment_parallelism == "threading":
             with ThreadPoolExecutor() as executor:
-                futures = [
-                    executor.submit(lambda call: call.function(*call.args, **call.kwargs), call) for call in calls
-                ]
+                futures = [executor.submit(lambda call: call.function(**call.kwargs), call) for call in calls]
                 results = []
                 for future in futures:
                     results.append(future.result())
