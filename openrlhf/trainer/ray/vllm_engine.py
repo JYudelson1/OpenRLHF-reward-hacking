@@ -205,7 +205,7 @@ class LLMRayActor:
             with open("/root/vllm-engine.log", "a") as f:
                 f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses starting waiting {actor_rank=} {self=} {id(self)=} {self.llm=} {env_maker=}\n")
             while len(self.all_full_data) < 8 or any(d is None for d in self.all_full_data):
-                sleep(0.1)
+                time.sleep(0.1)
             with open("/root/vllm-engine.log", "a") as f:
                 f.write(f"time {int(perf_counter())}: LLMRayActor.get_responses finished waiting {actor_rank=} {self=} {id(self)=} {self.llm=} {env_maker=}\n")
             
