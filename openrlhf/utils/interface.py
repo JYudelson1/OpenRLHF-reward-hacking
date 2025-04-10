@@ -47,7 +47,7 @@ class AgentInterface(ABC):
         mongo_uri: Optional[str] = None,
         mongo_db_name: Optional[str] = None,
         mongo_collection_name: Optional[str] = None,
-        environment_parallelism: Literal["ray", "threading"] = "ray",
+        environment_parallelism: Literal["ray", "threading"] = "threading",
         **kwargs,
     ):
         self.num_envs = len(full_data)
