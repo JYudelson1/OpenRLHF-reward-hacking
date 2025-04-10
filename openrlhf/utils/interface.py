@@ -20,15 +20,12 @@ Reward = float
 AgentState = Any  # State needed to track conversation progress
 
 
+@dataclass
 class DelayedFunction:
     function: Callable
     remote_function: ray.remote_function.RemoteFunction
+    args: Iterable[Any]
     kwargs: dict[str, Any]
-
-    def __init__(self, function: Callable, remote_function: ray.remote_function.RemoteFunction, **kwargs):
-        self.function = function
-        self.remote_function = remote_function
-        self.kwargs = kwargs
 
 
 @dataclass
@@ -86,7 +83,10 @@ class AgentInterface(ABC):
         # states = ray.get([init_state_remote.remote(self, data) for data in self.full_data])
         states = self.run_environment_calls_in_parallel(
             DelayedFunction(
-                function=self.__class__.init_state, remote_function=init_state_remote, agent=self, data=data
+                function=self.__class__.init_state,
+                remote_function=init_state_remote,
+                args=(self,),
+                kwargs={"data": data},
             )
             for data in self.full_data
         )
@@ -122,9 +122,8 @@ class AgentInterface(ABC):
                     DelayedFunction(
                         function=self.__class__.get_next_prompt,
                         remote_function=get_next_prompt_remote,
-                        agent=self,
-                        messages=all_messages[idx],
-                        state=states[idx],
+                        args=(self,),
+                        kwargs={"messages": all_messages[idx], "state": states[idx]},
                     )
                     for idx in active_indices
                 )
@@ -185,9 +184,8 @@ class AgentInterface(ABC):
                 DelayedFunction(
                     function=self.__class__.is_done,
                     remote_function=is_done_remote,
-                    agent=self,
-                    messages=all_messages[idx],
-                    state=states[idx],
+                    args=(self,),
+                    kwargs={"messages": all_messages[idx], "state": states[idx]},
                 )
                 for idx in active_indices
             )
@@ -237,9 +235,8 @@ class AgentInterface(ABC):
             DelayedFunction(
                 function=self.__class__.get_reward,
                 remote_function=get_reward_remote,
-                agent=self,
-                messages=all_messages[idx],
-                state=states[idx],
+                args=(self,),
+                kwargs={"messages": all_messages[idx], "state": states[idx]},
             )
             for idx in range(self.num_envs)
         )
