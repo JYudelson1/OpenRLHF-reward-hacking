@@ -179,13 +179,6 @@ class ActorPPOTrainer(BasePPOTrainer):
             // args.rollout_batch_size
             // args.n_samples_per_prompt
         )
-        
-        logger.info(f"num_rollouts_per_episodes: {num_rollouts_per_episodes}")
-        logger.info(f"num_update_steps_per_episodes: {num_update_steps_per_episodes}")
-        logger.info(f"args.train_batch_size: {args.train_batch_size}")
-        logger.info(f"args.max_epochs: {args.max_epochs}")
-        logger.info(f"args.rollout_batch_size: {args.rollout_batch_size}")
-        logger.info(f"args.n_samples_per_prompt: {args.n_samples_per_prompt}")
 
         # get eval and save steps
         if args.eval_steps == -1:
