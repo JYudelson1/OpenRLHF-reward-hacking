@@ -821,7 +821,6 @@ class ActorModelRayActor(BasePPORole):
             args.seed,
             max_count=args.max_samples,
             return_eval=args.eval_steps > 0,  # Only get eval split if we're doing evaluation
-            train_split=args.prompt_split,
             eval_ratio=args.eval_ratio
         )
 
