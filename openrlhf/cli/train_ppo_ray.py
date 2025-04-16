@@ -21,27 +21,28 @@ from openrlhf.utils import get_strategy
 # NOTE: reward function for multiple reward models, replace this with your own function!
 def reward_fn(rewards: List[torch.Tensor]):
     return torch.stack(rewards).sum(dim=0)
-    
+
+
 def _validate_args(args):
     actor_world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
 
-    assert (
-        args.rollout_batch_size % actor_world_size == 0
-    ), f"rollout_bach_size must be divisible by actor_world_size, got {args.rollout_batch_size} and {actor_world_size}"
+    assert args.rollout_batch_size % actor_world_size == 0, (
+        f"rollout_bach_size must be divisible by actor_world_size, got {args.rollout_batch_size} and {actor_world_size}"
+    )
 
     assert args.zero_stage != 3 or args.vllm_num_engines > 0, f"ZeRO-3 is only supported when vLLM enabled"
 
     if args.vllm_num_engines > 0:
-        assert (
-            actor_world_size % args.vllm_num_engines == 0 or args.vllm_num_engines % actor_world_size == 0
-        ), f"actor_world_size must be divisible by vllm_num_engines, got {actor_world_size} and {args.vllm_num_engines}"
+        assert actor_world_size % args.vllm_num_engines == 0 or args.vllm_num_engines % actor_world_size == 0, (
+            f"actor_world_size must be divisible by vllm_num_engines, got {actor_world_size} and {args.vllm_num_engines}"
+        )
 
     if args.critic_pretrain:
         critic_world_size = args.critic_num_nodes * args.critic_num_gpus_per_node
-        assert (
-            actor_world_size % critic_world_size == 0
-        ), f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
-        
+        assert actor_world_size % critic_world_size == 0, (
+            f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
+        )
+
     if args.mongo_uri:
         args.mongo_uri = args.mongo_uri.replace("%26", "&")
 
@@ -51,7 +52,6 @@ def _validate_args(args):
     else:
         if args.kl_estimator not in ["k1"]:
             print(f"Recommend setting {args.kl_estimator} to 'k1' when not using KL as a loss.")
-
 
 
 def train(args):
@@ -72,10 +72,12 @@ def train(args):
         optimal_cpu_amt = args.rollout_batch_size * args.n_samples_per_prompt
         if args.max_cpus > 0:
             optimal_cpu_amt = min(optimal_cpu_amt, args.max_cpus)
-        
+
         cpu_per_actor = optimal_cpu_amt / (args.actor_num_nodes * args.actor_num_gpus_per_node)
 
-        bundles = [{"GPU": 1, "CPU": cpu_per_actor} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)]
+        bundles = [
+            {"GPU": 1, "CPU": cpu_per_actor} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)
+        ]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
@@ -193,7 +195,13 @@ def train(args):
 
     # train actor and critic model
     refs = actor_model.async_fit_actor_model(
-        critic_model, ref_model, reward_models, args.remote_rm_url, reward_fn=reward_fn, vllm_engines=vllm_engines, using_env=args.env_file is not None
+        critic_model,
+        ref_model,
+        reward_models,
+        args.remote_rm_url,
+        reward_fn=reward_fn,
+        vllm_engines=vllm_engines,
+        using_env=args.env_file is not None,
     )
     ray.get(refs)
 
@@ -438,12 +446,12 @@ if __name__ == "__main__":
         type=str,
         default="ppo_%s" % datetime.now().strftime("%m%dT%H:%M"),
     )
-    
+
     # MongoDB parameters
     parser.add_argument("--mongo_uri", type=str, default=None, help="MongoDB connection URI")
     parser.add_argument("--mongo_db_name", type=str, default=None, help="MongoDB database name")
     parser.add_argument("--mongo_collection_name", type=str, default=None, help="MongoDB collection name")
-    
+
     # RL environment paramaters
     # Multiturn RL only
     parser.add_argument("--env_file", type=str, default=None, help="Path to the environment file")
@@ -457,9 +465,11 @@ if __name__ == "__main__":
 
     # ModelScope parameters
     parser.add_argument("--use_ms", action="store_true", default=False)
-    
+
     # Cpus for multiple environments running
-    parser.add_argument("--max_cpus", type=int, default=-1, help="Maximum number of CPUs to use for multiple environments running")
+    parser.add_argument(
+        "--max_cpus", type=int, default=-1, help="Maximum number of CPUs to use for multiple environments running"
+    )
     parser.add_argument("--eval_ratio", type=float, default=0.03, help="Fraction of samples to use for evaluation")
     
     args = parser.parse_args()
@@ -497,18 +507,15 @@ if __name__ == "__main__":
             args.flash_attn = True
         assert args.vllm_num_engines > 0, "Only support `--packing_samples` with vLLM."
         assert not args.pretrain_data, "`--pretrain_data` is not supported with `--packing_samples` yet."
-        
+
     if args.env_file and args.env_class:
         sys.path.insert(0, os.getcwd())
         env = importlib.import_module(args.env_file)
         env = getattr(env, args.env_class)
         args.env_maker = lambda *args, **kwargs: env(*args, **kwargs)
-        
+
     num_rollouts_per_episodes = (
-        args.train_batch_size
-        // args.max_epochs
-        // args.rollout_batch_size
-        // args.n_samples_per_prompt
+        args.train_batch_size // args.max_epochs // args.rollout_batch_size // args.n_samples_per_prompt
     )
 
     # get eval and save steps

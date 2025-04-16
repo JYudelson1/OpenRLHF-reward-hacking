@@ -1,3 +1,4 @@
+from itertools import pairwise
 import os
 import time
 import queue
@@ -25,9 +26,16 @@ def get_all_env_variables():
     return os.environ
 
 
+def cumulative_sum(xs):
+    sum = 0
+    yield sum
+    for x in xs:
+        sum += x
+        yield sum
+
+
 @ray.remote
 class LLMRayActor:
-
     def __init__(self, *args, bundle_indices: list = None, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
@@ -55,7 +63,7 @@ class LLMRayActor:
         self.requests = {}
         self.responses = {}
         self.full_data = {}
-        
+
         # Extract MongoDB configuration
         self.mongo_uri = kwargs.pop("mongo_uri", None)
         self.mongo_db_name = kwargs.pop("mongo_db_name", None)
@@ -69,6 +77,8 @@ class LLMRayActor:
             os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
         self.llm = vllm.LLM(*args, **kwargs)
+
+        self.rollouts = None
 
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray):
         return self.llm.collective_rpc(
@@ -91,79 +101,47 @@ class LLMRayActor:
     def wake_up(self):
         self.llm.wake_up()
 
-    def add_requests(self, actor_rank, *, sampling_params, prompt_token_ids, multiturn=False, env_maker=None, full_data=None):
-        # """
-        # Save the requests from actors and generate responses when all actors have sent their requests
-        # """
-        # start_time = time.time()
-        # logger.info(f"Engine {id(self)} received request from actor {actor_rank}, counter={self.actor_counter}/{self.num_actors}")
-        
-        # self.requests[actor_rank] = prompt_token_ids
-        # self.full_data[actor_rank] = full_data
-        # self.actor_counter += 1
-        # if self.actor_counter == self.num_actors:
-        #     start_time = time.time()
-        #     logger.info(f"Engine {id(self)} starting generation for all actors at {start_time}")
-        #     assert len(self.requests) == self.num_actors
-        #     num_requests = []
-        #     requests = []
-            
-        #     if not multiturn:
-        #         for actor_rank, request in self.requests.items():
-        #             num_requests.append((actor_rank, len(request)))
-        #             requests.extend(request)
-        #     else:
-        #         for actor_rank, data in self.full_data.items():
-        #             num_requests.append((actor_rank, len(data)))
-        #             requests.extend(data)
+    def reset_rollout_cache(self, world_size: int) -> None:
+        self.env_data_for_rollout = [None] * world_size
+        self.rollouts = None
 
-        #     if len(requests) > 0:
-        #         # For now we assume that all requests have the same sampling params
-        #         if not multiturn:
-        #             responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=requests)
-        #         else:
-        #             env = env_maker(full_data=requests, sampling_params=sampling_params, vllm_engine=self.llm)
-        #             responses = env.generate_many()
-        #     else:
-        #         responses = []
-                
-        #     logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")    
+    def remember_env_data_for_rollout(self, rank: int, data_for_rank: list[dict]) -> None:
+        assert hasattr(self, "env_data_for_rollout"), (
+            "You must call LLMRayActor.reset_rollout_cache before calling LLMRayActor.remember_env_data_for_rollout"
+        )
 
-        #     offset = 0
-        #     self.responses = {}
-        #     for actor_rank, num in num_requests:
-        #         self.responses[actor_rank] = responses[offset : offset + num]
-        #         offset += num
+        self.env_data_for_rollout[rank] = data_for_rank
 
-        #     self.actor_counter = 0
-        #     self.requests = {}
-        
-        """
-        Process the request immediately and return the results.
-        No actor counting or waiting for multiple actors - just direct processing.
-        """
-        start_time = time.time()
-        logger.info(f"Engine {id(self)} processing request from actor {actor_rank}")
+    def generate_env_rollout(self, rank: int, sampling_params, env_maker) -> list:
+        if self.rollouts is not None:
+            return self.rollouts[rank]
 
-        # Generate responses immediately
-        if not multiturn:
-            responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
-        else:
-            # Pass MongoDB configuration to the environment
-            env = env_maker(
-                full_data=full_data, 
-                sampling_params=sampling_params, 
-                vllm_engine=self.llm,
-                mongo_uri=self.mongo_uri,
-                mongo_db_name=self.mongo_db_name,
-                mongo_collection_name=self.mongo_collection_name
-            )
-            responses = env.generate_many()
-            
-        logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")
-        
-        # Return the responses directly
-        return responses
+        assert hasattr(self, "env_data_for_rollout"), (
+            "You must call LLMRayActor.reset_rollout_cache before calling LLMRayActor.generate_env_rollout"
+        )
+        assert all(data_for_rank is not None for data_for_rank in self.env_data_for_rollout), (
+            "You must call LLMRayActor.remember_env_data_for_rollout for each rank before calling LLMRayActor.generate_env_rollout"
+        )
+
+        env = env_maker(
+            full_data=sum(self.env_data_for_rollout, []),
+            sampling_params=sampling_params,
+            vllm_engine=self.llm,
+            mongo_uri=self.mongo_uri,
+            mongo_db_name=self.mongo_db_name,
+            mongo_collection_name=self.mongo_collection_name,
+        )
+
+        rollouts = env.generate_many()
+
+        self.rollouts = [
+            rollouts[i:j]
+            for i, j in pairwise(cumulative_sum(len(data_for_rank) for data_for_rank in self.env_data_for_rollout))
+        ]
+
+        self.env_data_for_rollout = [None] * len(self.env_data_for_rollout)
+
+        return self.rollouts[rank]
 
     def get_responses(self, actor_rank):
         """
