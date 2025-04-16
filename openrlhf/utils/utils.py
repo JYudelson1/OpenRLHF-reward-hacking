@@ -36,7 +36,7 @@ def get_strategy(args):
 
 def blending_datasets(
     datasets,
-    probabilities,
+    probabilities=None,
     strategy=None,
     seed=42,
     max_count=5000000,
@@ -47,11 +47,11 @@ def blending_datasets(
     eval_ratio=0.03,
 ):
     datasets = datasets.split(",")
-    probabilities = list(map(float, probabilities.split(",")))
-    assert len(probabilities) == len(datasets)
+    if probabilities is not None:
+        probabilities = list(map(float, probabilities.split(",")))
+        assert len(probabilities) == len(datasets)
 
-    train_data_list = []
-    eval_data_list = []
+    data_list = []
     for i, dataset in enumerate(datasets):
         dataset = dataset.strip()
         strategy.print(f"dataset: {dataset}")
@@ -111,7 +111,7 @@ def blending_datasets(
 
     # merge datasets
     if strategy.is_rank_0():
-        print(train_data_list)
+        print(data_list)
 
     train_dataset = interleave_datasets(
         train_data_list,

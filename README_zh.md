@@ -106,7 +106,7 @@ sudo pip uninstall xgboost transformer_engine flash_attn pynvml -y
 # pip install
 pip install openrlhf
 
-# 如果你需要使用 vLLM 加速 (安装 vLLM 0.8.2)
+# 如果你需要使用 vLLM 加速 (安装 vLLM 0.8.3)
 pip install openrlhf[vllm]
 # 最新的 vLLM 也是支持的
 pip install openrlhf[vllm_latest]
@@ -121,8 +121,7 @@ pip install -e .
 ```
 
 > [!NOTE]
->我们推荐使用 vLLM 0.8.2 及以上版本。
->`export VLLM_USE_V1=1` 需要 vLLM 0.8.2 或者 Nightly 版本以及启用 `export VLLM_ENABLE_V1_MULTIPROCESSING=0`.
+>我们推荐使用 vLLM 0.8.3 及以上版本。
 >我们也提供了 [Dockerfiles for vLLM](./dockerfile/) 和 [Nvidia-Docker 一键安装脚本](./examples/scripts/nvidia_docker_install.sh)。
 
 ### 准备数据集
@@ -171,9 +170,12 @@ data
 └── train.jsonl
 ```
 
+如何指定测试数据集 ?
+
+请使用 ``--eval_dataset {name or path}`` 来设置测试数据集路径。
+
 > [!NOTE]
->默认情况下我们使用 `train` 和 `test` 作为 split 区分 Huggingface 的训练/测试数据。
->`JSON key` 选项取决于具体的数据集。请参阅 [Reward Dataset](https://github.com/OpenRLHF/OpenRLHF/blob/main/openrlhf/datasets/reward_dataset.py#L10) 和 [SFT Dataset](https://github.com/OpenRLHF/OpenRLHF/blob/main/openrlhf/datasets/sft_dataset.py#L9)
+> ``JSON key`` 选项取决于具体的数据集。请参阅 [Reward Dataset](https://github.com/OpenRLHF/OpenRLHF/blob/main/openrlhf/datasets/reward_dataset.py#L10) 和 [SFT Dataset](https://github.com/OpenRLHF/OpenRLHF/blob/main/openrlhf/datasets/sft_dataset.py#L9)
 
 
 ### Supervised Fine-tuning
@@ -411,7 +413,7 @@ python -m openrlhf.cli.lora_combiner \
 - 启用 `--colocate_critic_reward`、`--colocate_actor_ref` 选项来合并节点。
 - 您应该尽可能增加 `rollout_micro_batch_size`（并最小化vLLM引擎的TP大小）。在训练阶段，更大的 `--micro_train_batch_size` 效果更好，并启用 `--packing_samples`。
 - 当有足够的GPU内存时，请禁用 `--adam_offload` 并启用 `--overlap_comm`。
-- 对于vLLM，请使用 `--vllm_sync_backend nccl` 并在vLLM 0.8.2+版本中设置 `export VLLM_USE_V1=1` 和 `export VLLM_ENABLE_V1_MULTIPROCESSING=0`。
+- 对于vLLM，请使用 `--vllm_sync_backend nccl` 
 - 当 `n_samples_per_prompts` > 1 时，在vLLM生成中启用 [enable_prefix_caching](https://docs.vllm.ai/en/stable/automatic_prefix_caching/apc.html)。
 - 对于大型基础模型，如果出现OOM，不要使用任何 `--colocate_xxxx` 选项。
 

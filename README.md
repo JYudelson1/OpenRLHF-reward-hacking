@@ -104,7 +104,7 @@ sudo pip uninstall xgboost transformer_engine flash_attn pynvml -y
 # pip install
 pip install openrlhf
 
-# If you want to use vLLM acceleration (Install vLLM 0.8.2)
+# If you want to use vLLM acceleration (Install vLLM 0.8.3)
 pip install openrlhf[vllm]
 # latest vLLM is also supported
 pip install openrlhf[vllm_latest]
@@ -119,8 +119,7 @@ pip install -e .
 ```
 
 > [!NOTE]
->We recommend using vLLM 0.8.2 or higher.
->`export VLLM_USE_V1=1` requires vLLM 0.8.2 or the Nightly version and enable `export VLLM_ENABLE_V1_MULTIPROCESSING=0`.
+>We recommend using vLLM 0.8.3 or higher.
 >We also provided the [Dockerfiles for vLLM](./dockerfile/) and [One-Click Installation Script of Nvidia-Docker](./examples/scripts/nvidia_docker_install.sh).
 
 ### Prepare Datasets
@@ -159,18 +158,12 @@ tokenizer.apply_chat_template(dataset[0]["input_key"], tokenize=False)
 "<s>[INST] Hello, how are you? [/INST]I'm doing great. How can I help you today?</s> [INST] I'd like to show off how chat templating works! [/INST]"
 ```
 
-How to specify training and test datasets ?
+How to specify test datasets ?
 
-You can specify it using the `data_type@data_dir` format. For example, the dataset can be set as `--dataset json@./data`.
+Please set test datasets path using ``--eval_dataset {name or path}``.
 
-```
-data
-├── test.jsonl
-└── train.jsonl
-```
 
 > [!NOTE]
-> By default, we use `train` and `test` as splits to distinguish training and testing datasets from Huggingface.
 > The ``JSON key`` options depends on the specific datasets. See [Reward Dataset](https://github.com/OpenRLHF/OpenRLHF/blob/main/openrlhf/datasets/reward_dataset.py#L10) and [SFT Dataset](https://github.com/OpenRLHF/OpenRLHF/blob/main/openrlhf/datasets/sft_dataset.py#L9)
 
 ### Supervised Fine-tuning
@@ -416,7 +409,7 @@ To achieve optimal performance, we recommend allocating nodes `vLLM:Actor:Critic
 - Enable the `--colocate_critic_reward`, `--colocate_actor_ref` options to merge nodes.  
 - You should increase the `rollout_micro_batch_size` (and minimize the TP size of vLLM engine) as much as possible. During the training phase, a larger `--micro_train_batch_size` is better and enable `--packing_samples`.
 - When there are enough GPU memory, please disable `--adam_offload` and enable `--overlap_comm`.
-- For vLLM, please use `--vllm_sync_backend nccl` and `export VLLM_USE_V1=1` and `export VLLM_ENABLE_V1_MULTIPROCESSING=0` with vLLM 0.8.2+.   
+- For vLLM, please use `--vllm_sync_backend nccl`
 - Enable [enable_prefix_caching](https://docs.vllm.ai/en/stable/automatic_prefix_caching/apc.html) in vLLM generation when `n_samples_per_prompts` > 1.
 - For a large base model, if an OOM occurs, do not use any `--colocate_xxxx` options.
 
