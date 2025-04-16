@@ -210,7 +210,6 @@ class Actor(nn.Module):
         sequences: torch.LongTensor,
         action_mask: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        action_mask: Optional[torch.Tensor] = None,
         return_output=False,
         allgather_logits=False,
         return_logprobs=False,
