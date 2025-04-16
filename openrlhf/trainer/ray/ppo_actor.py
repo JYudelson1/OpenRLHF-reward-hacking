@@ -179,6 +179,13 @@ class ActorPPOTrainer(BasePPOTrainer):
             // args.rollout_batch_size
             // args.n_samples_per_prompt
         )
+        
+        logger.info(f"num_rollouts_per_episodes: {num_rollouts_per_episodes}")
+        logger.info(f"num_update_steps_per_episodes: {num_update_steps_per_episodes}")
+        logger.info(f"args.train_batch_size: {args.train_batch_size}")
+        logger.info(f"args.max_epochs: {args.max_epochs}")
+        logger.info(f"args.rollout_batch_size: {args.rollout_batch_size}")
+        logger.info(f"args.n_samples_per_prompt: {args.n_samples_per_prompt}")
 
         # get eval and save steps
         if args.eval_steps == -1:
@@ -193,11 +200,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         # Restore step and start_epoch
         steps = consumed_samples // args.rollout_batch_size + 1
         
-        logger.info(f"num_rollouts_per_episodes: {num_rollouts_per_episodes}")
-        logger.info(f"consumed_samples: {consumed_samples}")
-        logger.info(f"steps: {steps}")
-        logger.info(f"args.rollout_batch_size: {args.rollout_batch_size}")
-        
+        logger.info(f"num_rollouts_per_episodes: {num_rollouts_per_episodes}")  
         
         start_episode = consumed_samples // args.rollout_batch_size // num_rollouts_per_episodes
         consumed_samples = consumed_samples % (num_rollouts_per_episodes * args.rollout_batch_size)
