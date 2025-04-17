@@ -130,7 +130,7 @@ class Samples:
         total_length=None,
         prompts=None,
         packed_seq_lens=None,
-        rewards=None,
+        reward=None,
         solutions=None,
     ):
         self.sequences = sequences
@@ -140,7 +140,7 @@ class Samples:
         self.total_length = total_length
         self.prompts = prompts or []
         self.packed_seq_lens = packed_seq_lens
-        self.rewards = rewards
+        self.reward = reward
         self.solutions = solutions
 
     def split(self, split_size: int):
@@ -158,8 +158,8 @@ class Samples:
             sample.prompts = self.prompts[i * split_size : (i + 1) * split_size]
             sample.labels = self.labels[i * split_size : (i + 1) * split_size]
             
-            if self.rewards is not None:
-                sample.rewards = self.rewards[i * split_size : (i + 1) * split_size]
+            if self.reward is not None:
+                sample.reward = self.reward[i * split_size : (i + 1) * split_size]
             
             if self.solutions is not None:
                 sample.solutions = self.solutions[i * split_size : (i + 1) * split_size]
