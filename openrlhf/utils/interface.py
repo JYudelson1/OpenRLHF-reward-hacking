@@ -384,25 +384,31 @@ class AgentInterface(ABC):
                 assert set(conversation[0].keys()) == {"role", "content"}
                 system_message = conversation[0]["content"]
                 conversation = conversation[1:]
+                system_message_kwargs = {"system": system_message}
             else:
-                system_message = None
+                system_message_kwargs = {}
 
             completion = self.llm_engine.messages.create(  # type: ignore
                 messages=conversation,  # type: ignore
-                system=system_message,  # type: ignore
                 model=self.openai_or_anthropic_model,  # type: ignore
                 max_tokens=self.sampling_params.max_tokens,  # type: ignore
                 temperature=self.sampling_params.temperature,
                 thinking=self.anthropic_thinking,  # type: ignore
+                **system_message_kwargs,  # type: ignore
             )
+
+            if len(system_message_kwargs) > 0:
+                prompt_string = (
+                    "Calling Anthropic API with the following messages:\n"
+                    f"System message: {system_message_kwargs['system']}\n"
+                    f"All other messages:\n {json.dumps(conversation)}"
+                )
+            else:
+                prompt_string = f"Calling Anthropic API wit the following messages: {json.dumps(conversation)}"
 
             return RequestOutput(
                 request_id="",
-                prompt="Calling openai Anthropic with the following messages:\nSystem message: "
-                + str(system_message)
-                + "All other messages:\n"
-                + json.dumps(conversation)
-                + "\n",
+                prompt=prompt_string,
                 prompt_token_ids=[-1] * completion.usage.input_tokens,  # type: ignore
                 prompt_logprobs=None,
                 outputs=[
