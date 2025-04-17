@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from time import perf_counter
 from typing import *
 import ray.remote_function
@@ -334,6 +335,23 @@ class AgentInterface(ABC):
             f"AgentInterface.llm_engine should be of type vllm.LLM, OpenAI, or Anthropic, but is of type {type(self.llm_engine)}."
         )
 
+    def _merge_tool_and_user_messages(self, messages: list[Message]) -> list[Message]:
+        merged_messages = []
+
+        for message in messages:
+            if message["role"] == "tool":
+                assert set(message.keys()) == {"role", "content"}
+                message = {"role": "user", "content": f"<tool_call>\n{message['content']}\n<tool_call/>"}
+
+            if len(merged_messages[-1]) > 0 or message["role"] == merged_messages[-1]["role"]:
+                assert set(message.keys()) == {"role", "content"}
+                merged_messages[-1]["content"] += "\n\n" + message["content"]
+                continue
+
+            merged_messages.append(message)
+
+        return merged_messages
+
     def _generate_chat_completions_vllm(self, messages: list[list[Message]]) -> list[RequestOutput]:
         return self.llm_engine.chat(messages=messages, sampling_params=self.sampling_params)  # type: ignore
 
@@ -343,6 +361,8 @@ class AgentInterface(ABC):
         )
 
         def single_completion(conversation: list[Message]) -> RequestOutput:
+            conversation = self._merge_tool_and_user_messages(conversation)
+
             completion = self.llm_engine.chat.completions.create(  # type: ignore
                 messages=conversation,  # type: ignore
                 model=self.openai_or_anthropic_model,  # type: ignore
@@ -379,6 +399,8 @@ class AgentInterface(ABC):
         )
 
         def single_completion(conversation: list[Message]) -> RequestOutput:
+            conversation = self._merge_tool_and_user_messages(conversation)
+
             api_kwargs = {}
 
             assert len(conversation) > 0
@@ -396,7 +418,6 @@ class AgentInterface(ABC):
                 model=self.openai_or_anthropic_model,  # type: ignore
                 max_tokens=self.sampling_params.max_tokens,  # type: ignore
                 temperature=self.sampling_params.temperature,
-                thinking=self.anthropic_thinking,  # type: ignore
                 **api_kwargs,  # type: ignore
             )
 
