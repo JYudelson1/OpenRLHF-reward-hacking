@@ -957,13 +957,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
 
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
-                    response_lengths
+                    response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
                     samples_list.append(
                         Samples(
                             sequences=sequences,
                             attention_mask=attention_mask,
                             action_mask=action_mask,
-                            packed_seq_lens=packed_seq_lens,
+                            packed_seq_lens=total_length,
                             response_length=response_length,
                             total_length=total_length,
                             reward=rewards,
