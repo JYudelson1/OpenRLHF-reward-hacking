@@ -626,7 +626,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 all_prompts = sum([[prompt] * n_samples_per_prompt for prompt in all_prompts], [])
 
                 # Calculate rewards
-                if samples.rewards is None:
+                if samples.reward is None:
                     if self.experience_maker.custom_reward_func:
                         rewards = self.experience_maker.custom_reward_func.remote(queries, all_prompts)
                     else:
@@ -635,7 +635,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                         rewards = remote_rm_fn_ray.remote(rm, queries=queries, prompts=all_prompts)
                     rewards = ray.get(rewards)
                 else:
-                    rewards = samples.rewards
+                    rewards = samples.reward
 
                 # Reshape rewards to (num_prompts, n_samples_per_prompt)
                 rewards = rewards.reshape(-1, n_samples_per_prompt)
