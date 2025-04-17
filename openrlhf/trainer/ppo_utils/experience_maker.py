@@ -905,7 +905,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         response_lengths.append(total_len - input_len)
                         sequences.extend(conversation.all_tokens)
                         attention_mask.extend([i + 1] * total_len)
-                        action_masks.extend([False] * (input_len - 1) + [True] * (total_len - input_len) + [False])
+                        action_masks.extend([False] * (input_len - 1) + [True] * (total_len - input_len))
 
                         rewards.append(reward)
                 else:
