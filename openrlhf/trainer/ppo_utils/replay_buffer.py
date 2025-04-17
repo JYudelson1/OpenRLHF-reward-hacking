@@ -74,6 +74,7 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
     for k, v in experience.info.items():
         
         vals = torch.unbind(v)
+        logger.info(f"k: {k}")
         logger.info(f"vals: {vals}")
         logger.info(f"{len(vals)=}")
         assert batch_size == len(vals)
