@@ -848,7 +848,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         sequences=sequences,
                         attention_mask=attention_mask,
                         action_mask=action_mask,
-                        num_actions=action_mask.size(1),
                         packed_seq_lens=None,
                         response_length=action_mask.float().sum(dim=-1),
                         total_length=attention_mask.float().sum(dim=-1),
@@ -867,7 +866,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 packed_seq_lens = []
                 attention_mask = []  # For sequence identification
                 action_masks = []  # For masking assistant responses
-                num_actions = []
+                response_lengths = []
 
                 if full_data[0] is not None:
                     # Sequence packing with multiple turns
@@ -906,10 +905,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         input_len = len(conversation.first_prompt_tokens)
                         total_len = len(conversation.all_tokens)
                         packed_seq_lens.append(total_len)
+                        response_lengths.append(total_len - input_len)
                         sequences.extend(conversation.all_tokens)
                         attention_mask.extend([i + 1] * total_len)
 
-                        num_actions.append(max(1, total_len - input_len))
                         rewards.append(reward)
                 else:
                     # Sequence packing with single turn
@@ -922,7 +921,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         sequences.extend(output.prompt_token_ids + list(output.outputs[0].token_ids))
                         attention_mask.extend([i + 1] * (input_len + output_len))
 
-                        num_actions.append(max(1, output_len))
 
                 # pad seq makes the sequence a multiple of ring_attention_size.
                 pad_len = None
@@ -939,15 +937,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
 
-                    response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
+                    response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
                     samples_list.append(
                         Samples(
                             sequences=sequences,
                             attention_mask=attention_mask,
                             action_mask=action_mask,
-                            num_actions=num_actions,
-                            packed_seq_lens=packed_seq_lens,
+                            packed_seq_lens=total_length,
                             response_length=response_length,
                             total_length=total_length,
                             reward=rewards,
@@ -959,14 +956,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
 
-                    response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
+                    response_lengths
                     samples_list.append(
                         Samples(
                             sequences=sequences,
                             attention_mask=attention_mask,
                             action_mask=action_mask,
-                            num_actions=num_actions,
                             packed_seq_lens=packed_seq_lens,
                             response_length=response_length,
                             total_length=total_length,
