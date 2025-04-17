@@ -635,7 +635,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                         rewards = remote_rm_fn_ray.remote(rm, queries=queries, prompts=all_prompts)
                     rewards = ray.get(rewards)
                 else:
-                    rewards = samples.reward
+                    rewards = torch.tensor(samples.reward)
 
                 # Reshape rewards to (num_prompts, n_samples_per_prompt)
                 rewards = rewards.reshape(-1, n_samples_per_prompt)
