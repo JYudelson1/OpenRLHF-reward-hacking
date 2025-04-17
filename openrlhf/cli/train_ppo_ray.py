@@ -36,6 +36,7 @@ def _validate_args(args):
         assert actor_world_size % args.vllm_num_engines == 0 or args.vllm_num_engines % actor_world_size == 0, (
             f"actor_world_size must be divisible by vllm_num_engines, got {actor_world_size} and {args.vllm_num_engines}"
         )
+        assert args.vllm_num_engines == 1, "Only one vLLM engine is supported right now!"
 
     if args.critic_pretrain:
         critic_world_size = args.critic_num_nodes * args.critic_num_gpus_per_node
