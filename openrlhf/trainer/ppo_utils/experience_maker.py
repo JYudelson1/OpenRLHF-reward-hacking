@@ -835,7 +835,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
                     # concat input and output
                     sequences.append(input_ids + output_ids)
+                rewards = None
             else:
+                rewards = []
                 for (conversation, reward) in outputs:
                     # left padding input
                     input_len = len(conversation.first_prompt_tokens)
@@ -847,7 +849,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
                     # concat input and output
                     sequences.append(input_ids + output_ids)
-
+                    rewards.append(reward)
             sequences = torch.tensor(sequences)
             sequences, attention_mask, action_mask = self.actor.process_sequences(
                 sequences, max_input_len, eos_token_id, pad_token_id
@@ -862,7 +864,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 packed_seq_lens=None,
                 response_length=action_mask.float().sum(dim=-1),
                 total_length=attention_mask.float().sum(dim=-1),
-                reward=None,
+                reward=rewards,
                 solutions=solutions.copy() if solutions[0] is not None else None,
             )
         else:
@@ -921,7 +923,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     rewards.append(reward)
             else:
                 # Sequence packing with single turn
-                rewards = None
                 for i, output in enumerate(outputs):
                     input_len = len(output.prompt_token_ids)
                     output_len = len(output.outputs[0].token_ids)
