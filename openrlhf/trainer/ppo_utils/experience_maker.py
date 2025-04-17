@@ -683,7 +683,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         return returns
 
     @torch.no_grad()
-    def generate_samples(self, all_prompts: List[str], **generate_kwargs) -> List[Samples]:
+    def generate_samples(self, all_examples: List[dict], **generate_kwargs) -> List[Samples]:
         """
         Generate samples and return in batches.
 
@@ -691,10 +691,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         in which actor will be used to generate samples.
         """
         if self.vllm_engines is None:
-            return self._generate_with_hf(all_prompts, **generate_kwargs)
+            return self._generate_with_hf(all_examples, **generate_kwargs)
 
         # vLLM generation
-        return self._generate_vllm(all_prompts, **generate_kwargs)
+        return self._generate_vllm(all_examples, **generate_kwargs)
 
     @torch.no_grad()
     def _generate_with_hf(self, all_examples: List[dict], **generate_kwargs) -> List[Samples]:
