@@ -4,11 +4,12 @@ from time import perf_counter
 from typing import *
 import ray.remote_function
 import vllm
-from vllm import SamplingParams
+from vllm import CompletionOutput, SamplingParams, RequestOutput
+from openai import OpenAI
+from anthropic import Anthropic
+import json
 import ray
 import logging
-import os
-import pymongo
 from dataclasses import dataclass
 from pymongo import MongoClient
 from datetime import datetime
@@ -41,21 +42,25 @@ class AgentInterface(ABC):
         self,
         full_data: List[dict],
         sampling_params: SamplingParams,
-        vllm_engine: vllm.LLM,
+        llm_engine: vllm.LLM | OpenAI | Anthropic,
         mongo_uri: Optional[str] = None,
         mongo_db_name: Optional[str] = None,
         mongo_collection_name: Optional[str] = None,
         environment_parallelism: Literal["ray", "threading"] = "threading",
+        openai_or_anthropic_model: str | None = None,
+        anthropic_thinking: bool = False,
         **kwargs,
     ):
         self.num_envs = len(full_data)
         self.full_data = full_data
         self.sampling_params = sampling_params
-        self.vllm_engine = vllm_engine
+        self.llm_engine = llm_engine
         self.mongo_uri = mongo_uri
         self.mongo_db_name = mongo_db_name
         self.mongo_collection_name = mongo_collection_name
         self.environment_parallelism = environment_parallelism
+        self.openai_or_anthropic_model = openai_or_anthropic_model
+        self.anthropic_thinking = anthropic_thinking
 
         # Check if MongoDB configuration is partially provided
         mongo_params = [mongo_uri, mongo_db_name, mongo_collection_name]
@@ -76,8 +81,8 @@ class AgentInterface(ABC):
         times_evaluating_is_done = []
 
         # Initialize states for all conversations
-        vllm_engine = self.vllm_engine
-        self.vllm_engine = None
+        llm_engine = self.llm_engine
+        self.llm_engine = None
 
         init_env_start_time = perf_counter()
         # states = ray.get([init_state_remote.remote(self, data) for data in self.full_data])
@@ -93,7 +98,7 @@ class AgentInterface(ABC):
         init_env_end_time = perf_counter()
         time_initializing_environments = init_env_end_time - init_env_start_time
 
-        self.vllm_engine = vllm_engine
+        self.llm_engine = llm_engine
 
         all_messages = [list() for _ in range(self.num_envs)]
         active_indices = list(range(self.num_envs))
@@ -108,8 +113,8 @@ class AgentInterface(ABC):
             # Get next prompts for all active conversations
             try:
                 # Temporarily remove vllm engine before sending through Ray
-                vllm_engine = self.vllm_engine
-                self.vllm_engine = None
+                llm_engine = self.llm_engine
+                self.llm_engine = None
 
                 env_step_start_time = perf_counter()
                 # all_prompts_and_states = ray.get(
@@ -130,9 +135,9 @@ class AgentInterface(ABC):
                 env_step_end_time = perf_counter()
                 times_doing_environment_steps.append(env_step_end_time - env_step_start_time)
 
-                self.vllm_engine = vllm_engine
+                self.llm_engine = llm_engine
             except Exception as e:
-                self.vllm_engine = vllm_engine  # Restore in case of error
+                self.llm_engine = llm_engine  # Restore in case of error
                 logger.error(f"Error getting prompts: {str(e)}")
                 raise
 
@@ -168,13 +173,14 @@ class AgentInterface(ABC):
             generate_start_time = perf_counter()
             # Batch generate responses
             # TODO: Maybe use their tool API instead of handrolling?
-            outputs = self.vllm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
+            outputs = self._generate_chat_completions(active_conversations)
+            # outputs = self.llm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
             generate_end_time = perf_counter()
             times_generating_completions.append(generate_end_time - generate_start_time)
 
             # Process outputs and update states
-            vllm_engine = self.vllm_engine
-            self.vllm_engine = None
+            llm_engine = self.llm_engine
+            self.llm_engine = None
 
             is_done_start_time = perf_counter()
             # all_is_done = ray.get(
@@ -192,7 +198,7 @@ class AgentInterface(ABC):
             is_done_end_time = perf_counter()
             times_evaluating_is_done.append(is_done_end_time - is_done_start_time)
 
-            self.vllm_engine = vllm_engine
+            self.llm_engine = llm_engine
             new_active_indices = []
             for i, output in enumerate(outputs):
                 real_idx = active_indices[i]
@@ -221,8 +227,8 @@ class AgentInterface(ABC):
 
         # Calculate rewards for completed conversations
         results = []
-        vllm_engine = self.vllm_engine
-        self.vllm_engine = None
+        llm_engine = self.llm_engine
+        self.llm_engine = None
 
         rewards_start_time = perf_counter()
         # all_rewards = ray.get(
@@ -243,7 +249,7 @@ class AgentInterface(ABC):
         rewards_end_time = perf_counter()
         time_computing_rewards = rewards_end_time - rewards_start_time
 
-        self.vllm_engine = vllm_engine
+        self.llm_engine = llm_engine
 
         # Create results list
         results_data = []
@@ -316,6 +322,107 @@ class AgentInterface(ABC):
         )
 
         return results
+
+    def _generate_chat_completions(self, messages: list[list[Message]]) -> list[RequestOutput]:
+        if isinstance(self.llm_engine, vllm.LLM):
+            return self._generate_chat_completions_vllm(messages)
+        if isinstance(self.llm_engine, OpenAI):
+            return self._generate_chat_completions_openai(messages)
+        if isinstance(self.llm_engine, Anthropic):
+            return self._generate_chat_completions_anthropic(messages)
+        raise TypeError(
+            f"AgentInterface.llm_engine should be of type vllm.LLM, OpenAI, or Anthropic, but is of type {type(self.llm_engine)}."
+        )
+
+    def _generate_chat_completions_vllm(self, messages: list[list[Message]]) -> list[RequestOutput]:
+        return self.llm_engine.chat(messages=messages, sampling_params=self.sampling_params)  # type: ignore
+
+    def _generate_chat_completions_openai(self, messages: list[list[Message]]) -> list[RequestOutput]:
+        assert self.openai_or_anthropic_model is not None, (
+            "AgentInterface.openai_or_anthropic_model should be provided on initialization if AgentInterface.llm_engine is of type OpenAI."
+        )
+
+        def single_completion(conversation: list[Message]) -> RequestOutput:
+            completion = self.llm_engine.chat.completions.create(  # type: ignore
+                messages=conversation,  # type: ignore
+                model=self.openai_or_anthropic_model,  # type: ignore
+                temperature=self.sampling_params.temperature,
+                max_completion_tokens=self.sampling_params.max_tokens,
+            )
+            return RequestOutput(
+                request_id="",
+                prompt="Calling openai API with the following messages: " + json.dumps(conversation) + "\n",
+                prompt_token_ids=[-1] * completion.usage.prompt_tokens,  # type: ignore
+                prompt_logprobs=None,
+                outputs=[
+                    CompletionOutput(
+                        index=0,
+                        text=completion.choices[0].message.content,  # type: ignore
+                        token_ids=[-1] * completion.usage.completion_tokens,  # type: ignore
+                        cumulative_logprob=None,
+                        logprobs=None,
+                    )
+                ],
+                finished=True,
+            )
+
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(single_completion, conversation) for conversation in messages]
+            completions = []
+            for future in futures:
+                completions.append(future.result())
+        return completions
+
+    def _generate_chat_completions_anthropic(self, messages: list[list[Message]]) -> list[RequestOutput]:
+        assert self.openai_or_anthropic_model is not None, (
+            "AgentInterface.openai_or_anthropic_model should be provided on initialization if AgentInterface.llm_engine is of type Anthropic."
+        )
+
+        def single_completion(conversation: list[Message]) -> RequestOutput:
+            assert len(conversation) > 0
+            if conversation[0]["role"] == "system":
+                assert set(conversation[0].keys()) == {"role", "content"}
+                system_message = conversation[0]["content"]
+                conversation = conversation[1:]
+            else:
+                system_message = None
+
+            completion = self.llm_engine.messages.create(  # type: ignore
+                messages=conversation,  # type: ignore
+                system=system_message,  # type: ignore
+                model=self.openai_or_anthropic_model,  # type: ignore
+                max_tokens=self.sampling_params.max_tokens,  # type: ignore
+                temperature=self.sampling_params.temperature,
+                thinking=self.anthropic_thinking,  # type: ignore
+            )
+
+            return RequestOutput(
+                request_id="",
+                prompt="Calling openai Anthropic with the following messages:\nSystem message: "
+                + str(system_message)
+                + "All other messages:\n"
+                + json.dumps(conversation)
+                + "\n",
+                prompt_token_ids=[-1] * completion.usage.input_tokens,  # type: ignore
+                prompt_logprobs=None,
+                outputs=[
+                    CompletionOutput(
+                        index=0,
+                        text=completion.content[0].text,  # type: ignore
+                        token_ids=[-1] * completion.usage.output_tokens,  # type: ignore
+                        cumulative_logprob=None,
+                        logprobs=None,
+                    )
+                ],
+                finished=True,
+            )
+
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(single_completion, conversation) for conversation in messages]
+            completions = []
+            for future in futures:
+                completions.append(future.result())
+        return completions
 
     @abstractmethod
     def init_state(self, data: dict) -> AgentState:
