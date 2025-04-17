@@ -343,7 +343,7 @@ class AgentInterface(ABC):
                 assert set(message.keys()) == {"role", "content"}
                 message = {"role": "user", "content": f"<tool_call>\n{message['content']}\n<tool_call/>"}
 
-            if len(merged_messages[-1]) > 0 or message["role"] == merged_messages[-1]["role"]:
+            if len(merged_messages) > 0 and message["role"] == merged_messages[-1]["role"]:
                 assert set(message.keys()) == {"role", "content"}
                 merged_messages[-1]["content"] += "\n\n" + message["content"]
                 continue

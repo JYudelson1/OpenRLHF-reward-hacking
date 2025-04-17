@@ -126,7 +126,7 @@ class LLMRayActor:
         env = env_maker(
             full_data=sum(self.env_data_for_rollout, []),
             sampling_params=sampling_params,
-            vllm_engine=self.llm,
+            llm_engine=self.llm,
             mongo_uri=self.mongo_uri,
             mongo_db_name=self.mongo_db_name,
             mongo_collection_name=self.mongo_collection_name,
