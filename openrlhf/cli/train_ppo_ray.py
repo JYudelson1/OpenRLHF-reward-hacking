@@ -514,6 +514,7 @@ if __name__ == "__main__":
             args.flash_attn = True
         assert args.vllm_num_engines > 0, "Only support `--packing_samples` with vLLM."
         assert not args.pretrain_data, "`--pretrain_data` is not supported with `--packing_samples` yet."
+        assert False, "Please remove --packing_samples flag, as it has been temporarily deprecated"
 
     if args.env_file and args.env_class:
         sys.path.insert(0, os.getcwd())
