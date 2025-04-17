@@ -311,7 +311,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         start_time = time.time()
         if dist.get_rank() == 0:
             logger.info(
-                f"🚀 Starting experience making with {len(rollout_samples) * len(rollout_samples.sequences) * dist.get_world_size() // self.strategy.ring_attn_size} batches"
+                f"🚀 Starting experience making with {len(rollout_samples) * len(rollout_samples[0].sequences) * dist.get_world_size() // self.strategy.ring_attn_size} batches"
             )
 
         args = self.strategy.args
@@ -320,8 +320,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         experiences = []
 
         # TODO(gzpan): Support dynamic batch later
-        samples_list = rollout_samples.split(args.micro_rollout_batch_size)
-
+        # samples_list = rollout_samples.split(args.micro_rollout_batch_size)
+        samples_list = rollout_samples
         # Extract all information from samples in one pass
         # Convert samples into lists of tensors and metadata for batch processing
         sequences_list = [s.sequences for s in samples_list]
