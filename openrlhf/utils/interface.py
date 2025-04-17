@@ -48,7 +48,7 @@ class AgentInterface(ABC):
         mongo_collection_name: Optional[str] = None,
         environment_parallelism: Literal["ray", "threading"] = "threading",
         openai_or_anthropic_model: str | None = None,
-        anthropic_thinking: bool = False,
+        anthropic_thinking: Any = None,
         **kwargs,
     ):
         self.num_envs = len(full_data)
@@ -379,14 +379,17 @@ class AgentInterface(ABC):
         )
 
         def single_completion(conversation: list[Message]) -> RequestOutput:
+            api_kwargs = {}
+
             assert len(conversation) > 0
             if conversation[0]["role"] == "system":
                 assert set(conversation[0].keys()) == {"role", "content"}
                 system_message = conversation[0]["content"]
                 conversation = conversation[1:]
-                system_message_kwargs = {"system": system_message}
-            else:
-                system_message_kwargs = {}
+                api_kwargs["system"] = system_message
+
+            if self.anthropic_thinking is not None:
+                api_kwargs["thinking"] = self.anthropic_thinking
 
             completion = self.llm_engine.messages.create(  # type: ignore
                 messages=conversation,  # type: ignore
@@ -394,13 +397,13 @@ class AgentInterface(ABC):
                 max_tokens=self.sampling_params.max_tokens,  # type: ignore
                 temperature=self.sampling_params.temperature,
                 thinking=self.anthropic_thinking,  # type: ignore
-                **system_message_kwargs,  # type: ignore
+                **api_kwargs,  # type: ignore
             )
 
-            if len(system_message_kwargs) > 0:
+            if "system" in api_kwargs.keys():
                 prompt_string = (
                     "Calling Anthropic API with the following messages:\n"
-                    f"System message: {system_message_kwargs['system']}\n"
+                    f"System message: {api_kwargs['system']}\n"
                     f"All other messages:\n {json.dumps(conversation)}"
                 )
             else:
