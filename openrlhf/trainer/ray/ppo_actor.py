@@ -551,7 +551,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
         # TODO: Add evaluation mechanism for PPO
         if global_step % args.eval_steps == 0 and self.eval_dataloader and len(self.eval_dataloader) > 0:
-            self.evaluate(self.eval_dataloader, global_step, args.eval_temperature, args.eval_n_samples_per_prompt)
+            self.evaluate(self.eval_dataloader, global_step, args.eval_temperature, args.eval_n_samples_per_prompt, args.eval_steps)
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
         if global_step % args.save_steps == 0:
@@ -584,7 +584,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 ray.get(ref)
         torch_dist_barrier_and_cuda_sync()
 
-    def evaluate(self, eval_dataloader, global_step, temperature=0.6, n_samples_per_prompt=1):
+    def evaluate(self, eval_dataloader, global_step, temperature=0.6, n_samples_per_prompt=1, eval_steps=1):
         """Evaluate model performance on eval dataset.
 
         Args:
@@ -689,9 +689,11 @@ class ActorPPOTrainer(BasePPOTrainer):
                     # Log to wandb/tensorboard
                     if self._wandb is not None:
                         logger.info(f"Logging to wandb")
-                        logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": global_step}.items()}
-                        logger.info(f"Logs: {logs}")
-                        self._wandb.log(logs)
+                        # Convert metrics to use eval/ prefix
+                        eval_logs = {"eval/%s" % k: v for k, v in logs.items()}
+                        # Add the epoch counter (different from global_step)
+                        eval_logs["eval/epoch"] = global_step // eval_steps
+                        self._wandb.log(eval_logs)
                     elif self._tensorboard is not None:
                         for k, v in logs.items():
                             self._tensorboard.add_scalar(f"eval/{k}", v, global_step)
