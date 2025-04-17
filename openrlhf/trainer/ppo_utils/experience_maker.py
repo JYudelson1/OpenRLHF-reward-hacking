@@ -797,8 +797,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         #     all_output_refs.append(llm.get_responses.remote(rank))
         # all_outputs = sum(ray.get(all_output_refs), [])
 
-        outputs = all_outputs[i : i + args.micro_rollout_batch_size]
-        solutions = all_solutions[i : i + args.micro_rollout_batch_size]
+        outputs = all_outputs
+        solutions = all_solutions
         assert len(outputs) == len(solutions) or solutions[0] is None
         if not self.packing_samples:
             # NOTE: concat all outputs to following format:
