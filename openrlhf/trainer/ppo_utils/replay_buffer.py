@@ -6,6 +6,9 @@ from typing import List, Optional
 import torch
 import torch.nn.functional as F
 
+from logging import getLogger
+logger = getLogger(__name__)
+
 
 from .experience_maker import Experience
 
@@ -40,6 +43,7 @@ class BufferItem:
 
 def split_experience_batch(experience: Experience) -> List[BufferItem]:
     batch_size = len(experience.sequences)
+    logger.info(f"Splitting experience batch of size {batch_size}")
     batch_kwargs = [{} for _ in range(batch_size)]
     keys = (
         "sequences",
@@ -60,6 +64,9 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
         vals = value
         if isinstance(vals, torch.Tensor):
             vals = torch.unbind(vals)
+            
+        logger.info(f"vals: {vals}")
+        logger.info(f"{len(vals)=}")
         assert batch_size == len(vals)
         for i, v in enumerate(vals):
             batch_kwargs[i][key] = v
@@ -67,6 +74,7 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
     for i in range(batch_size):
         batch_kwargs[i]["info"] = {}
     for k, v in experience.info.items():
+        
         vals = torch.unbind(v)
         assert batch_size == len(vals)
         for i, vv in enumerate(vals):
