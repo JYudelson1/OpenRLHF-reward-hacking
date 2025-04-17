@@ -128,7 +128,6 @@ class Samples:
         action_mask=None,
         response_length=None,
         total_length=None,
-        prompts=None,
         packed_seq_lens=None,
         reward=None,
         solutions=None,
@@ -138,7 +137,6 @@ class Samples:
         self.action_mask = action_mask
         self.response_length = response_length
         self.total_length = total_length
-        self.prompts = prompts or []
         self.packed_seq_lens = packed_seq_lens
         self.reward = reward
         self.solutions = solutions
@@ -155,7 +153,6 @@ class Samples:
             sample.action_mask = action_mask
             sample.response_length = sample.action_mask.float().sum(dim=-1)
             sample.total_length = sample.attention_mask.float().sum(dim=-1)
-            sample.prompts = self.prompts[i * split_size : (i + 1) * split_size]
             
             if self.reward is not None:
                 sample.reward = self.reward[i * split_size : (i + 1) * split_size]
@@ -319,8 +316,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         experiences = []
 
         # TODO(gzpan): Support dynamic batch later
-        # samples_list = rollout_samples.split(args.micro_rollout_batch_size)
-        samples_list = rollout_samples
+        samples_list = rollout_samples.split(args.micro_rollout_batch_size)
+
         # Extract all information from samples in one pass
         # Convert samples into lists of tensors and metadata for batch processing
         sequences_list = [s.sequences for s in samples_list]
@@ -800,173 +797,183 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         #     all_output_refs.append(llm.get_responses.remote(rank))
         # all_outputs = sum(ray.get(all_output_refs), [])
 
-        samples_list = []
-        for i in range(0, len(all_outputs), args.micro_rollout_batch_size):
-            outputs = all_outputs[i : i + args.micro_rollout_batch_size]
-            solutions = all_solutions[i : i + args.micro_rollout_batch_size]
-            assert len(outputs) == len(solutions) or solutions[0] is None
-            if not self.packing_samples:
-                # NOTE: concat all outputs to following format:
-                #
-                # | [PAD] [PAD] token token token | token token [EOS] [PAD] |
-                # | token token token token token | token token [EOS] [PAD] |
-                # | [PAD] [PAD] [PAD] token token | token token token [EOS] |
-                # |<---------- prompt ----------->|<-------- answer ------->|
-                assert full_data[0] is None, "RL environments currently only supported with sample packing"
+        outputs = all_outputs[i : i + args.micro_rollout_batch_size]
+        solutions = all_solutions[i : i + args.micro_rollout_batch_size]
+        assert len(outputs) == len(solutions) or solutions[0] is None
+        if not self.packing_samples:
+            # NOTE: concat all outputs to following format:
+            #
+            # | [PAD] [PAD] token token token | token token [EOS] [PAD] |
+            # | token token token token token | token token [EOS] [PAD] |
+            # | [PAD] [PAD] [PAD] token token | token token token [EOS] |
+            # |<---------- prompt ----------->|<-------- answer ------->|
+            #assert full_data[0] is None, "RL environments currently only supported with sample packing"
+            if full_data[0] is None:
                 max_input_len, max_output_len = 0, 0
-                for output in outputs:
+                for (output) in outputs:
                     max_input_len = max(max_input_len, len(output.prompt_token_ids))
                     max_output_len = max(max_output_len, len(output.outputs[0].token_ids))
+            else:
+                max_input_len, max_output_len = 0, 0
+                for (conversation, reward) in outputs:
+                    max_input_len = max(max_input_len, len(conversation.first_prompt_tokens))
+                    max_output_len = max(max_output_len, len(conversation.all_tokens) - len(conversation.first_prompt_tokens))
 
-                pad_token_id, eos_token_id = self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
-                sequences = []
-                prompt_token_ids = []
+            pad_token_id, eos_token_id = self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
+            sequences = []
+            
+            if full_data[0] is None:
                 for output in outputs:
                     # left padding input
                     input_len = len(output.prompt_token_ids)
                     input_ids = [pad_token_id] * (max_input_len - input_len) + list(output.prompt_token_ids)
-                    prompt_token_ids.append(output.prompt_token_ids)
 
-                # right padding output
-                # TODO(gzpan): check if trunc output to max_output_len?
-                output_len = len(output.outputs[0].token_ids)
-                output_ids = list(output.outputs[0].token_ids) + [pad_token_id] * (max_output_len - output_len)
+                    # right padding output
+                    # TODO(gzpan): check if trunc output to max_output_len?
+                    output_len = len(output.outputs[0].token_ids)
+                    output_ids = list(output.outputs[0].token_ids) + [pad_token_id] * (max_output_len - output_len)
 
-                # concat input and output
-                sequences.append(input_ids + output_ids)
-
-                sequences = torch.tensor(sequences)
-                sequences, attention_mask, action_mask = self.actor.process_sequences(
-                    sequences, max_input_len, eos_token_id, pad_token_id
-                )
-                sequences = sequences.to("cuda")
-                attention_mask = attention_mask.to("cuda")
-                action_mask = action_mask.to("cuda")
-                samples_list.append(
-                    Samples(
-                        sequences=sequences,
-                        attention_mask=attention_mask,
-                        action_mask=action_mask,
-                        packed_seq_lens=None,
-                        response_length=action_mask.float().sum(dim=-1),
-                        total_length=attention_mask.float().sum(dim=-1),
-                        reward=None,
-                        solutions=solutions.copy() if solutions[0] is not None else None,
-                    )
-                )
+                    # concat input and output
+                    sequences.append(input_ids + output_ids)
             else:
-                # NOTE: concat all outputs to following format:
-                #
-                # | token token token | token token [EOS] | token token token token token | token token [EOS] | token token | token token token [EOS] |
-                # |<---  prompt ----->|<---- answer ----->|<---------- prompt ----------->|<----- answer ---->|<- prompt -->|<-------- answer ------->|
-                pad_token_id, eos_token_id = self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
-                sequences = []
-                packed_seq_lens = []
-                attention_mask = []  # For sequence identification
-                action_masks = []  # For masking assistant responses
-                response_lengths = []
+                for (conversation, reward) in outputs:
+                    # left padding input
+                    input_len = len(conversation.first_prompt_tokens)
+                    input_ids = [pad_token_id] * (max_input_len - input_len) + list(conversation.first_prompt_tokens)
+                    
+                    # right padding output
+                    output_len = len(conversation.all_tokens) - input_len
+                    output_ids = list(conversation.all_tokens[input_len:]) + [pad_token_id] * (max_output_len - output_len)
 
-                if full_data[0] is not None:
-                    # Sequence packing with multiple turns
-                    # rewards = []
-                    # for i, (conversation, reward) in enumerate(outputs):
-                    #     current_seq = []
-                    #     current_action_mask = []
-                    #     total_len = 0
-                    #     rewards.append(reward)
+                    # concat input and output
+                    sequences.append(input_ids + output_ids)
 
-                    #     # Process each turn in the conversation
-                    #     for turn in conversation.tokens_by_turn:
-                    #         prompt_tokens = turn["input_tokens"]
-                    #         response_tokens = turn["output_tokens"]
+            sequences = torch.tensor(sequences)
+            sequences, attention_mask, action_mask = self.actor.process_sequences(
+                sequences, max_input_len, eos_token_id, pad_token_id
+            )
+            sequences = sequences.to("cuda")
+            attention_mask = attention_mask.to("cuda")
+            action_mask = action_mask.to("cuda")
+            return Samples(
+                sequences=sequences,
+                attention_mask=attention_mask,
+                action_mask=action_mask,
+                packed_seq_lens=None,
+                response_length=action_mask.float().sum(dim=-1),
+                total_length=attention_mask.float().sum(dim=-1),
+                reward=None,
+                solutions=solutions.copy() if solutions[0] is not None else None,
+            )
+        else:
+            # NOTE: concat all outputs to following format:
+            #
+            # | token token token | token token [EOS] | token token token token token | token token [EOS] | token token | token token token [EOS] |
+            # |<---  prompt ----->|<---- answer ----->|<---------- prompt ----------->|<----- answer ---->|<- prompt -->|<-------- answer ------->|
+            pad_token_id, eos_token_id = self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
+            sequences = []
+            packed_seq_lens = []
+            attention_mask = []  # For sequence identification
+            action_masks = []  # For masking assistant responses
+            response_lengths = []
 
-                    #         # Add tokens to sequence
-                    #         current_seq.extend(prompt_tokens)
-                    #         current_seq.extend(response_tokens)
+            if full_data[0] is not None:
+                # Sequence packing with multiple turns
+                # rewards = []
+                # for i, (conversation, reward) in enumerate(outputs):
+                #     current_seq = []
+                #     current_action_mask = []
+                #     total_len = 0
+                #     rewards.append(reward)
 
-                    #         # Mark which tokens are from assistant (1) vs user (0)
-                    #         current_action_mask.extend([False] * (len(prompt_tokens) - 1))  # User prompt
-                    #         current_action_mask.extend(([True] * len(response_tokens)) + [False])  # Assistant response
+                #     # Process each turn in the conversation
+                #     for turn in conversation.tokens_by_turn:
+                #         prompt_tokens = turn["input_tokens"]
+                #         response_tokens = turn["output_tokens"]
 
-                    #         total_len += len(prompt_tokens) + len(response_tokens)
+                #         # Add tokens to sequence
+                #         current_seq.extend(prompt_tokens)
+                #         current_seq.extend(response_tokens)
 
-                    #     # Store sequence info
-                    #     sequences.extend(current_seq)
-                    #     packed_seq_lens.append(total_len)
-                    #     attention_mask.extend([i + 1] * total_len)  # Sequence identifier
-                    #     action_masks.extend(current_action_mask)
-                    #     num_actions.append(sum(current_action_mask))  # Total response tokens
-                    # action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
-                    rewards = []
-                    for i, (conversation, reward) in enumerate(outputs):
-                        input_len = len(conversation.first_prompt_tokens)
-                        total_len = len(conversation.all_tokens)
-                        packed_seq_lens.append(total_len)
-                        response_lengths.append(total_len - input_len)
-                        sequences.extend(conversation.all_tokens)
-                        attention_mask.extend([i + 1] * total_len)
-                        action_masks.extend([False] * (input_len - 1) + [True] * (total_len - input_len))
+                #         # Mark which tokens are from assistant (1) vs user (0)
+                #         current_action_mask.extend([False] * (len(prompt_tokens) - 1))  # User prompt
+                #         current_action_mask.extend(([True] * len(response_tokens)) + [False])  # Assistant response
 
-                        rewards.append(reward)
-                else:
-                    # Sequence packing with single turn
-                    rewards = None
-                    for i, output in enumerate(outputs):
-                        input_len = len(output.prompt_token_ids)
-                        output_len = len(output.outputs[0].token_ids)
-                        packed_seq_lens.append(input_len + output_len)
-                        sequences.extend(output.prompt_token_ids + list(output.outputs[0].token_ids))
-                        attention_mask.extend([i + 1] * (input_len + output_len))
-                        action_masks.extend([False] * (input_len - 1) + [True] * output_len + [False])
+                #         total_len += len(prompt_tokens) + len(response_tokens)
 
-                # pad seq makes the sequence a multiple of ring_attention_size.
-                if self.strategy.ring_attn_group is not None:
-                    pad_len, sequences, attention_mask, num_actions, packed_seq_lens = pad_sequences(
-                        sequences=sequences,
-                        attention_mask=attention_mask,
-                        num_actions=num_actions,
-                        packed_seq_lens=packed_seq_lens,
-                        ring_attn_group=self.strategy.ring_attn_group,
-                        pad_token_id=pad_token_id,
-                    )
+                #     # Store sequence info
+                #     sequences.extend(current_seq)
+                #     packed_seq_lens.append(total_len)
+                #     attention_mask.extend([i + 1] * total_len)  # Sequence identifier
+                #     action_masks.extend(current_action_mask)
+                #     num_actions.append(sum(current_action_mask))  # Total response tokens
+                # action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
+                rewards = []
+                for i, (conversation, reward) in enumerate(outputs):
+                    input_len = len(conversation.first_prompt_tokens)
+                    total_len = len(conversation.all_tokens)
+                    packed_seq_lens.append(total_len)
+                    response_lengths.append(total_len - input_len)
+                    sequences.extend(conversation.all_tokens)
+                    attention_mask.extend([i + 1] * total_len)
+                    action_masks.extend([False] * (input_len - 1) + [True] * (total_len - input_len))
 
-                    sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
-                    attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
-                    action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
+                    rewards.append(reward)
+            else:
+                # Sequence packing with single turn
+                rewards = None
+                for i, output in enumerate(outputs):
+                    input_len = len(output.prompt_token_ids)
+                    output_len = len(output.outputs[0].token_ids)
+                    packed_seq_lens.append(input_len + output_len)
+                    sequences.extend(output.prompt_token_ids + list(output.outputs[0].token_ids))
+                    attention_mask.extend([i + 1] * (input_len + output_len))
+                    action_masks.extend([False] * (input_len - 1) + [True] * output_len + [False])
 
-                    total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
-                    response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
-                    samples_list.append(
-                        Samples(
-                            sequences=sequences,
-                            attention_mask=attention_mask,
-                            action_mask=action_mask,
-                            packed_seq_lens=total_length,
-                            response_length=response_length,
-                            total_length=total_length,
-                            reward=rewards,
-                            solutions=solutions.copy() if solutions[0] is not None else None,
-                        )
-                    )
-                else:
-                    sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
-                    attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
-                    action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
-                    total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
-                    response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
-                    samples_list.append(
-                        Samples(
-                            sequences=sequences,
-                            attention_mask=attention_mask,
-                            action_mask=action_mask,
-                            packed_seq_lens=total_length,
-                            response_length=response_length,
-                            total_length=total_length,
-                            reward=rewards,
-                            solutions=solutions.copy() if solutions[0] is not None else None,
-                        )
-                    )
-        return samples_list
+            # pad seq makes the sequence a multiple of ring_attention_size.
+            if self.strategy.ring_attn_group is not None:
+                pad_len, sequences, attention_mask, num_actions, packed_seq_lens = pad_sequences(
+                    sequences=sequences,
+                    attention_mask=attention_mask,
+                    num_actions=num_actions,
+                    packed_seq_lens=packed_seq_lens,
+                    ring_attn_group=self.strategy.ring_attn_group,
+                    pad_token_id=pad_token_id,
+                )
+
+                sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
+                attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
+                action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
+
+                total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
+                response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
+                return Samples(
+                    sequences=sequences,
+                    attention_mask=attention_mask,
+                    action_mask=action_mask,
+                    packed_seq_lens=total_length,
+                    response_length=response_length,
+                    total_length=total_length,
+                    reward=rewards,
+                    solutions=solutions.copy() if solutions[0] is not None else None,
+                )
+                
+            else:
+                sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
+                attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
+                action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
+                total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
+                response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
+                return Samples(
+                    sequences=sequences,
+                    attention_mask=attention_mask,
+                    action_mask=action_mask,
+                    packed_seq_lens=total_length,
+                    response_length=response_length,
+                    total_length=total_length,
+                    reward=rewards,
+                    solutions=solutions.copy() if solutions[0] is not None else None,
+                )
 
     def _generate_vllm_bare(self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params):
         has_environment = vars(self.strategy.args).get("env_file", False)
