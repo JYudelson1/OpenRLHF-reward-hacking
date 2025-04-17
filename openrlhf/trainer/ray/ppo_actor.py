@@ -687,10 +687,10 @@ class ActorPPOTrainer(BasePPOTrainer):
                         logs[f"eval_{datasource}_pass1"] = metrics["pass1"] / metrics["count"]
 
                     # Log to wandb/tensorboard
-                    logger.info(f"Logs: {logs}")
                     if self._wandb is not None:
                         logger.info(f"Logging to wandb")
                         logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": global_step}.items()}
+                        logger.info(f"Logs: {logs}")
                         self._wandb.log(logs)
                     elif self._tensorboard is not None:
                         for k, v in logs.items():
