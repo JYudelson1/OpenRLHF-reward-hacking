@@ -156,7 +156,6 @@ class Samples:
             sample.response_length = sample.action_mask.float().sum(dim=-1)
             sample.total_length = sample.attention_mask.float().sum(dim=-1)
             sample.prompts = self.prompts[i * split_size : (i + 1) * split_size]
-            sample.labels = self.labels[i * split_size : (i + 1) * split_size]
             
             if self.reward is not None:
                 sample.reward = self.reward[i * split_size : (i + 1) * split_size]
@@ -898,7 +897,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     #     action_masks.extend(current_action_mask)
                     #     num_actions.append(sum(current_action_mask))  # Total response tokens
                     # action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
-                    action_mask = None
                     rewards = []
                     for i, (conversation, reward) in enumerate(outputs):
                         input_len = len(conversation.first_prompt_tokens)
@@ -907,11 +905,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         response_lengths.append(total_len - input_len)
                         sequences.extend(conversation.all_tokens)
                         attention_mask.extend([i + 1] * total_len)
+                        action_masks.extend([False] * (input_len - 1) + [True] * (total_len - input_len) + [False])
 
                         rewards.append(reward)
                 else:
                     # Sequence packing with single turn
-                    action_mask = None
                     rewards = None
                     for i, output in enumerate(outputs):
                         input_len = len(output.prompt_token_ids)
@@ -919,10 +917,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         packed_seq_lens.append(input_len + output_len)
                         sequences.extend(output.prompt_token_ids + list(output.outputs[0].token_ids))
                         attention_mask.extend([i + 1] * (input_len + output_len))
-
+                        action_masks.extend([False] * (input_len - 1) + [True] * output_len + [False])
 
                 # pad seq makes the sequence a multiple of ring_attention_size.
-                pad_len = None
                 if self.strategy.ring_attn_group is not None:
                     pad_len, sequences, attention_mask, num_actions, packed_seq_lens = pad_sequences(
                         sequences=sequences,
@@ -935,6 +932,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
                     sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
+                    action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
 
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
                     response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
@@ -953,7 +951,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 else:
                     sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
-
+                    action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
                     response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
                     samples_list.append(
