@@ -665,6 +665,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
                 # Only rank0 processes the gathered metrics
                 if self.strategy.is_rank_0():
+                    logger.info(f"Evaluating {len(gathered_metrics)} datasources")
                     # Combine metrics from all ranks
                     global_metrics = {}
                     for rank_metrics in gathered_metrics:
@@ -686,7 +687,9 @@ class ActorPPOTrainer(BasePPOTrainer):
                         logs[f"eval_{datasource}_pass1"] = metrics["pass1"] / metrics["count"]
 
                     # Log to wandb/tensorboard
+                    logger.info(f"Logs: {logs}")
                     if self._wandb is not None:
+                        logger.info(f"Logging to wandb")
                         logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": global_step}.items()}
                         self._wandb.log(logs)
                     elif self._tensorboard is not None:
