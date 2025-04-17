@@ -94,6 +94,12 @@ def train(args):
                 f"vllm_num_engines * vllm_tensor_parallel_size, got {args.actor_num_nodes * args.actor_num_gpus_per_node} "
                 f"and {args.vllm_num_engines * args.vllm_tensor_parallel_size}"
             )
+            
+        optimal_cpu_amt = args.rollout_batch_size * args.n_samples_per_prompt
+        if args.max_cpus > 0:
+            optimal_cpu_amt = min(optimal_cpu_amt, args.max_cpus)
+
+        cpu_per_actor = optimal_cpu_amt / (args.actor_num_nodes * args.actor_num_gpus_per_node)
 
         vllm_engines = create_vllm_engines(
             args.vllm_num_engines,
@@ -111,6 +117,7 @@ def train(args):
             args.mongo_uri,
             args.mongo_db_name,
             args.mongo_collection_name,
+            cpu_per_actor,
         )
 
     actor_model = PPORayActorGroup(

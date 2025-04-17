@@ -166,6 +166,7 @@ def create_vllm_engines(
     mongo_uri=None,
     mongo_db_name=None,
     mongo_collection_name=None,
+    cpu_per_actor=None,
 ):
     import vllm
 
@@ -183,7 +184,8 @@ def create_vllm_engines(
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
-        bundles = [{"GPU": 1, "CPU": 8} for _ in range(num_engines * tensor_parallel_size)]
+        
+        bundles = [{"GPU": 1, "CPU": cpu_per_actor or 1} for _ in range(num_engines * tensor_parallel_size)]
         shared_pg = placement_group(bundles, strategy="PACK")
         ray.get(shared_pg.ready())
 
