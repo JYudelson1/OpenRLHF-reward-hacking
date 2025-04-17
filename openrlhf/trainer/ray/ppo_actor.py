@@ -609,33 +609,33 @@ class ActorPPOTrainer(BasePPOTrainer):
             with torch.no_grad():
                 # First collect all prompts and labels
                 all_prompts = []
-                all_labels = []
                 all_datasources = []
 
-                for datasources, prompts, labels in eval_dataloader:
+                for prompts in eval_dataloader:
                     all_prompts.extend(prompts)
-                    all_labels.extend(labels)
-                    all_datasources.extend(datasources)
+                    all_datasources.extend([p.get("datasource", "") for p in prompts])
 
                 # Generate samples and calculate rewards
                 generate_kwargs = self.generate_kwargs.copy()
                 generate_kwargs["temperature"] = temperature
                 generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
-                samples = self.experience_maker.generate_samples(all_prompts, all_labels, **generate_kwargs)
+                samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
                 queries = [self.tokenizer.batch_decode(seq, skip_special_tokens=False) for seq in samples.sequences]
 
                 # duplicate prompts and labels for each sample
                 all_prompts = sum([[prompt] * n_samples_per_prompt for prompt in all_prompts], [])
-                all_labels = sum([[label] * n_samples_per_prompt for label in all_labels], [])
 
                 # Calculate rewards
-                if self.experience_maker.custom_reward_func:
-                    rewards = self.experience_maker.custom_reward_func.remote(queries, all_prompts, all_labels)
+                if samples.rewards is None:
+                    if self.experience_maker.custom_reward_func:
+                        rewards = self.experience_maker.custom_reward_func.remote(queries, all_prompts)
+                    else:
+                        rank = torch.distributed.get_rank() // self.strategy.ring_attn_size
+                        rm = self.remote_rm_url[rank % len(self.remote_rm_url)]
+                        rewards = remote_rm_fn_ray.remote(rm, queries=queries, prompts=all_prompts)
+                    rewards = ray.get(rewards)
                 else:
-                    rank = torch.distributed.get_rank() // self.strategy.ring_attn_size
-                    rm = self.remote_rm_url[rank % len(self.remote_rm_url)]
-                    rewards = remote_rm_fn_ray.remote(rm, queries=queries, prompts=all_prompts, labels=all_labels)
-                rewards = ray.get(rewards)
+                    rewards = samples.rewards
 
                 # Reshape rewards to (num_prompts, n_samples_per_prompt)
                 rewards = rewards.reshape(-1, n_samples_per_prompt)
@@ -833,7 +833,7 @@ class ActorModelRayActor(BasePPORole):
 
         # Create train dataset and dataloader (existing code)
         self.prompts_dataset = PromptDataset(
-            train_data, self.tokenizer, strategy, input_template=args.input_template
+            train_data, self.tokenizer, strategy, input_template=args.input_template, dataset_name=args.prompt_data
         )
         self.prompts_dataloader = strategy.setup_dataloader(
             self.prompts_dataset,
@@ -845,7 +845,7 @@ class ActorModelRayActor(BasePPORole):
         # Create eval dataloader if needed
         if args.eval_steps > 0:
             self.eval_dataset = PromptDataset(
-                eval_data, self.tokenizer, strategy, input_template=args.input_template
+                eval_data, self.tokenizer, strategy, input_template=args.input_template, dataset_name=args.prompt_data
             )
             self.eval_dataloader = strategy.setup_dataloader(
                 self.eval_dataset,
@@ -964,8 +964,6 @@ class ActorModelRayActor(BasePPORole):
             if self.strategy.args.vllm_enable_sleep:
                 batch_vllm_engine_call(vllm_engines, "sleep")
                 torch_dist_barrier_and_cuda_sync()
-
-        trainer.eval_dataloader = self.eval_dataloader
 
         trainer.eval_dataloader = self.eval_dataloader
 

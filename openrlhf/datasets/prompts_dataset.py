@@ -42,6 +42,7 @@ class PromptDataset(Dataset):
         tokenizer,
         strategy,
         input_template=None,
+        dataset_name=""
     ) -> None:
         super().__init__()
         self.strategy = strategy
@@ -61,6 +62,7 @@ class PromptDataset(Dataset):
             prompt, full_data, solution = preprocess_data(data, input_template, input_key, apply_chat_template, multiturn)
             data_entry = {
                 "prompts": prompt,
+                "datasource": dataset_name,
             }
             if full_data is not None:
                 data_entry["full_data"] = full_data
