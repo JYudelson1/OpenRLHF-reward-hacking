@@ -588,7 +588,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
         # TODO: Add evaluation mechanism for PPO
         if global_step % args.eval_steps == 0:
-            self.evaluate(self.eval_dataloader, global_step, args.eval_temperature, args.eval_n_samples_per_prompt, args.eval_steps)
+            self.evaluate(self.eval_dataloader, global_step, args.temperature, args.n_samples_per_prompt, args.eval_steps)
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
         if global_step % args.save_steps == 0:
