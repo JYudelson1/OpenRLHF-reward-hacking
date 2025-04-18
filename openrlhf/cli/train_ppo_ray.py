@@ -274,6 +274,8 @@ if __name__ == "__main__":
 
     # Checkpoints
     parser.add_argument("--eval_steps", type=int, default=-1)
+    parser.add_argument("--eval_ratio", type=float, default=0.03)
+    
     parser.add_argument("--save_steps", type=int, default=-1)
     parser.add_argument("--logging_steps", type=int, default=1)
     parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_ppo_ray")
@@ -508,16 +510,6 @@ if __name__ == "__main__":
         env = importlib.import_module(args.env_file)
         env = getattr(env, args.env_class)
         args.env_maker = lambda *args, **kwargs: env(*args, **kwargs)
-
-    num_rollouts_per_episodes = (
-        args.train_batch_size // args.max_epochs // args.rollout_batch_size // args.n_samples_per_prompt
-    )
-
-    # get eval and save steps
-    if args.eval_steps == -1:
-        args.eval_steps = num_rollouts_per_episodes  # Evaluate once per epoch
-        if args.eval_steps == 0:
-            args.eval_steps = 1
 
     if args.vllm_enable_sleep and not args.colocate_all_models:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
