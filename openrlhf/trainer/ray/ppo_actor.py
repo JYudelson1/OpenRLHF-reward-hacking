@@ -2,6 +2,8 @@ import itertools
 import math
 import os
 import socket
+import time
+import logging
 from typing import Callable, Dict, List
 
 import deepspeed
@@ -29,6 +31,7 @@ from openrlhf.utils import AgentInterface
 from .launcher import BasePPORole
 from .utils import get_physical_gpu_id
 
+logger = logging.getLogger(__name__)
 
 class ActorPPOTrainer(BasePPOTrainer):
     def __init__(
@@ -638,7 +641,8 @@ class ActorPPOTrainer(BasePPOTrainer):
             from openrlhf.trainer.ray.vllm_engine import batch_vllm_engine_call
 
             batch_vllm_engine_call(self.vllm_engines, "wake_up")
-            torch_dist_barrier_and_cuda_sync()
+            torch.distributed.barrier()
+            torch.cuda.synchronize()
 
         # Only run evaluation on ring attention rank0
         if self.strategy.ring_attn_group is None or self.strategy.ring_attn_rank == 0:
@@ -743,7 +747,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         end_time = time.time()
         duration = end_time - start_time
         if self.strategy.is_rank_0():
-            time_str = str(timedelta(seconds=duration)).split(".")[0]
+            time_str = str(time.timedelta(seconds=duration)).split(".")[0]
             logger.info(f"✨ Evaluation completed in {time_str}")
 
     def reload_states(self):
