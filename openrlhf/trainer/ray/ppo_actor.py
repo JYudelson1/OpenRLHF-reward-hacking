@@ -660,6 +660,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 generate_kwargs = self.generate_kwargs.copy()
                 generate_kwargs["temperature"] = temperature
                 generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
+                logger.info(f"Generating these {len(prompts)} prompts: {all_prompts}")
                 samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
                 queries = [self.tokenizer.batch_decode(seq, skip_special_tokens=False) for seq in samples.sequences]
 
