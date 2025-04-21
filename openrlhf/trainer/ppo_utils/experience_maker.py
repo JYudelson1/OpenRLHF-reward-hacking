@@ -769,16 +769,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         args = self.strategy.args
 
-        max_tokens = kwargs.get("max_new_tokens", 1024)
         sampling_params = SamplingParams(
             temperature=kwargs.get("temperature", 1.0),
             top_p=kwargs.get("top_p", 1.0),
             top_k=kwargs.get("top_k", -1),
-            max_tokens=max_tokens,
+            max_tokens=kwargs.get("max_new_tokens", 1024),
             min_tokens=kwargs.get("min_new_tokens", 1),
             skip_special_tokens=kwargs.get("skip_special_tokens", False),
             include_stop_str_in_output=True,
-            truncate_prompt_tokens=max_tokens, # to do: = max_tokens if something_something.args.truncation else None
         )
 
         # Expand prompt list based on the number of samples per prompt
@@ -993,6 +991,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         return samples_list
 
     def _generate_vllm_bare(self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params):
+        logger.info(f"{type(all_prompt_token_ids)=}")
+        for key, value in all_prompt_token_ids.items():
+            logger.info(f"{key=} {type(value)=}")
+        for key, value in all_prompt_token_ids.items():
+            logger.info(f"{key=} {type(value)=} {value.shape=} {value.dtype=}")
+
         has_environment = vars(self.strategy.args).get("env_file", False)
         batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
 
