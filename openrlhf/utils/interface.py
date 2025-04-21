@@ -14,6 +14,7 @@ import logging
 from dataclasses import dataclass
 from pymongo import MongoClient
 from datetime import datetime
+from vllm.transformers_utils.tokenizer import get_tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class AgentInterface(ABC):
         environment_parallelism: Literal["ray", "threading"] = "threading",
         openai_or_anthropic_model: str | None = None,
         anthropic_thinking: Any = None,
+        truncate_prompt_tokens: Optional[int] = None,
         **kwargs,
     ):
         self.num_envs = len(full_data)
@@ -62,6 +64,30 @@ class AgentInterface(ABC):
         self.environment_parallelism = environment_parallelism
         self.openai_or_anthropic_model = openai_or_anthropic_model
         self.anthropic_thinking = anthropic_thinking
+        self.tokenizer = None
+
+        # Set truncate_prompt_tokens in sampling_params if provided
+        if truncate_prompt_tokens is not None:
+            if isinstance(self.llm_engine, vllm.LLM):
+                # Set it in SamplingParams for vLLM
+                self.sampling_params.truncate_prompt_tokens = truncate_prompt_tokens
+                logger.info(f"Set SamplingParams.truncate_prompt_tokens to {truncate_prompt_tokens}")
+
+                # Also try to get tokenizer for manual truncation backup
+                try:
+                    self.tokenizer = self.llm_engine.get_tokenizer()
+                    logger.info(f"Initialized tokenizer for manual input truncation (limit={truncate_prompt_tokens}).")
+                except Exception as e:
+                    logger.warning(
+                        f"Could not get tokenizer from vLLM engine: {e}. "
+                        f"Manual input truncation (limit={truncate_prompt_tokens}) will be disabled."
+                    )
+                    self.tokenizer = None
+            else:
+                logger.warning(
+                    f"truncate_prompt_tokens ({truncate_prompt_tokens}) provided but LLM engine is not vLLM. "
+                    "This parameter will be ignored for both SamplingParams and manual truncation."
+                )
 
         # Check if MongoDB configuration is partially provided
         mongo_params = [mongo_uri, mongo_db_name, mongo_collection_name]
@@ -353,7 +379,66 @@ class AgentInterface(ABC):
         return merged_messages
 
     def _generate_chat_completions_vllm(self, messages: list[list[Message]]) -> list[RequestOutput]:
-        return self.llm_engine.chat(messages=messages, sampling_params=self.sampling_params)  # type: ignore
+        processed_messages = []
+        truncation_limit = getattr(self.sampling_params, 'truncate_prompt_tokens', None)
+
+        # Check if manual truncation is needed (limit set and tokenizer available)
+        if self.tokenizer and truncation_limit:
+            logger.debug(f"Applying manual truncation with limit: {truncation_limit}")
+            for conversation in messages:
+                # Make a copy to modify
+                truncated_conversation = list(conversation)
+
+                while True: # Loop until conversation fits or cannot be truncated further
+                    try:
+                        # Apply chat template and tokenize
+                        token_ids = self.tokenizer.apply_chat_template(
+                            truncated_conversation,
+                            tokenize=True,
+                            add_generation_prompt=False # vLLM likely adds this
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not apply chat template for manual truncation: {e}. "
+                            f"Skipping manual truncation for this conversation: {truncated_conversation[0]['content'][:50]}..."
+                        )
+                        # Use the current state of truncated_conversation before the error
+                        break
+
+                    # Check if token count is within the limit
+                    if len(token_ids) <= truncation_limit:
+                        # Conversation fits, break the inner loop
+                        break
+                    else:
+                        # Token count exceeds limit, try removing the oldest message
+                        if len(truncated_conversation) > 1:
+                            # Remove the first message (oldest)
+                            removed_message = truncated_conversation.pop(0)
+                            logger.debug(f"Manual truncation removed message: {removed_message['role']} - {removed_message['content'][:50]}... (Current tokens: {len(token_ids)})")
+                        else:
+                            # Only one message left, and it's still too long
+                            logger.warning(
+                                f"Single remaining message exceeds truncation limit ({len(token_ids)} > {truncation_limit}). "
+                                f"Cannot truncate further manually. Passing potentially long message to vLLM."
+                            )
+                            break # Stop manual truncation attempts
+
+                # Add the potentially manually truncated conversation to the list
+                processed_messages.append(truncated_conversation)
+
+        else:
+            # No manual truncation needed (limit not set, tokenizer unavailable, or not vLLM)
+            processed_messages = messages
+            if truncation_limit and not self.tokenizer:
+                 logger.debug("Manual truncation skipped: tokenizer not available.")
+            elif not truncation_limit:
+                 logger.debug("Manual truncation skipped: truncate_prompt_tokens not set.")
+
+
+        # Call vLLM chat with the processed messages and original sampling_params
+        # vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
+        logger.debug(f"Calling vLLM chat with {len(processed_messages)} conversations. SamplingParams includes truncate_prompt_tokens={truncation_limit}")
+        return self.llm_engine.chat(messages=processed_messages, sampling_params=self.sampling_params) # type: ignore
 
     def _generate_chat_completions_openai(self, messages: list[list[Message]]) -> list[RequestOutput]:
         assert self.openai_or_anthropic_model is not None, (
