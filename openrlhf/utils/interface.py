@@ -62,6 +62,10 @@ class AgentInterface(ABC):
         self.environment_parallelism = environment_parallelism
         self.openai_or_anthropic_model = openai_or_anthropic_model
         self.anthropic_thinking = anthropic_thinking
+        
+        # Add truncation for the vllm engine instead of crashing at a full prompt
+        if self.openai_or_anthropic_model is None:
+            self.sampling_params.truncate_prompt_tokens = self.llm_engine.llm_engine.model_config.max_model_len
 
         # Check if MongoDB configuration is partially provided
         mongo_params = [mongo_uri, mongo_db_name, mongo_collection_name]
