@@ -999,7 +999,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
 
         if has_environment:
-            ray.get([llm.reset_rollout_cache.remote(world_size=world_size) for llm in llms])
+            ray.get([llm.reset_rollout_cache.remote() for llm in llms])
 
             torch.distributed.barrier()
             torch.cuda.synchronize()

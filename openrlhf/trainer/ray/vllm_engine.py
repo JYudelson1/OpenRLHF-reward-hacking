@@ -101,8 +101,8 @@ class LLMRayActor:
     def wake_up(self):
         self.llm.wake_up()
 
-    def reset_rollout_cache(self, world_size: int) -> None:
-        self.env_data_for_rollout = [None] * world_size
+    def reset_rollout_cache(self) -> None:
+        self.env_data_for_rollout = {}
         self.rollouts = None
 
     def remember_env_data_for_rollout(self, rank: int, data_for_rank: list[dict]) -> None:
@@ -128,7 +128,7 @@ class LLMRayActor:
         )
 
         env = env_maker(
-            full_data=sum(self.env_data_for_rollout, []),
+            full_data=sum(self.env_data_for_rollout.values(), []),
             sampling_params=sampling_params,
             llm_engine=self.llm,
             mongo_uri=self.mongo_uri,
@@ -138,12 +138,16 @@ class LLMRayActor:
 
         rollouts = env.generate_many()
 
-        self.rollouts = [
-            rollouts[i:j]
-            for i, j in pairwise(cumulative_sum(len(data_for_rank) for data_for_rank in self.env_data_for_rollout))
-        ]
+        self.rollouts = {
+            rank: rollouts[i:j]
+            for rank, (i, j) in zip(
+                self.env_data_for_rollout.keys(),
+                pairwise(cumulative_sum(len(data_for_rank) for data_for_rank in self.env_data_for_rollout)),
+                strict=True,
+            )
+        }
 
-        self.env_data_for_rollout = [None] * len(self.env_data_for_rollout)
+        self.env_data_for_rollout = {}
 
         return self.rollouts[rank]
 
