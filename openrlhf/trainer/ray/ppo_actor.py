@@ -662,22 +662,15 @@ class ActorPPOTrainer(BasePPOTrainer):
                 generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
                 logger.info(f"Generating these {len(prompts)} prompts: {all_prompts}")
                 samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
-                queries = [self.tokenizer.batch_decode(seq, skip_special_tokens=False) for seq in samples.sequences]
 
                 # duplicate prompts and labels for each sample
                 all_prompts = sum([[prompt] * n_samples_per_prompt for prompt in all_prompts], [])
 
                 # Calculate rewards
-                if samples.reward is None:
-                    if self.experience_maker.custom_reward_func:
-                        rewards = self.experience_maker.custom_reward_func.remote(queries, all_prompts)
-                    else:
-                        rank = torch.distributed.get_rank() // self.strategy.ring_attn_size
-                        rm = self.remote_rm_url[rank % len(self.remote_rm_url)]
-                        rewards = remote_rm_fn_ray.remote(rm, queries=queries, prompts=all_prompts)
-                    rewards = ray.get(rewards)
+                if samples[0].reward is None:
+                    assert False, "Reward model and remote reward are not currently supported with evaluations"
                 else:
-                    rewards = torch.tensor(samples.reward)
+                    rewards = torch.tensor([sample.reward for sample in samples])
 
                 # Reshape rewards to (num_prompts, n_samples_per_prompt)
                 rewards = rewards.reshape(-1, n_samples_per_prompt)
