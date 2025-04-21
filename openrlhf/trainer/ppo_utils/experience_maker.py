@@ -769,6 +769,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         args = self.strategy.args
 
+        logger.info(f"Truncating prompt tokens to {kwargs.get('truncate_prompt_tokens', None)}")
+        
+
         sampling_params = SamplingParams(
             temperature=kwargs.get("temperature", 1.0),
             top_p=kwargs.get("top_p", 1.0),
