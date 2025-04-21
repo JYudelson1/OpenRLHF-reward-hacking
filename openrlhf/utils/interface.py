@@ -353,6 +353,7 @@ class AgentInterface(ABC):
         return merged_messages
 
     def _generate_chat_completions_vllm(self, messages: list[list[Message]]) -> list[RequestOutput]:
+        self.sampling_params.truncate_prompt_tokens = 300
         return self.llm_engine.chat(messages=messages, sampling_params=self.sampling_params)  # type: ignore
 
     def _generate_chat_completions_openai(self, messages: list[list[Message]]) -> list[RequestOutput]:
