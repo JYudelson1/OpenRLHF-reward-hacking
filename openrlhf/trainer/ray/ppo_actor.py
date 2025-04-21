@@ -2,7 +2,7 @@ import itertools
 import math
 import os
 import socket
-import time
+import time, datetime
 import logging
 from typing import Callable, Dict, List
 
@@ -660,7 +660,6 @@ class ActorPPOTrainer(BasePPOTrainer):
                 generate_kwargs = self.generate_kwargs.copy()
                 generate_kwargs["temperature"] = temperature
                 generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
-                logger.info(f"Generating these {len(prompts)} prompts: {all_prompts}")
                 samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
 
                 # duplicate prompts and labels for each sample
@@ -741,7 +740,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         end_time = time.time()
         duration = end_time - start_time
         if self.strategy.is_rank_0():
-            time_str = str(time.timedelta(seconds=duration)).split(".")[0]
+            time_str = str(datetime.timedelta(seconds=duration)).split(".")[0]
             logger.info(f"✨ Evaluation completed in {time_str}")
 
     def reload_states(self):
