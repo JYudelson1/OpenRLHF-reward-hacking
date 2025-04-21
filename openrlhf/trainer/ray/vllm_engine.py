@@ -110,9 +110,13 @@ class LLMRayActor:
             "You must call LLMRayActor.reset_rollout_cache before calling LLMRayActor.remember_env_data_for_rollout"
         )
 
+        print(f"LLMRayActor.remember_env_data_for_rollout called with {self=} {rank=} {len(data_for_rank)=}")
+
         self.env_data_for_rollout[rank] = data_for_rank
 
     def generate_env_rollout(self, rank: int, sampling_params, env_maker) -> list:
+        print(f"LLMRayActor.generate_env_rollout called with {self=} {rank=}")
+
         if self.rollouts is not None:
             return self.rollouts[rank]
 
