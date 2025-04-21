@@ -870,6 +870,7 @@ class ActorModelRayActor(BasePPORole):
             eos_token_id=self.tokenizer.eos_token_id,
             save_hf_ckpt=args.save_hf_ckpt,
             disable_ds_ckpt=args.disable_ds_ckpt,
+            truncate_prompt_tokens=args.prompt_max_len+args.generate_max_len
         )
 
         # broadcast checkpoint

@@ -777,6 +777,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             min_tokens=kwargs.get("min_new_tokens", 1),
             skip_special_tokens=kwargs.get("skip_special_tokens", False),
             include_stop_str_in_output=True,
+            truncate_prompt_tokens=kwargs.get("truncate_prompt_tokens", None)
         )
 
         # Expand prompt list based on the number of samples per prompt
