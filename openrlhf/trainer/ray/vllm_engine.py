@@ -142,7 +142,7 @@ class LLMRayActor:
             rank: rollouts[i:j]
             for rank, (i, j) in zip(
                 self.env_data_for_rollout.keys(),
-                pairwise(cumulative_sum(len(data_for_rank) for data_for_rank in self.env_data_for_rollout)),
+                pairwise(cumulative_sum(len(data_for_rank) for data_for_rank in self.env_data_for_rollout.values())),
                 strict=True,
             )
         }
