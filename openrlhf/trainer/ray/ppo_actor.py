@@ -594,6 +594,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             self.evaluate(self.eval_dataloader, global_step, args.temperature, args.n_samples_per_prompt, args.eval_steps)
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
+        print(f"{args.save_steps=}")
         if global_step % args.save_steps == 0:
             tag = f"global_step{global_step}"
             self._save_checkpoint(args, tag, client_states)
