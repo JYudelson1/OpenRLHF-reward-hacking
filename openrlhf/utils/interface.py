@@ -12,6 +12,7 @@ import json
 import ray
 import logging
 from dataclasses import dataclass
+
 from pymongo import MongoClient
 from datetime import datetime
 from vllm.transformers_utils.tokenizer import get_tokenizer
@@ -106,7 +107,6 @@ class AgentInterface(ABC):
         times_doing_environment_steps = []
         times_generating_completions = []
         times_evaluating_is_done = []
-        times_uploading_to_mongo_db = []
 
         # Initialize states for all conversations
         llm_engine = self.llm_engine
@@ -301,27 +301,8 @@ class AgentInterface(ABC):
             )
 
         # Upload results to MongoDB after all processing is complete
-        mongo_params = [self.mongo_uri, self.mongo_db_name, self.mongo_collection_name]
-        if all(mongo_params):
-            mongodb_start_time = perf_counter()
-            try:
-                # Connect to MongoDB
-                mongo_client = MongoClient(self.mongo_uri)
-                mongo_db = mongo_client[self.mongo_db_name]
-                mongo_collection = mongo_db[self.mongo_collection_name]
-
-                # Upload all results
-                for i, data in enumerate(results_data):
-                    # Add timestamp at upload time
-                    data["timestamp"] = datetime.utcnow()
-                    mongo_collection.insert_one(data)
-
-                logger.info(f"Uploaded {len(results_data)} conversations to MongoDB")
-                mongo_client.close()
-            except Exception as e:
-                logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
-            mongodb_end_time = perf_counter()
-            times_uploading_to_mongo_db.append(mongodb_end_time - mongodb_start_time)
+        
+        self.log_rollouts_mongodb(results_data)
 
         everything_end_time = perf_counter()
         total_time = everything_end_time - everything_start_time
@@ -340,7 +321,6 @@ class AgentInterface(ABC):
             f"Evaluating whether environments are done: {int(sum(times_evaluating_is_done))} seconds ({sum(times_evaluating_is_done) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_evaluating_is_done)})"
         )
         logger.info(f"Computing rewards: {int(time_computing_rewards)} ({time_computing_rewards / total_time:.0%})")
-        logger.info(f"Uploading to MongoDB: {int(sum(times_uploading_to_mongo_db))} seconds ({sum(times_uploading_to_mongo_db) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_uploading_to_mongo_db)})")
         unaccounted_for_time = (
             total_time
             - sum(times_generating_completions)
@@ -354,6 +334,26 @@ class AgentInterface(ABC):
         )
 
         return results
+    
+    def log_rollouts_mongodb(self, results_data: list[dict]) -> None:
+        mongo_params = [self.mongo_uri, self.mongo_db_name, self.mongo_collection_name]
+        if all(mongo_params):
+            try:
+                # Connect to MongoDB
+                mongo_client = MongoClient(self.mongo_uri)
+                mongo_db = mongo_client[self.mongo_db_name]
+                mongo_collection = mongo_db[self.mongo_collection_name]
+
+                # Upload all results
+                for i, data in enumerate(results_data):
+                    # Add timestamp at upload time
+                    data["timestamp"] = datetime.utcnow()
+                    mongo_collection.insert_one(data)
+
+                logger.info(f"Uploaded {len(results_data)} conversations to MongoDB")
+                mongo_client.close()
+            except Exception as e:
+                logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
 
     def _generate_chat_completions(self, messages: list[list[Message]]) -> list[RequestOutput]:
         if isinstance(self.llm_engine, vllm.LLM):
