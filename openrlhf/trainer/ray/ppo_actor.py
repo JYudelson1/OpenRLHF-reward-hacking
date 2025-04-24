@@ -763,7 +763,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
         name = "rollouts"
         if train_or_eval is not None:
-            name = f"{train_or_eval}-{train_or_eval}"
+            name += f"-{train_or_eval}"
         if episode is not None:
             name += f"-episode-{episode}"
         if steps is not None:
