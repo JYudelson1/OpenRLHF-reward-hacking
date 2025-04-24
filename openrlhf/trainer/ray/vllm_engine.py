@@ -195,7 +195,7 @@ def create_vllm_engines(
             if max_cpus > 0:
                 optimal_cpu_amt = min(optimal_cpu_amt, max_cpus)
 
-            cpu_per_actor = optimal_cpu_amt / (actor_num_nodes * actor_num_gpus_per_node)
+            cpu_per_actor = optimal_cpu_amt / (actor_num_gpus_per_node)
         # Create a big placement group to ensure that all engines are packed
         bundles = [{"GPU": 1, "CPU": cpu_per_actor} for _ in range(num_engines * tensor_parallel_size)]
         shared_pg = placement_group(bundles, strategy="PACK")
