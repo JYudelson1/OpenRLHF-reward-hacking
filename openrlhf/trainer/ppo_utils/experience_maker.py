@@ -61,6 +61,7 @@ class Experience:
     action_mask: Optional[torch.BoolTensor]
     info: Optional[dict]
     kl: Optional[torch.Tensor] = None
+    json_rollouts: list | None = None
 
     @torch.no_grad()
     def to_device(self, device: torch.device):
@@ -123,6 +124,7 @@ class Samples:
     reward: Optional[List[float]]
     solutions: Optional[List[str]]
     pad_len: Optional[int]
+    json_rollouts: list | None = None
 
 
 class BaseExperienceMaker(ABC):
@@ -480,6 +482,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 samples.action_mask,
                 info,
                 kl,
+                json_rollouts=samples.json_rollouts,
             )
 
             experiences.append(experience)
@@ -796,6 +799,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             sampling_params=sampling_params,
         )
 
+        json_rollouts = [{"rollout": conversation.messages, "reward": reward} for conversation, reward in all_outputs]
+
         # Waiting for all requests to be sent
         if self.strategy.ring_attn_group is not None:
             if self.ring_rank0_group is None:
@@ -868,6 +873,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         reward=None,
                         solutions=solutions.copy() if solutions[0] is not None else None,
                         pad_len=None,
+                        json_rollouts=json_rollouts,
                     )
                 )
             else:
@@ -966,6 +972,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             reward=rewards,
                             solutions=solutions.copy() if solutions[0] is not None else None,
                             pad_len=pad_len,
+                            json_rollouts=json_rollouts,
                         )
                     )
                 else:
@@ -986,6 +993,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             reward=rewards,
                             solutions=solutions.copy() if solutions[0] is not None else None,
                             pad_len=None,
+                            json_rollouts=json_rollouts,
                         )
                     )
         return samples_list

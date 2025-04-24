@@ -1,4 +1,5 @@
 import itertools
+import json
 import math
 import os
 import socket
@@ -212,6 +213,8 @@ class ActorPPOTrainer(BasePPOTrainer):
                         )
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
+
+                    self.log_rollouts_wandb(experience.json_rollouts, episode=episode, steps=steps, i_experience=i, train_or_eval="train")
 
                 if self.args.advantage_estimator not in ["group_norm", "dr_grpo"]:
                     self.replay_buffer.normalize(
@@ -663,6 +666,8 @@ class ActorPPOTrainer(BasePPOTrainer):
                 generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
                 samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
 
+                self.log_rollouts_wandb([sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval")
+
                 # duplicate prompts and labels for each sample
                 all_prompts = sum([[prompt] * n_samples_per_prompt for prompt in all_prompts], [])
 
@@ -749,6 +754,36 @@ class ActorPPOTrainer(BasePPOTrainer):
 
     def offload_states(self):
         offload_deepspeed_states(self.actor.model)
+
+    def log_rollouts_wandb(self, json_rollouts, episode=None, steps=None, i_experience=None, global_step=None, train_or_eval=None) -> None:
+        if self._wandb is None:
+            return
+        if not self.strategy.is_rank_0():
+            return
+
+        name = "rollouts"
+        if train_or_eval is not None:
+            name = f"{train_or_eval}-{train_or_eval}"
+        if episode is not None:
+            name += f"-episode-{episode}"
+        if steps is not None:
+            name += f"-steps-{steps}"
+        if i_experience is not None:
+            name += f"-experience-{i_experience}"
+        if global_step is not None:
+            name += f"-global-step-{global_step}"
+
+        try:
+            text_rollouts = json.dumps(json_rollouts)
+            filename = name + ".json"
+        except json.decoder.JSONDecodeError:
+            text_rollouts = str(json_rollouts)
+            filename = name + ".txt"
+
+        artifact = self._wandb.Artifact(name=name, type="rollouts")
+        with artifact.new_file(filename) as f:
+            f.write(text_rollouts)
+        self._wandb.log_artifact(artifact)
 
 
 @ray.remote(num_gpus=1)
@@ -1029,6 +1064,7 @@ class ActorModelRayActor(BasePPORole):
             self.tokenizer,
             args.save_path,
         )
+
 
 def custom_collate_fn(batch):
     return batch
