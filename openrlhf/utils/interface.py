@@ -49,7 +49,7 @@ class AgentInterface(ABC):
         mongo_uri: Optional[str] = None,
         mongo_db_name: Optional[str] = None,
         mongo_collection_name: Optional[str] = None,
-        environment_parallelism: Literal["ray", "threading"] = "threading",
+        environment_parallelism: Literal["ray", "threading"] | None = "threading",
         openai_or_anthropic_model: str | None = None,
         anthropic_thinking: Any = None,
         truncate_prompt_tokens: Optional[int] = None,
@@ -579,6 +579,9 @@ class AgentInterface(ABC):
         pass
 
     def run_environment_calls_in_parallel(self, calls: Iterable[DelayedFunction]) -> list[Any]:
+        if self.environment_parallelism is None:
+            return [call.function(*call.args, **call.kwargs) for call in calls]
+
         if self.environment_parallelism == "ray":
             return ray.get([call.remote_function.remote(*call.args, **call.kwargs) for call in calls])
 
@@ -593,7 +596,7 @@ class AgentInterface(ABC):
             return results
 
         raise ValueError(
-            f"Invalid value `{self.environment_parallelism}` of AgentInterface.environment_parallelism. It should be either 'ray' or 'threading'."
+            f"Invalid value `{self.environment_parallelism}` of AgentInterface.environment_parallelism. It should be either 'ray', 'threading', or None."
         )
 
 
