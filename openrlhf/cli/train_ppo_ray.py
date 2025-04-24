@@ -111,6 +111,11 @@ def train(args):
             args.mongo_uri,
             args.mongo_db_name,
             args.mongo_collection_name,
+            rollout_batch_size=args.rollout_batch_size,
+            n_samples_per_prompt=args.n_samples_per_prompt,
+            actor_num_nodes=args.actor_num_nodes,
+            actor_num_gpus_per_node=args.actor_num_gpus_per_node,
+            max_cpus=args.max_cpus,
         )
 
     actor_model = PPORayActorGroup(
