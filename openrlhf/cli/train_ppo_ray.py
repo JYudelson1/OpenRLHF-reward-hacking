@@ -73,10 +73,10 @@ def train(args):
         if args.max_cpus > 0:
             optimal_cpu_amt = min(optimal_cpu_amt, args.max_cpus)
 
-        cpu_per_actor = optimal_cpu_amt / (args.actor_num_gpus_per_node)
+        cpu_per_actor = optimal_cpu_amt / (args.actor_num_nodes * args.actor_num_gpus_per_node)
 
         bundles = [
-            {"GPU": 1, "CPU": cpu_per_actor} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)
+            {"GPU": 1, "CPU": 1} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)
         ]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
