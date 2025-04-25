@@ -79,10 +79,10 @@ def train(args):
             {"GPU": 1, "CPU": cpu_per_actor} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)
         ]
         if args.actor_num_nodes == 1:
-            strategy = "PACK"
+            pack_strategy = "PACK"
         else:
-            strategy = "SPREAD"
-        pg = placement_group(bundles, strategy=strategy)
+           pack_strategy = "SPREAD"
+        pg = placement_group(bundles,strategy=pack_strategy)
         ray.get(pg.ready())
 
     # init vLLM engine for text generation
