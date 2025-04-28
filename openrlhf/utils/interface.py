@@ -5,7 +5,14 @@ from time import perf_counter
 from typing import *
 import ray.remote_function
 import vllm
-from vllm import CompletionOutput, SamplingParams, RequestOutput
+from vllm import CompletionOutput, SamplingParams, RequestOutput, ChatTemplateContentFormatOption, LoRARequest, ChatCompletionMessageParam
+from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
+                                         ChatTemplateContentFormatOption,
+                                         apply_hf_chat_template,
+                                         apply_mistral_chat_template,
+                                         parse_chat_messages,
+                                         resolve_chat_template_content_format)
+from vllm.inputs import TokensPrompt
 from openai import OpenAI
 from anthropic import Anthropic
 import json
@@ -443,7 +450,125 @@ class AgentInterface(ABC):
         # Call vLLM chat with the processed messages and original sampling_params
         # vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
         logger.debug(f"Calling vLLM chat with {len(processed_messages)} conversations. SamplingParams includes truncate_prompt_tokens={truncation_limit}")
-        return self.llm_engine.chat(messages=processed_messages, sampling_params=self.sampling_params) # type: ignore
+        return self.vllm_chat_with_truncation(
+            self.llm_engine, 
+            messages=processed_messages, 
+            sampling_params=self.sampling_params, 
+            truncation_amt=truncation_limit
+        )    
+    
+    def _vllm_chat_with_truncation(
+        engine: vllm.LLM,
+        messages: list[list[Message]],
+        sampling_params: SamplingParams,
+        use_tqdm: bool = True,
+        lora_request: Optional[LoRARequest] = None,
+        chat_template: Optional[str] = None,
+        chat_template_content_format: ChatTemplateContentFormatOption = "auto",
+        add_generation_prompt: bool = True,
+        continue_final_message: bool = False,
+        tools: Optional[list[dict[str, Any]]] = None,
+        truncation_amt: Optional[int] = None
+    ) -> list[RequestOutput]:
+        """
+        Generate responses for a chat conversation.
+
+        The chat conversation is converted into a text prompt using the
+        tokenizer and calls the :meth:`generate` method to generate the
+        responses.
+
+        Multi-modal inputs can be passed in the same way you would pass them
+        to the OpenAI API.
+
+        Args:
+            messages: A list of conversations or a single conversation.
+
+              - Each conversation is represented as a list of messages.
+              - Each message is a dictionary with 'role' and 'content' keys.
+
+            sampling_params: The sampling parameters for text generation.
+                If None, we use the default sampling parameters. When it
+                is a single value, it is applied to every prompt. When it
+                is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
+            use_tqdm: Whether to use tqdm to display the progress bar.
+            lora_request: LoRA request to use for generation, if any.
+            chat_template: The template to use for structuring the chat.
+              If not provided, the model's default chat template will be used.
+            chat_template_content_format: The format to render message content.
+
+              - "string" will render the content as a string.
+                Example: ``"Who are you?"``
+              - "openai" will render the content as a list of dictionaries,
+                similar to OpenAI schema.
+                Example: ``[{"type": "text", "text": "Who are you?"}]``
+
+            add_generation_prompt: If True, adds a generation template
+                to each message.
+            continue_final_message: If True, continues the final message in
+                the conversation instead of starting a new one. Cannot be
+                ``True`` if ``add_generation_prompt`` is also ``True``.
+            mm_processor_kwargs: Multimodal processor kwarg overrides for this
+                chat request. Only used for offline requests.
+
+        Returns:
+            A list of ``RequestOutput`` objects containing the generated
+            responses in the same order as the input messages.
+        """
+        list_of_messages: list[list[ChatCompletionMessageParam]]
+
+        tokenizer = engine.get_tokenizer(lora_request)
+        model_config = engine.llm_engine.get_model_config()
+        resolved_content_format = resolve_chat_template_content_format(
+            chat_template,
+            tools,
+            chat_template_content_format,
+            tokenizer,
+            trust_remote_code=model_config.trust_remote_code,
+        )
+
+        prompts: list[TokensPrompt] = []
+
+        for msgs in list_of_messages:
+            # NOTE: _parse_chat_message_content_parts() currently doesn't
+            # handle mm_processor_kwargs, since there is no implementation in
+            # the chat message parsing for it.
+            conversation, _ = parse_chat_messages(
+                msgs,
+                model_config,
+                tokenizer,
+                content_format=resolved_content_format,
+            )
+
+            prompt_str = apply_hf_chat_template(
+                tokenizer,
+                trust_remote_code=model_config.trust_remote_code,
+                conversation=conversation,
+                chat_template=chat_template,
+                tools=tools,
+                add_generation_prompt=add_generation_prompt,
+                continue_final_message=continue_final_message,
+            )
+            # Special tokens are already included in chat templates so
+            # should not be added by the tokenizer in this case.
+            prompt_token_ids = tokenizer.encode(prompt_str,
+                                                add_special_tokens=False)
+            
+            # Truncate the prompt if necessary
+            if truncation_amt is not None and len(prompt_token_ids) > truncation_amt:
+                prompt_token_ids = prompt_token_ids[:truncation_amt]
+                logger.warning(f"Truncated prompt from {len(prompt_token_ids)} tokens to {truncation_amt} tokens.")
+            
+            prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
+
+            prompts.append(prompt)
+
+        return engine.generate(
+            prompts,
+            sampling_params=sampling_params,
+            use_tqdm=use_tqdm,
+            lora_request=lora_request,
+        )
 
     def _generate_chat_completions_openai(self, messages: list[list[Message]]) -> list[RequestOutput]:
         assert self.openai_or_anthropic_model is not None, (
