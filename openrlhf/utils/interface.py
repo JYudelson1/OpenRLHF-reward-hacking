@@ -5,7 +5,9 @@ from time import perf_counter
 from typing import *
 import ray.remote_function
 import vllm
-from vllm import CompletionOutput, SamplingParams, RequestOutput, LoRARequest
+from vllm import CompletionOutput, SamplingParams
+from vllm.outputs import RequestOutput
+from vllm.lora.request import LoRARequest
 from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
                                          ChatTemplateContentFormatOption,
                                          apply_hf_chat_template,
