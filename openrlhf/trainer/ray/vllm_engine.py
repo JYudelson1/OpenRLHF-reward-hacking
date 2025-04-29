@@ -212,8 +212,6 @@ def create_vllm_engines(
         shared_pg = placement_group(bundles, strategy="PACK")
         ray.get(shared_pg.ready())
 
-    engine_refs = []
-    
     for i in range(num_engines):
         bundle_indices = None
         if tensor_parallel_size > 1:
@@ -230,8 +228,7 @@ def create_vllm_engines(
         else:
             num_actors = num_total_actors // num_engines + int(i < num_total_actors % num_engines)
 
-        # Create the engine asynchronously
-        engine_ref = LLMRayActor.options(
+        engine = LLMRayActor.options(
             num_cpus=num_gpus,
             num_gpus=num_gpus,
             scheduling_strategy=scheduling_strategy,
@@ -258,19 +255,20 @@ def create_vllm_engines(
             mongo_collection_name=mongo_collection_name,
         )
         
-        engine_refs.append(engine_ref)
+        # Force initialization by calling a method on the engine
+        # This is the key change - we're actually triggering the initialization
+        if stagger_init:
+            logger.info(f"Initializing vLLM engine {i+1}/{num_engines}")
+            # Call a lightweight method to trigger initialization
+            ray.get(engine.get_engine_version.remote())
+            logger.info(f"vLLM engine {i+1}/{num_engines} initialized")
+            
+            # Wait before initializing the next engine
+            if i < num_engines - 1:
+                logger.info(f"Waiting {stagger_delay}s before initializing next engine")
+                time.sleep(stagger_delay)
         
-        # If staggered initialization is enabled, wait for the current engine to initialize
-        # before starting the next one
-        if stagger_init and i < num_engines - 1:
-            logger.info(f"Initialized vLLM engine {i+1}/{num_engines}, waiting {stagger_delay}s before next initialization")
-            # We don't need to wait for the engine to be fully initialized,
-            # just give it a head start to avoid resource contention
-            time.sleep(stagger_delay)
-    
-    # Now collect all the engines
-    for ref in engine_refs:
-        vllm_engines.append(ref)
+        vllm_engines.append(engine)
 
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
