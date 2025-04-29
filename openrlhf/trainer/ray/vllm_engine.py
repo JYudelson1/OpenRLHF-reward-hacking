@@ -260,7 +260,7 @@ def create_vllm_engines(
         if stagger_init:
             logger.info(f"Initializing vLLM engine {i+1}/{num_engines}")
             # Call a lightweight method to trigger initialization
-            ray.get(engine)
+            ray.get(engine.reset_rollout_cache.remote())
             logger.info(f"vLLM engine {i+1}/{num_engines} initialized")
             
             # Wait before initializing the next engine
