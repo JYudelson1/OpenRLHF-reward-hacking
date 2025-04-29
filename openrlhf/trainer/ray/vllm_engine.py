@@ -180,11 +180,8 @@ def create_vllm_engines(
     actor_num_nodes=None,
     actor_num_gpus_per_node=None,
     max_cpus=None,
-    stagger_init=False,
-    stagger_delay=30,
 ):
     import vllm
-    import time
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
@@ -254,19 +251,6 @@ def create_vllm_engines(
             mongo_db_name=mongo_db_name,
             mongo_collection_name=mongo_collection_name,
         )
-        
-        # Force initialization by calling a method on the engine
-        # This is the key change - we're actually triggering the initialization
-        if stagger_init:
-            logger.info(f"Initializing vLLM engine {i+1}/{num_engines}")
-            # Call a lightweight method to trigger initialization
-            ray.get(engine.reset_rollout_cache.remote())
-            logger.info(f"vLLM engine {i+1}/{num_engines} initialized")
-            
-            # Wait before initializing the next engine
-            if i < num_engines - 1:
-                logger.info(f"Waiting {stagger_delay}s before initializing next engine")
-                time.sleep(stagger_delay)
         
         vllm_engines.append(engine)
 
