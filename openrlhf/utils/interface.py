@@ -5,11 +5,10 @@ from time import perf_counter
 from typing import *
 import ray.remote_function
 import vllm
-from vllm import CompletionOutput, SamplingParams, RequestOutput, ChatTemplateContentFormatOption, LoRARequest, ChatCompletionMessageParam
+from vllm import CompletionOutput, SamplingParams, RequestOutput, LoRARequest
 from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
                                          ChatTemplateContentFormatOption,
                                          apply_hf_chat_template,
-                                         apply_mistral_chat_template,
                                          parse_chat_messages,
                                          resolve_chat_template_content_format)
 from vllm.inputs import TokensPrompt
