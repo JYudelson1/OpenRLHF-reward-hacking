@@ -180,8 +180,11 @@ def create_vllm_engines(
     actor_num_nodes=None,
     actor_num_gpus_per_node=None,
     max_cpus=None,
+    stagger_init=False,
+    stagger_delay=30,
 ):
     import vllm
+    import time
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
@@ -209,6 +212,8 @@ def create_vllm_engines(
         shared_pg = placement_group(bundles, strategy="PACK")
         ray.get(shared_pg.ready())
 
+    engine_refs = []
+    
     for i in range(num_engines):
         bundle_indices = None
         if tensor_parallel_size > 1:
@@ -225,34 +230,47 @@ def create_vllm_engines(
         else:
             num_actors = num_total_actors // num_engines + int(i < num_total_actors % num_engines)
 
-        vllm_engines.append(
-            LLMRayActor.options(
-                num_cpus=num_gpus,
-                num_gpus=num_gpus,
-                scheduling_strategy=scheduling_strategy,
-            ).remote(
-                model=pretrain,
-                enforce_eager=enforce_eager,
-                worker_extension_cls="openrlhf.trainer.ray.vllm_worker_wrap.WorkerWrap",
-                tensor_parallel_size=tensor_parallel_size,
-                seed=seed + i,
-                distributed_executor_backend=distributed_executor_backend,
-                max_model_len=max_model_len,
-                enable_prefix_caching=enable_prefix_caching,
-                dtype="bfloat16",
-                trust_remote_code=True,
-                full_determinism=full_determinism,
-                num_actors=num_actors,
-                gpu_memory_utilization=gpu_memory_utilization,
-                bundle_indices=bundle_indices,
-                num_gpus=0.2 if use_hybrid_engine else 1,
-                enable_sleep_mode=vllm_enable_sleep,
-                noset_visible_devices=noset_visible_devices,
-                mongo_uri=mongo_uri,
-                mongo_db_name=mongo_db_name,
-                mongo_collection_name=mongo_collection_name,
-            )
+        # Create the engine asynchronously
+        engine_ref = LLMRayActor.options(
+            num_cpus=num_gpus,
+            num_gpus=num_gpus,
+            scheduling_strategy=scheduling_strategy,
+        ).remote(
+            model=pretrain,
+            enforce_eager=enforce_eager,
+            worker_extension_cls="openrlhf.trainer.ray.vllm_worker_wrap.WorkerWrap",
+            tensor_parallel_size=tensor_parallel_size,
+            seed=seed + i,
+            distributed_executor_backend=distributed_executor_backend,
+            max_model_len=max_model_len,
+            enable_prefix_caching=enable_prefix_caching,
+            dtype="bfloat16",
+            trust_remote_code=True,
+            full_determinism=full_determinism,
+            num_actors=num_actors,
+            gpu_memory_utilization=gpu_memory_utilization,
+            bundle_indices=bundle_indices,
+            num_gpus=0.2 if use_hybrid_engine else 1,
+            enable_sleep_mode=vllm_enable_sleep,
+            noset_visible_devices=noset_visible_devices,
+            mongo_uri=mongo_uri,
+            mongo_db_name=mongo_db_name,
+            mongo_collection_name=mongo_collection_name,
         )
+        
+        engine_refs.append(engine_ref)
+        
+        # If staggered initialization is enabled, wait for the current engine to initialize
+        # before starting the next one
+        if stagger_init and i < num_engines - 1:
+            logger.info(f"Initialized vLLM engine {i+1}/{num_engines}, waiting {stagger_delay}s before next initialization")
+            # We don't need to wait for the engine to be fully initialized,
+            # just give it a head start to avoid resource contention
+            time.sleep(stagger_delay)
+    
+    # Now collect all the engines
+    for ref in engine_refs:
+        vllm_engines.append(ref)
 
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)

@@ -120,6 +120,8 @@ def train(args):
             actor_num_nodes=args.actor_num_nodes,
             actor_num_gpus_per_node=args.actor_num_gpus_per_node,
             max_cpus=args.max_cpus,
+            stagger_init=args.stagger_init,
+            stagger_delay=args.stagger_delay,
         )
 
     actor_model = PPORayActorGroup(
@@ -476,6 +478,20 @@ if __name__ == "__main__":
     # Cpus for multiple environments running
     parser.add_argument(
         "--max_cpus", type=int, default=-1, help="Maximum number of CPUs to use for multiple environments running"
+    )
+
+    # Stagger initialization
+    parser.add_argument(
+        "--stagger_init", 
+        action="store_true", 
+        default=False,
+        help="Stagger vLLM engine initialization to avoid deadlocks"
+    )
+    parser.add_argument(
+        "--stagger_delay", 
+        type=int, 
+        default=30,
+        help="Delay in seconds between vLLM engine initializations when stagger_init is enabled"
     )
 
     args = parser.parse_args()
