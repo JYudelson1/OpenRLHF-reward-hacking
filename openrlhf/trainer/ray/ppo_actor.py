@@ -272,12 +272,12 @@ class ActorPPOTrainer(BasePPOTrainer):
             )
 
             for (rollout_num, rand_prompts) in enumerate(self.prompts_dataloader):
-                rollout_ref = ray.remote(self.experience_maker.make_experience_list).remote(
-                    rand_prompts, **self.generate_kwargs
+                rollout_ref = make_experience_list_remote.remote(
+                    self.experience_maker, rand_prompts, **self.generate_kwargs
                 )
                 
                 if rollout_num > 0:
-                    train_ref = ray.remote(self._train).remote(steps, pbar, args)
+                    train_ref = train_remote.remote(self, steps, pbar, args)
                     rollout_experiences, _ = ray.get([rollout_ref, train_ref])
                     steps = steps + 1
                 else:
@@ -1152,3 +1152,14 @@ class ActorModelRayActor(BasePPORole):
 
 def custom_collate_fn(batch):
     return batch
+
+## Ray Remote Functions
+
+@ray.remote
+def make_experience_list_remote(experience_maker, prompts, **generate_kwargs):
+    return experience_maker.make_experience_list(prompts, **generate_kwargs)
+
+@ray.remote
+def train_remote(trainer, steps, pbar, args):
+    return trainer._train(steps, pbar, args)
+
