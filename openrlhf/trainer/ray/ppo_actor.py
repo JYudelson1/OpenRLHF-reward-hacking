@@ -175,7 +175,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         else:
             self._fit(args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes)
 
-    def _fit_one_off(
+    def _fit(
         self,
         args,
         prompts_dataloader,
@@ -237,7 +237,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         if self._tensorboard is not None and self.strategy.is_rank_0():
             self._tensorboard.close()
             
-    def _fit(self, args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes):
+    def _fit_one_off(self, args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes):
         num_rollouts_per_episodes = (
             num_update_steps_per_episodes
             * args.train_batch_size
@@ -282,6 +282,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                     steps = steps + 1
                 else:
                     # First rollout logic
+                    logger.info(f"First rollout, waiting for rollout to complete...")
                     rollout_experiences = ray.get(rollout_ref)
                     
                 for i, experience in enumerate(
