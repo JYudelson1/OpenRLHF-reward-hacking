@@ -170,6 +170,19 @@ class ActorPPOTrainer(BasePPOTrainer):
         consumed_samples=0,
         num_update_steps_per_episodes=1,
     ) -> None:
+        if args.one_off_pipeline:
+            self._fit_one_off(args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes)
+        else:
+            self._fit(args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes)
+
+    def _fit(
+        self,
+        args,
+        prompts_dataloader,
+        pretrain_dataloader,
+        consumed_samples=0,
+        num_update_steps_per_episodes=1,
+    ) -> None:
         num_rollouts_per_episodes = (
             num_update_steps_per_episodes
             * args.train_batch_size
@@ -216,28 +229,98 @@ class ActorPPOTrainer(BasePPOTrainer):
 
                     self.log_rollouts_wandb(experience.json_rollouts, episode=episode, steps=steps, i_experience=i, train_or_eval="train")
 
-                if self.args.advantage_estimator not in ["group_norm", "dr_grpo"]:
-                    self.replay_buffer.normalize(
-                        self.strategy, "advantages", divide_by_std=not self.args.no_advantage_std_norm
-                    )
-                status = self.ppo_train(steps)
-                self.replay_buffer.clear()
-
-                if "kl" in status:
-                    self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
-                pbar.set_postfix(status)
-
-                # logs/checkpoints
-                client_states = {"consumed_samples": steps * args.rollout_batch_size}
-                self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
-
-                pbar.update()
+                self._train(steps, pbar, args)
                 steps = steps + 1
 
         if self._wandb is not None and self.strategy.is_rank_0():
             self._wandb.finish()
         if self._tensorboard is not None and self.strategy.is_rank_0():
             self._tensorboard.close()
+            
+    def _fit_one_off(self, args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes):
+        num_rollouts_per_episodes = (
+            num_update_steps_per_episodes
+            * args.train_batch_size
+            // args.max_epochs
+            // args.rollout_batch_size
+            // args.n_samples_per_prompt
+        )
+
+        # get eval and save steps
+        if args.eval_steps == -1:
+            args.eval_steps = num_rollouts_per_episodes  # Evaluate once per epoch
+        if args.save_steps == -1:
+            args.save_steps = float("inf")  # do not save ckpt
+
+        self.prompts_dataloader = prompts_dataloader
+        self.pretrain_dataloader = pretrain_dataloader
+
+        # Restore step and start_epoch
+        steps = consumed_samples // args.rollout_batch_size + 1
+        start_episode = consumed_samples // args.rollout_batch_size // num_rollouts_per_episodes
+        consumed_samples = consumed_samples % (num_rollouts_per_episodes * args.rollout_batch_size)
+        
+        for episode in range(start_episode, args.num_episodes):
+            if isinstance(self.prompts_dataloader.sampler, DistributedSampler):
+                self.prompts_dataloader.sampler.set_epoch(
+                    episode, consumed_samples=0 if episode > start_episode else consumed_samples
+                )
+            pbar = tqdm(
+                range(self.prompts_dataloader.__len__()),
+                desc=f"Episode [{episode + 1}/{args.num_episodes}]",
+                disable=not self.strategy.is_rank_0(),
+            )
+
+            for (rollout_num, rand_prompts) in enumerate(self.prompts_dataloader):
+                rollout_ref = ray.remote(self.experience_maker.make_experience_list).remote(
+                    rand_prompts, **self.generate_kwargs
+                )
+                
+                if rollout_num > 0:
+                    train_ref = ray.remote(self._train).remote(steps, pbar, args)
+                    rollout_experiences, _ = ray.get([rollout_ref, train_ref])
+                    steps = steps + 1
+                else:
+                    # First rollout logic
+                    rollout_experiences = ray.get(rollout_ref)
+                    
+                for i, experience in enumerate(
+                    rollout_experiences
+                ):
+                    if i == 0:
+                        output = self.tokenizer.batch_decode(
+                            experience.sequences[0].unsqueeze(0), skip_special_tokens=True
+                        )
+                        self.strategy.print(output)
+                    self.replay_buffer.append(experience)
+
+                    self.log_rollouts_wandb(experience.json_rollouts, episode=episode, steps=steps, i_experience=i, train_or_eval="train")
+
+                
+                
+
+        if self._wandb is not None and self.strategy.is_rank_0():
+            self._wandb.finish()
+        if self._tensorboard is not None and self.strategy.is_rank_0():
+            self._tensorboard.close()
+            
+    def _train(self, steps, pbar, args):
+        if self.args.advantage_estimator not in ["group_norm", "dr_grpo"]:
+            self.replay_buffer.normalize(
+                self.strategy, "advantages", divide_by_std=not self.args.no_advantage_std_norm
+            )
+        status = self.ppo_train(steps)
+        self.replay_buffer.clear()
+
+        if "kl" in status:
+            self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
+        pbar.set_postfix(status)
+
+        # logs/checkpoints
+        client_states = {"consumed_samples": steps * args.rollout_batch_size}
+        self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
+
+        pbar.update()
 
     def ppo_train(self, global_steps):
         # 1. ensure all experience makers done
