@@ -477,6 +477,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_cpus", type=int, default=-1, help="Maximum number of CPUs to use for multiple environments running"
     )
+    
+    # Pipelineing
+    parser.add_argument("--one_off_pipeline", action="store_true", default=False)
 
     args = parser.parse_args()
 
