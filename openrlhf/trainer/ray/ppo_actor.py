@@ -273,14 +273,11 @@ class ActorPPOTrainer(BasePPOTrainer):
 
             for (rollout_num, rand_prompts) in enumerate(self.prompts_dataloader):
                 rm_fn = self.experience_maker.reward_fn
-                abc_impl = self.experience_maker._abc_impl
                 del self.experience_maker.reward_fn
-                del self.experience_maker._abc_impl
                 rollout_ref = make_experience_list_remote.remote(
                     self.experience_maker, rand_prompts, **self.generate_kwargs
                 )
                 self.experience_maker.reward_fn = rm_fn
-                self.experience_maker._abc_impl = abc_impl
                 if rollout_num > 0:
                     train_ref = train_remote.remote(self, steps, pbar, args)
                     rollout_experiences, _ = ray.get([rollout_ref, train_ref])
