@@ -161,6 +161,35 @@ class ActorPPOTrainer(BasePPOTrainer):
             ray.get(refs)
 
         torch.distributed.barrier()
+        
+        # Create actor references to self for parallel operations
+        self.experience_maker_actor = None
+        self.trainer_actor = None
+        
+    def setup_ray_actors(self):
+        """Call this once before starting the training loop"""
+        # Define actor classes inside the method to access the trainer
+        
+        @ray.remote
+        class ExperienceMakerActor:
+            def __init__(self, experience_maker):
+                self.experience_maker = experience_maker
+                
+            def make_experience_list(self, prompts, **generate_kwargs):
+                return self.experience_maker.make_experience_list(prompts, **generate_kwargs)
+        
+        @ray.remote
+        class TrainerActor:
+            def __init__(self, trainer):
+                self.trainer = trainer
+                
+            def train(self, steps, pbar, args):
+                return self.trainer._train(steps, pbar, args)
+        
+        # Create actor instances
+        self.experience_maker_actor = ExperienceMakerActor.remote(self.experience_maker)
+        self.trainer_actor = TrainerActor.remote(self)  # Passing self as the trainer
+    
 
     def fit(
         self,
@@ -238,6 +267,11 @@ class ActorPPOTrainer(BasePPOTrainer):
             self._tensorboard.close()
             
     def _fit_one_off(self, args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes):
+       
+        # Make sure actors are set up
+        if self.experience_maker_actor is None:
+            self.setup_ray_actors()    
+            
         num_rollouts_per_episodes = (
             num_update_steps_per_episodes
             * args.train_batch_size
@@ -272,12 +306,12 @@ class ActorPPOTrainer(BasePPOTrainer):
             )
 
             for (rollout_num, rand_prompts) in enumerate(self.prompts_dataloader):
-                rollout_ref = make_experience_list_remote.remote(
-                    self.experience_maker, rand_prompts, **self.generate_kwargs
+                rollout_ref = self.experience_maker_actor.make_experience_list.remote(
+                    rand_prompts, **self.generate_kwargs
                 )
                 
                 if rollout_num > 0:
-                    train_ref = train_remote.remote(self, steps, pbar, args)
+                    train_ref = self.trainer_actor.train.remote(steps, pbar, args)
                     rollout_experiences, _ = ray.get([rollout_ref, train_ref])
                     steps = steps + 1
                 else:
