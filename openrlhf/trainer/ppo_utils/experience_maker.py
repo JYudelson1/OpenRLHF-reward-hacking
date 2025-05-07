@@ -1,5 +1,4 @@
 import time
-from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
@@ -127,7 +126,7 @@ class Samples:
     json_rollouts: list | None = None
 
 
-class BaseExperienceMaker(ABC):
+class BaseExperienceMaker:
     """
     Base experience maker that only handles initialization.
     """
