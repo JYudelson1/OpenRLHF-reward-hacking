@@ -480,3 +480,26 @@ class DeepspeedStrategy(ABC):
         if load_path is None:
             raise Exception(f"[deepspeed] failed to resume from checkpoint {load_dir}")
         return load_path, states
+
+def all_reduce(data, world_size, op="mean"):
+        assert op in ("mean", "max", "sum")
+        if isinstance(data, dict):
+            ret = {}
+            for k, v in data.items():
+                ret[k] = all_reduce(v, world_size, op)
+            return ret
+        else:
+            is_tensor = True
+            if not isinstance(data, torch.Tensor):
+                data = torch.Tensor([data])
+                is_tensor = False
+            is_cpu_tensor = data.device.type == "cpu"
+
+            if is_cpu_tensor:
+                data = data.to(torch.cuda.current_device())
+            if op == "mean":
+                data /= world_size
+            dist.all_reduce(data, op=dist.ReduceOp.MAX if op == "max" else dist.ReduceOp.SUM)
+            if is_cpu_tensor:
+                data = data.cpu()
+            return data.item() if not is_tensor else data

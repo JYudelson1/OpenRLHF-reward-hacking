@@ -9,6 +9,8 @@ import torch.nn.functional as F
 
 from .experience_maker import Experience
 
+from openrlhf.utils.deepspeed.deepspeed import all_reduce
+
 
 @dataclass
 class BufferItem:
@@ -212,7 +214,13 @@ class NaiveReplayBuffer(ABC):
         experience = make_experience_batch(batch, self.packing_samples)
         return experience
 
-    def normalize(self, strategy, attribute: str, divide_by_std: bool = True) -> None:
+    def normalize(
+        self, 
+        attribute: str, 
+        divide_by_std: bool = True, 
+        env_maker: bool = False, 
+        world_size: int = 1
+    ) -> None:
         assert attribute == "advantages"
         items = []
         action_masks = []
@@ -222,11 +230,11 @@ class NaiveReplayBuffer(ABC):
 
         items_vector = torch.cat(items).float().flatten()
 
-        if action_masks[0] is None and not vars(strategy.args).get("env_maker", False):
+        if action_masks[0] is None and not env_maker:
             # packing samples has no action mask
             action_masks_vector = 1
             num_actions = items_vector.numel()
-        elif vars(strategy.args).get("env_maker", False):
+        elif env_maker:
             #TODO: MULTI TURN STUFF
             action_masks_vector = 1
             num_actions = items_vector.numel()
@@ -240,12 +248,12 @@ class NaiveReplayBuffer(ABC):
         # for DP
         # mean
         sum_and_count = torch.tensor([items_vector.sum(), num_actions], device=items_vector.device)
-        all_sum, all_count = strategy.all_reduce(sum_and_count, "sum")
+        all_sum, all_count = all_reduce(sum_and_count, "sum", world_size=world_size)
         mean = all_sum / all_count
         # std
         if divide_by_std:
             std = ((items_vector - mean).pow(2) * action_masks_vector).sum()
-            all_std = strategy.all_reduce(std, "sum")
+            all_std = all_reduce(std, "sum", world_size=world_size)
             rstd = (all_std / all_count).clamp(min=1e-8).rsqrt()
         else:
             rstd = 1
