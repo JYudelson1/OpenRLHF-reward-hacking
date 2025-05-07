@@ -201,9 +201,24 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Store a flag instead of the actual ProcessGroup
         self.has_ring_attn_group = self.strategy.ring_attn_group is not None
 
-        
         if self.custom_reward_func:
             self.custom_reward_func = ray.remote(self.custom_reward_func)
+            
+    def __reduce__(self):
+        """Basic serialization function for debugging."""
+        # Get the current state
+        state = self.__dict__.copy()
+        
+        # Function to restore the object
+        def restore_experience_maker(state):
+            # Create a new instance without initialization
+            instance = RemoteExperienceMaker.__new__(RemoteExperienceMaker)
+            
+            # Restore the state
+            instance.__dict__.update(state)
+            return instance
+        
+        return (restore_experience_maker, (state,))
 
     @torch.no_grad()
     def make_experience_list(self, all_prompts: Union[str, List[str]], **generate_kwargs) -> List[Experience]:
