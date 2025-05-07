@@ -197,7 +197,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         super().__init__(*args, **kwargs)
         self.vllm_engines = vllm_engines
         self.packing_samples = packing_samples
+        
+        # Store a flag instead of the actual ProcessGroup
+        self.has_ring_attn_group = self.strategy.ring_attn_group is not None
 
+        
         if self.custom_reward_func:
             self.custom_reward_func = ray.remote(self.custom_reward_func)
 
@@ -800,8 +804,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         json_rollouts = [{"rollout": conversation.messages, "reward": reward} for conversation, reward in all_outputs]
 
-        # Waiting for all requests to be sent
-        if self.strategy.ring_attn_group is not None:
+        # Use the flag instead of directly accessing the ProcessGroup
+        if self.has_ring_attn_group:
             raise NotImplementedError("Ring attention group is not supported for vLLM")
         else:
             dist.barrier()
