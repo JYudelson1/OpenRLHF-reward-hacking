@@ -452,13 +452,14 @@ class AgentInterface(ABC):
         # vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
         logger.debug(f"Calling vLLM chat with {len(processed_messages)} conversations. SamplingParams includes truncate_prompt_tokens={truncation_limit}")
         return self._vllm_chat_with_truncation(
-            self.llm_engine, 
+            engine=self.llm_engine, 
             messages=processed_messages, 
             sampling_params=self.sampling_params, 
             truncation_amt=truncation_limit
         )    
     
     def _vllm_chat_with_truncation(
+        self,
         engine: vllm.LLM,
         messages: list[list[Message]],
         sampling_params: SamplingParams,
@@ -516,7 +517,7 @@ class AgentInterface(ABC):
             A list of ``RequestOutput`` objects containing the generated
             responses in the same order as the input messages.
         """
-        list_of_messages: list[list[ChatCompletionMessageParam]]
+        list_of_messages: list[list[ChatCompletionMessageParam]] = messages
 
         tokenizer = engine.get_tokenizer(lora_request)
         model_config = engine.llm_engine.get_model_config()
