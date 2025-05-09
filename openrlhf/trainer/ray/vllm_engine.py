@@ -51,6 +51,11 @@ class LLMRayActor:
             # when the distributed_executor_backend is not ray and
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
+            
+        if kwargs.get("truncate_prompt_tokens") is not None:
+            self.truncate_prompt_tokens = kwargs.get("truncate_prompt_tokens")
+        else:
+            self.truncate_prompt_tokens = None
 
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
@@ -135,6 +140,7 @@ class LLMRayActor:
             mongo_uri=self.mongo_uri,
             mongo_db_name=self.mongo_db_name,
             mongo_collection_name=self.mongo_collection_name,
+            truncate_prompt_tokens=self.truncate_prompt_tokens,
         )
 
         rollouts = env.generate_many()
@@ -180,6 +186,7 @@ def create_vllm_engines(
     actor_num_nodes=None,
     actor_num_gpus_per_node=None,
     max_cpus=None,
+    truncate_prompt_tokens=None,
 ):
     import vllm
 
@@ -250,6 +257,7 @@ def create_vllm_engines(
             mongo_uri=mongo_uri,
             mongo_db_name=mongo_db_name,
             mongo_collection_name=mongo_collection_name,
+            truncate_prompt_tokens=truncate_prompt_tokens,
         )
         
         vllm_engines.append(engine)
