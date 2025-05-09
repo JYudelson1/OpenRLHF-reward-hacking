@@ -54,8 +54,10 @@ class LLMRayActor:
             
         if kwargs.get("truncate_prompt_tokens") is not None:
             self.truncate_prompt_tokens = kwargs.get("truncate_prompt_tokens")
+            del kwargs["truncate_prompt_tokens"]
         else:
             self.truncate_prompt_tokens = None
+            del kwargs["truncate_prompt_tokens"]
 
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
