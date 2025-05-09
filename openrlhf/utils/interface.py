@@ -519,7 +519,7 @@ class AgentInterface(ABC):
         """
         list_of_messages: list[list[ChatCompletionMessageParam]] = messages
 
-        tokenizer = engine.get_tokenizer(lora_request)
+        tokenizer = engine.get_tokenizer()
         model_config = engine.llm_engine.get_model_config()
         resolved_content_format = resolve_chat_template_content_format(
             chat_template,
