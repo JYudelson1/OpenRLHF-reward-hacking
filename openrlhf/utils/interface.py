@@ -302,7 +302,7 @@ class AgentInterface(ABC):
             results_data.append(
                 {
                     "messages": messages,
-                    "all_text": all_tokens_text[i],
+                    #"all_text": all_tokens_text[i],
                     "reward": float(reward),
                     "task_prompt": messages[0]["content"],
                 }
