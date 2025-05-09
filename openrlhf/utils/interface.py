@@ -451,7 +451,7 @@ class AgentInterface(ABC):
         # Call vLLM chat with the processed messages and original sampling_params
         # vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
         logger.debug(f"Calling vLLM chat with {len(processed_messages)} conversations. SamplingParams includes truncate_prompt_tokens={truncation_limit}")
-        return self.vllm_chat_with_truncation(
+        return self._vllm_chat_with_truncation(
             self.llm_engine, 
             messages=processed_messages, 
             sampling_params=self.sampling_params, 
