@@ -16,6 +16,7 @@ from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
 from vllm.inputs import TokensPrompt
 from openai import OpenAI
 from anthropic import Anthropic
+from tenacity import retry, stop_after_attempt, wait_exponential
 import json
 import ray
 import logging
@@ -391,6 +392,7 @@ class AgentInterface(ABC):
 
         return merged_messages
 
+
     def _generate_chat_completions_vllm(self, messages: list[list[Message]]) -> list[RequestOutput]:
         processed_messages = []
         truncation_limit = getattr(self.sampling_params, 'truncate_prompt_tokens', None)
@@ -577,6 +579,10 @@ class AgentInterface(ABC):
             "AgentInterface.openai_or_anthropic_model should be provided on initialization if AgentInterface.llm_engine is of type OpenAI."
         )
 
+        @retry(
+            stop=stop_after_attempt(8),
+            wait=wait_exponential(multiplier=15, min=1),
+        )
         def single_completion(conversation: list[Message]) -> RequestOutput:
             conversation = self._merge_tool_and_user_messages(conversation)
 
@@ -615,6 +621,10 @@ class AgentInterface(ABC):
             "AgentInterface.openai_or_anthropic_model should be provided on initialization if AgentInterface.llm_engine is of type Anthropic."
         )
 
+        @retry(
+            stop=stop_after_attempt(8),
+            wait=wait_exponential(multiplier=15, min=1),
+        )
         def single_completion(conversation: list[Message]) -> RequestOutput:
             conversation = self._merge_tool_and_user_messages(conversation)
 
