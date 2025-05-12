@@ -594,7 +594,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
         # TODO: Add evaluation mechanism for PPO
         if global_step % args.eval_steps == 0:
-            self.evaluate(self.eval_dataloader, global_step, args.temperature, args.n_samples_per_prompt, args.eval_steps)
+            self.evaluate(self.eval_dataloader, global_step, args.n_samples_per_prompt, args.eval_steps)
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
         print(f"{args.save_steps=}")
@@ -628,7 +628,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 ray.get(ref)
         torch.distributed.barrier()
     
-    def evaluate(self, eval_dataloader, global_step, temperature=0.6, n_samples_per_prompt=1, eval_steps=1):
+    def evaluate(self, eval_dataloader, global_step, n_samples_per_prompt=1, eval_steps=1):
         """Evaluate model performance on eval dataset.
 
         Args:
@@ -656,20 +656,21 @@ class ActorPPOTrainer(BasePPOTrainer):
                 all_prompts = []
                 all_datasources = []
 
-                for prompts in eval_dataloader:
+                for prompts in iter(eval_dataloader):
                     all_prompts.extend(prompts)
                     all_datasources.extend([p.get("datasource", "") for p in prompts])
+                    
+                # Logging
+                logger.info(f"Evaluating {len(all_prompts)} prompts")
+                logger.info(f"First prompt: {all_prompts[0]}")
 
                 # Generate samples and calculate rewards
                 generate_kwargs = self.generate_kwargs.copy()
-                generate_kwargs["temperature"] = temperature
                 generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
+                
                 samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
 
                 self.log_rollouts_wandb([sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval")
-
-                # duplicate prompts and labels for each sample
-                all_prompts = sum([[prompt] * n_samples_per_prompt for prompt in all_prompts], [])
 
                 # Calculate rewards
                 if samples[0].reward is None:
