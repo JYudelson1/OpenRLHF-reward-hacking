@@ -662,7 +662,6 @@ class ActorPPOTrainer(BasePPOTrainer):
                     
                 # Logging
                 logger.info(f"Evaluating {len(all_prompts)} prompts")
-                logger.info(f"First prompt: {all_prompts[0]}")
 
                 # Generate samples and calculate rewards
                 generate_kwargs = self.generate_kwargs.copy()
