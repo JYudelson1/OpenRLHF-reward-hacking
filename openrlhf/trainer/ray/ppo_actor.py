@@ -656,10 +656,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 all_prompts = []
                 all_datasources = []
                 
-                logger.info(f"Evaluating {len(eval_dataloader)} prompts")
-
                 for prompts in iter(eval_dataloader):
-                    logger.info(f"Evaluating {len(prompts)} prompts (one batch)")
                     all_prompts.extend(prompts)
                     all_datasources.extend([p.get("datasource", "") for p in prompts])
                     
