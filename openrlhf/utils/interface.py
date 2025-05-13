@@ -294,7 +294,6 @@ class AgentInterface(ABC):
                 all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
                 #all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
                 if self.stop_on_truncation and was_truncated[i]:
-                    logger.warning(f"Truncated prompt for conversation {real_idx}. Setting is_done to True.")
                     all_is_done[i] = True
                     
                 if not all_is_done[i]:
