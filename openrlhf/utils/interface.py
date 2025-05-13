@@ -375,7 +375,13 @@ class AgentInterface(ABC):
 
     def _generate_chat_completions(self, messages: list[list[Message]]) -> list[RequestOutput]:
         if isinstance(self.llm_engine, vllm.LLM):
-            return self._generate_chat_completions_vllm(messages)
+             #vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
+            return self._vllm_chat_with_truncation(
+                engine=self.llm_engine, 
+                messages=messages, 
+                sampling_params=self.sampling_params, 
+                truncation_amt=self.sampling_params.truncate_prompt_tokens
+            )  
         if isinstance(self.llm_engine, OpenAI):
             return self._generate_chat_completions_openai(messages)
         if isinstance(self.llm_engine, Anthropic):
@@ -400,74 +406,6 @@ class AgentInterface(ABC):
             merged_messages.append(message)
 
         return merged_messages
-
-
-    def _generate_chat_completions_vllm(self, messages: list[list[Message]]) -> list[RequestOutput]:
-        processed_messages = []
-        truncation_limit = getattr(self.sampling_params, 'truncate_prompt_tokens', None)
-
-        # Check if manual truncation is needed (limit set and tokenizer available)
-        if self.tokenizer and truncation_limit:
-            logger.debug(f"Applying manual truncation with limit: {truncation_limit}")
-            for conversation in messages:
-                # Make a copy to modify
-                truncated_conversation = list(conversation)
-
-                while True: # Loop until conversation fits or cannot be truncated further
-                    try:
-                        # Apply chat template and tokenize
-                        token_ids = self.tokenizer.apply_chat_template(
-                            truncated_conversation,
-                            tokenize=True,
-                            add_generation_prompt=False # vLLM likely adds this
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Could not apply chat template for manual truncation: {e}. "
-                            f"Skipping manual truncation for this conversation: {truncated_conversation[0]['content'][:50]}..."
-                        )
-                        # Use the current state of truncated_conversation before the error
-                        break
-
-                    # Check if token count is within the limit
-                    if len(token_ids) <= truncation_limit:
-                        # Conversation fits, break the inner loop
-                        break
-                    else:
-                        # Token count exceeds limit, try removing the oldest message
-                        if len(truncated_conversation) > 1:
-                            # Remove the first message (oldest)
-                            removed_message = truncated_conversation.pop(0)
-                            logger.debug(f"Manual truncation removed message: {removed_message['role']} - {removed_message['content'][:50]}... (Current tokens: {len(token_ids)})")
-                        else:
-                            # Only one message left, and it's still too long
-                            logger.warning(
-                                f"Single remaining message exceeds truncation limit ({len(token_ids)} > {truncation_limit}). "
-                                f"Cannot truncate further manually. Passing potentially long message to vLLM."
-                            )
-                            break # Stop manual truncation attempts
-
-                # Add the potentially manually truncated conversation to the list
-                processed_messages.append(truncated_conversation)
-
-        else:
-            # No manual truncation needed (limit not set, tokenizer unavailable, or not vLLM)
-            processed_messages = messages
-            if truncation_limit and not self.tokenizer:
-                 logger.debug("Manual truncation skipped: tokenizer not available.")
-            elif not truncation_limit:
-                 logger.debug("Manual truncation skipped: truncate_prompt_tokens not set.")
-
-
-        # Call vLLM chat with the processed messages and original sampling_params
-        # vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
-        logger.debug(f"Calling vLLM chat with {len(processed_messages)} conversations. SamplingParams includes truncate_prompt_tokens={truncation_limit}")
-        return self._vllm_chat_with_truncation(
-            engine=self.llm_engine, 
-            messages=processed_messages, 
-            sampling_params=self.sampling_params, 
-            truncation_amt=truncation_limit
-        )    
     
     def _vllm_chat_with_truncation(
         self,
