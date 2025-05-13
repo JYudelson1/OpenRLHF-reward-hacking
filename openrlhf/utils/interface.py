@@ -47,7 +47,46 @@ class AgentConversation:
     tokens_by_turn: List[Dict[str, Any]]
     first_prompt_tokens: List[int]
     all_tokens: List[int]
-
+    
+@dataclass
+class TimeMetrics:
+    time_initializing_environments: float
+    time_doing_environment_steps: List[float]
+    time_generating_completions: List[float]
+    time_evaluating_is_done: List[float]
+    time_computing_rewards: float
+    everything_start_time: float
+    init_env_start_time: float
+    compute_rewards_start_time: float
+    total_time: float
+    
+    def log_time_metrics(self):
+        logger.info(f"Rollout completed in {int(self.total_time)} seconds. Breakdown of time spent:")
+        logger.info(
+            f"Generating completions with vllm: {int(self.time_generating_completions)} seconds ({self.time_generating_completions / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_generating_completions)})"
+        )
+        logger.info(
+            f"Initializing environments: {int(self.time_initializing_environments)} seconds ({self.time_initializing_environments / self.total_time:.0%})"
+        )
+        logger.info(
+            f"Doing environment steps: {int(sum(self.time_doing_environment_steps))} seconds ({sum(self.time_doing_environment_steps) / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_doing_environment_steps)})"
+        )
+        logger.info(
+            f"Evaluating whether environments are done: {int(sum(self.time_evaluating_is_done))} seconds ({sum(self.time_evaluating_is_done) / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_evaluating_is_done)})"
+        )
+        logger.info(f"Computing rewards: {int(self.time_computing_rewards)} ({self.time_computing_rewards / self.total_time:.0%})")
+        unaccounted_for_time = (
+            self.total_time
+            - sum(self.time_generating_completions)
+            - self.time_initializing_environments
+            - sum(self.time_doing_environment_steps)
+            - sum(self.time_evaluating_is_done)
+            - self.time_computing_rewards
+        )
+        logger.info(
+            f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / self.total_time:.0%})"
+        )
+    
 
 class AgentInterface(ABC):
     def __init__(
@@ -111,17 +150,20 @@ class AgentInterface(ABC):
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
 
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
-        everything_start_time = perf_counter()
+        
+        ## Initialize time metrics
+        time_metrics = TimeMetrics()
+        time_metrics.everything_start_time = perf_counter()
 
-        times_doing_environment_steps = []
-        times_generating_completions = []
-        times_evaluating_is_done = []
+        time_metrics.time_doing_environment_steps = []
+        time_metrics.time_generating_completions = []
+        time_metrics.time_evaluating_is_done = []
 
         ## Initialize states for all conversations (remove llm engine before sending through Ray)
         llm_engine = self.llm_engine
         self.llm_engine = None
 
-        init_env_start_time = perf_counter()
+        time_metrics.init_env_start_time = perf_counter()
         states = self.run_environment_calls_in_parallel(
             DelayedFunction(
                 function=self.__class__.init_state,
@@ -131,8 +173,7 @@ class AgentInterface(ABC):
             )
             for data in self.full_data
         )
-        init_env_end_time = perf_counter()
-        time_initializing_environments = init_env_end_time - init_env_start_time
+        time_metrics.time_initializing_environments = perf_counter() - time_metrics.init_env_start_time
 
         # Restore llm engine
         self.llm_engine = llm_engine
@@ -164,7 +205,7 @@ class AgentInterface(ABC):
                     for idx in active_indices
                 )
                 env_step_end_time = perf_counter()
-                times_doing_environment_steps.append(env_step_end_time - env_step_start_time)
+                time_metrics.time_doing_environment_steps.append(env_step_end_time - env_step_start_time)
 
                 self.llm_engine = llm_engine
             except Exception as e:
@@ -207,7 +248,7 @@ class AgentInterface(ABC):
             outputs = self._generate_chat_completions(active_conversations)
             # outputs = self.llm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
             generate_end_time = perf_counter()
-            times_generating_completions.append(generate_end_time - generate_start_time)
+            time_metrics.time_generating_completions.append(generate_end_time - generate_start_time)
 
             # Process outputs and update states
             llm_engine = self.llm_engine
@@ -227,7 +268,7 @@ class AgentInterface(ABC):
                 for idx in active_indices
             )
             is_done_end_time = perf_counter()
-            times_evaluating_is_done.append(is_done_end_time - is_done_start_time)
+            time_metrics.time_evaluating_is_done.append(is_done_end_time - is_done_start_time)
 
             self.llm_engine = llm_engine
             new_active_indices = []
@@ -261,7 +302,7 @@ class AgentInterface(ABC):
         llm_engine = self.llm_engine
         self.llm_engine = None
 
-        rewards_start_time = perf_counter()
+        time_metrics.compute_rewards_start_time = perf_counter()
         # all_rewards = ray.get(
         #     [
         #         get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx])
@@ -277,8 +318,7 @@ class AgentInterface(ABC):
             )
             for idx in range(self.num_envs)
         )
-        rewards_end_time = perf_counter()
-        time_computing_rewards = rewards_end_time - rewards_start_time
+        time_metrics.time_computing_rewards = perf_counter() - time_metrics.compute_rewards_start_time
 
         self.llm_engine = llm_engine
 
@@ -307,35 +347,10 @@ class AgentInterface(ABC):
         
         self.log_rollouts_mongodb(results_data)
 
-        everything_end_time = perf_counter()
-        total_time = everything_end_time - everything_start_time
-
-        logger.info(f"Rollout completed in {int(total_time)} seconds. Breakdown of time spent:")
-        logger.info(
-            f"Generating completions with vllm: {int(sum(times_generating_completions))} seconds ({sum(times_generating_completions) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_generating_completions)})"
-        )
-        logger.info(
-            f"Initializing environments: {int(time_initializing_environments)} seconds ({time_initializing_environments / total_time:.0%})"
-        )
-        logger.info(
-            f"Doing environment steps: {int(sum(times_doing_environment_steps))} seconds ({sum(times_doing_environment_steps) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_doing_environment_steps)})"
-        )
-        logger.info(
-            f"Evaluating whether environments are done: {int(sum(times_evaluating_is_done))} seconds ({sum(times_evaluating_is_done) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_evaluating_is_done)})"
-        )
-        logger.info(f"Computing rewards: {int(time_computing_rewards)} ({time_computing_rewards / total_time:.0%})")
-        unaccounted_for_time = (
-            total_time
-            - sum(times_generating_completions)
-            - time_initializing_environments
-            - sum(times_doing_environment_steps)
-            - sum(times_evaluating_is_done)
-            - time_computing_rewards
-        )
-        logger.info(
-            f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / total_time:.0%})"
-        )
-
+        time_metrics.total_time = perf_counter() - time_metrics.everything_start_time
+        time_metrics.log_time_metrics()
+        
+        
         return results
     
     def log_rollouts_mongodb(self, results_data: list[dict]) -> None:
