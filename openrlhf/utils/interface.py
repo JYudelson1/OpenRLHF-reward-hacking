@@ -153,12 +153,7 @@ class AgentInterface(ABC):
                 self.llm_engine = None
 
                 env_step_start_time = perf_counter()
-                # all_prompts_and_states = ray.get(
-                #    [
-                #         get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx])
-                #         for idx in active_indices
-                #     ]
-                # )
+
                 all_prompts_and_states = self.run_environment_calls_in_parallel(
                     DelayedFunction(
                         function=self.__class__.get_next_prompt,
