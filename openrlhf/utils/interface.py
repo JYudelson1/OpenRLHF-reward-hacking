@@ -101,7 +101,7 @@ class AgentInterface(ABC):
         openai_or_anthropic_model: str | None = None,
         anthropic_thinking: Any = None,
         truncate_prompt_tokens: Optional[int] = None,
-        **kwargs,
+        stop_on_truncation: bool = False,
     ):
         self.num_envs = len(full_data)
         self.full_data = full_data
@@ -114,7 +114,7 @@ class AgentInterface(ABC):
         self.openai_or_anthropic_model = openai_or_anthropic_model
         self.anthropic_thinking = anthropic_thinking
         self.tokenizer = None
-
+        self.stop_on_truncation = stop_on_truncation
         # Set truncate_prompt_tokens in sampling_params if provided
         if truncate_prompt_tokens is not None:
             if isinstance(self.llm_engine, vllm.LLM):
@@ -245,7 +245,10 @@ class AgentInterface(ABC):
             generate_start_time = perf_counter()
             # Batch generate responses
             # TODO: Maybe use their tool API instead of handrolling?
-            outputs = self._generate_chat_completions(active_conversations)
+            if isinstance(self.llm_engine, vllm.LLM) and self.stop_on_truncation:
+                outputs, was_truncated = self._generate_chat_completions(active_conversations)
+            else:
+                outputs = self._generate_chat_completions(active_conversations)
             # outputs = self.llm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
             generate_end_time = perf_counter()
             time_metrics.time_generating_completions.append(generate_end_time - generate_start_time)
@@ -255,9 +258,7 @@ class AgentInterface(ABC):
             self.llm_engine = None
 
             is_done_start_time = perf_counter()
-            # all_is_done = ray.get(
-            #     [is_done_remote.remote(self, messages=all_messages[idx], state=states[idx]) for idx in active_indices]
-            # )
+
             all_is_done = self.run_environment_calls_in_parallel(
                 DelayedFunction(
                     function=self.__class__.is_done,
@@ -292,6 +293,10 @@ class AgentInterface(ABC):
 
                 all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
                 #all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
+                if self.stop_on_truncation and was_truncated[i]:
+                    logger.warning(f"Truncated prompt for conversation {real_idx}. Setting is_done to True.")
+                    all_is_done[i] = True
+                    
                 if not all_is_done[i]:
                     new_active_indices.append(real_idx)
 
@@ -373,7 +378,7 @@ class AgentInterface(ABC):
             except Exception as e:
                 logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
 
-    def _generate_chat_completions(self, messages: list[list[Message]]) -> list[RequestOutput]:
+    def _generate_chat_completions(self, messages: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
         if isinstance(self.llm_engine, vllm.LLM):
              #vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
             return self._vllm_chat_with_truncation(
@@ -420,7 +425,7 @@ class AgentInterface(ABC):
         continue_final_message: bool = False,
         tools: Optional[list[dict[str, Any]]] = None,
         truncation_amt: Optional[int] = None
-    ) -> list[RequestOutput]:
+    ) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
         """
         Generate responses for a chat conversation.
 
@@ -465,6 +470,7 @@ class AgentInterface(ABC):
         Returns:
             A list of ``RequestOutput`` objects containing the generated
             responses in the same order as the input messages.
+            Optionally, a list of booleans indicating whether each prompt was truncated.
         """
         list_of_messages: list[list[ChatCompletionMessageParam]] = messages
 
@@ -479,6 +485,8 @@ class AgentInterface(ABC):
         )
 
         prompts: list[TokensPrompt] = []
+        
+        was_truncated: List[bool] = []
 
         for msgs in list_of_messages:
             # NOTE: _parse_chat_message_content_parts() currently doesn't
@@ -509,17 +517,25 @@ class AgentInterface(ABC):
             if truncation_amt is not None and len(prompt_token_ids) > truncation_amt:
                 prompt_token_ids = prompt_token_ids[:truncation_amt]
                 logger.warning(f"Truncated prompt from {len(prompt_token_ids)} tokens to {truncation_amt} tokens.")
+                was_truncated.append(True)
+            else:
+                was_truncated.append(False)
             
             prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
 
             prompts.append(prompt)
 
-        return engine.generate(
+        outputs = engine.generate(
             prompts,
             sampling_params=sampling_params,
             use_tqdm=use_tqdm,
             lora_request=lora_request,
         )
+        
+        if truncation_amt is not None:
+            return outputs, was_truncated
+        else:
+            return outputs
 
     def _generate_chat_completions_openai(self, messages: list[list[Message]]) -> list[RequestOutput]:
         assert self.openai_or_anthropic_model is not None, (
