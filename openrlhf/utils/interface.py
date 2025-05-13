@@ -117,12 +117,11 @@ class AgentInterface(ABC):
         times_generating_completions = []
         times_evaluating_is_done = []
 
-        # Initialize states for all conversations
+        ## Initialize states for all conversations (remove llm engine before sending through Ray)
         llm_engine = self.llm_engine
         self.llm_engine = None
 
         init_env_start_time = perf_counter()
-        # states = ray.get([init_state_remote.remote(self, data) for data in self.full_data])
         states = self.run_environment_calls_in_parallel(
             DelayedFunction(
                 function=self.__class__.init_state,
@@ -135,6 +134,7 @@ class AgentInterface(ABC):
         init_env_end_time = perf_counter()
         time_initializing_environments = init_env_end_time - init_env_start_time
 
+        # Restore llm engine
         self.llm_engine = llm_engine
 
         all_messages = [list() for _ in range(self.num_envs)]
@@ -144,7 +144,6 @@ class AgentInterface(ABC):
         total_tokens = [0 for _ in range(self.num_envs)]
         first_prompt_tokens = [None for _ in range(self.num_envs)]
         all_tokens = [[] for _ in range(self.num_envs)]
-        all_tokens_text = [[] for _ in range(self.num_envs)]
         # Continue until all conversations are complete
         while active_indices:
             # Get next prompts for all active conversations
