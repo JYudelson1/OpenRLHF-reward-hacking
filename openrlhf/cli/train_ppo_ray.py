@@ -5,7 +5,7 @@ import importlib
 import ray
 import torch
 from ray.util.placement_group import placement_group
-import os, sys
+import os, sys, json
 
 from openrlhf.trainer.ray import (
     ActorModelRayActor,
@@ -464,6 +464,7 @@ if __name__ == "__main__":
     # Multiturn RL only
     parser.add_argument("--env_file", type=str, default=None, help="Path to the environment file")
     parser.add_argument("--env_class", type=str, default=None, help="Name of the environment class")
+    parser.add_argument("--env_args_file", type=str, default=None, help="Path to the environment arguments file")
 
     # TensorBoard parameters
     parser.add_argument("--use_tensorboard", type=str, default=None, help="TensorBoard logging path")
@@ -519,7 +520,13 @@ if __name__ == "__main__":
         sys.path.insert(0, os.getcwd())
         env = importlib.import_module(args.env_file)
         env = getattr(env, args.env_class)
-        args.env_maker = lambda *args, **kwargs: env(*args, **kwargs)
+        
+        env_args = {}
+        if args.env_args_file:
+            with open(args.env_args_file, "r") as f:
+                env_args = json.load(f)
+        
+        args.env_maker = lambda *args, **kwargs: env(*args, **{**env_args, **kwargs})
 
     if args.vllm_enable_sleep and not args.colocate_all_models:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
