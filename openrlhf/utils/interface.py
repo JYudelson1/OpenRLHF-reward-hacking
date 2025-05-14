@@ -40,7 +40,6 @@ class DelayedFunction:
     args: Iterable[Any]
     kwargs: dict[str, Any]
 
-
 @dataclass
 class AgentConversation:
     messages: List[Message]
@@ -86,7 +85,6 @@ class TimeMetrics:
             f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / self.total_time:.0%})"
         )
     
-
 class AgentInterface(ABC):
     def __init__(
         self,
@@ -101,6 +99,7 @@ class AgentInterface(ABC):
         anthropic_thinking: Any = None,
         truncate_prompt_tokens: Optional[int] = None,
         stop_on_truncation: bool = False,
+        length_penalty: float = 0.0,
     ):
         self.num_envs = len(full_data)
         self.full_data = full_data
@@ -120,17 +119,6 @@ class AgentInterface(ABC):
                 # Set it in SamplingParams for vLLM
                 self.sampling_params.truncate_prompt_tokens = truncate_prompt_tokens
                 logger.info(f"Set SamplingParams.truncate_prompt_tokens to {truncate_prompt_tokens}")
-
-                # Also try to get tokenizer for manual truncation backup
-                try:
-                    self.tokenizer = self.llm_engine.get_tokenizer()
-                    logger.info(f"Initialized tokenizer for manual input truncation (limit={truncate_prompt_tokens}).")
-                except Exception as e:
-                    logger.warning(
-                        f"Could not get tokenizer from vLLM engine: {e}. "
-                        f"Manual input truncation (limit={truncate_prompt_tokens}) will be disabled."
-                    )
-                    self.tokenizer = None
             else:
                 logger.warning(
                     f"truncate_prompt_tokens ({truncate_prompt_tokens}) provided but LLM engine is not vLLM. "
@@ -147,6 +135,44 @@ class AgentInterface(ABC):
 
         # As an example of full_data, for a given swe_bench task, it is a list of dicts, each with the following keys:
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
+        
+    @abstractmethod
+    def init_state(self, data: dict) -> AgentState:
+        """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
+        pass
+
+    @abstractmethod
+    def get_next_prompt(
+        self, messages: List[Message], state: AgentState
+    ) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
+        """Input:
+        - messages: the messages in the conversation
+        - state: the state of the environment
+
+        Output:
+        - next_prompt: the next prompt to send to the model (can be a list of prompts)
+        - next_state: the updated state of the environment
+
+        Note: an output of None means that the environment is done and the agent should stop generating.
+
+        Get the next prompt to send to the model and updated state.
+        In this function, you should (1) use the model's last message to update the state.
+        Then (2) create the prompt to send to the model, which should probably incorporate observations about the environment.
+        Finally, (3) return the next prompt for the model to send, along with the updated state."""
+        pass
+
+    @abstractmethod
+    def is_done(self, messages: List[Message], state: AgentState) -> bool:
+        """Determine if the conversation is complete"""
+        pass
+
+    @abstractmethod
+    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
+        """Get the reward for the conversation.
+        NOTE: This should not include length penalty!"""
+        pass
+    
+    ### Below are the logical pieces
 
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
         
@@ -306,12 +332,7 @@ class AgentInterface(ABC):
         self.llm_engine = None
 
         time_metrics.compute_rewards_start_time = perf_counter()
-        # all_rewards = ray.get(
-        #     [
-        #         get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx])
-        #         for idx in range(self.num_envs)
-        #     ]
-        # )
+
         all_rewards = self.run_environment_calls_in_parallel(
             DelayedFunction(
                 function=self.__class__.get_reward,
@@ -642,40 +663,6 @@ class AgentInterface(ABC):
                 completions.append(future.result())
         return completions
 
-    @abstractmethod
-    def init_state(self, data: dict) -> AgentState:
-        """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
-        pass
-
-    @abstractmethod
-    def get_next_prompt(
-        self, messages: List[Message], state: AgentState
-    ) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
-        """Input:
-        - messages: the messages in the conversation
-        - state: the state of the environment
-
-        Output:
-        - next_prompt: the next prompt to send to the model (can be a list of prompts)
-        - next_state: the updated state of the environment
-
-        Note: an output of None means that the environment is done and the agent should stop generating.
-
-        Get the next prompt to send to the model and updated state.
-        In this function, you should (1) use the model's last message to update the state.
-        Then (2) create the prompt to send to the model, which should probably incorporate observations about the environment.
-        Finally, (3) return the next prompt for the model to send, along with the updated state."""
-        pass
-
-    @abstractmethod
-    def is_done(self, messages: List[Message], state: AgentState) -> bool:
-        """Determine if the conversation is complete"""
-        pass
-
-    @abstractmethod
-    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
-        pass
-
     def run_environment_calls_in_parallel(self, calls: Iterable[DelayedFunction]) -> list[Any]:
         if self.environment_parallelism is None:
             return [call.function(*call.args, **call.kwargs) for call in calls]
@@ -696,7 +683,14 @@ class AgentInterface(ABC):
         raise ValueError(
             f"Invalid value `{self.environment_parallelism}` of AgentInterface.environment_parallelism. It should be either 'ray', 'threading', or None."
         )
-
+        
+    def _length_penalty(self, conversation: list[Message]) -> float:
+        total_assistant_message_length = sum(
+            len(message["content"])
+            for message in conversation
+            if message["role"] == "assistant"
+        )
+        return total_assistant_message_length * self.length_penalty
 
 @ray.remote
 def init_state_remote(agent: AgentInterface, data: dict) -> AgentState:
@@ -705,7 +699,7 @@ def init_state_remote(agent: AgentInterface, data: dict) -> AgentState:
 
 @ray.remote
 def get_reward_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Reward:
-    return agent.get_reward(messages, state)
+    return agent.get_reward(messages, state) + agent._length_penalty(messages)
 
 
 @ray.remote
