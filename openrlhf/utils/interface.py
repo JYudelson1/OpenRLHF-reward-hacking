@@ -48,17 +48,16 @@ class AgentConversation:
     first_prompt_tokens: List[int]
     all_tokens: List[int]
     
-@dataclass
 class TimeMetrics:
-    time_initializing_environments: float
-    time_doing_environment_steps: List[float]
-    time_generating_completions: List[float]
-    time_evaluating_is_done: List[float]
-    time_computing_rewards: float
-    everything_start_time: float
-    init_env_start_time: float
-    compute_rewards_start_time: float
-    total_time: float
+    time_initializing_environments: Optional[float]
+    time_doing_environment_steps: Optional[List[float]]
+    time_generating_completions: Optional[List[float]]
+    time_evaluating_is_done: Optional[List[float]]
+    time_computing_rewards: Optional[float]
+    everything_start_time: Optional[float]
+    init_env_start_time: Optional[float]
+    compute_rewards_start_time: Optional[float]
+    total_time: Optional[float]
     
     def log_time_metrics(self):
         logger.info(f"Rollout completed in {int(self.total_time)} seconds. Breakdown of time spent:")
