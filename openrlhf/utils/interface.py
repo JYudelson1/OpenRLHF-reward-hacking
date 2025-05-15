@@ -578,8 +578,9 @@ class AgentInterface(ABC):
             
             # Truncate the prompt if necessary
             if truncation_amt is not None and len(prompt_token_ids) > truncation_amt:
+                old_len = len(prompt_token_ids)
                 prompt_token_ids = prompt_token_ids[:truncation_amt]
-                logger.warning(f"Truncated prompt from {len(prompt_token_ids)} tokens to {truncation_amt} tokens.")
+                logger.warning(f"Truncated prompt from {old_len} tokens to {truncation_amt} tokens.")
                 was_truncated.append(True)
             else:
                 was_truncated.append(False)
