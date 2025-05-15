@@ -887,7 +887,7 @@ class ActorModelRayActor(BasePPORole):
 
         self._setup_distributed(strategy)
 
-        actor = Actor(
+        actor_handle = ray.remote(Actor).remote(
             pretrain,
             use_flash_attention_2=strategy.args.flash_attn,
             bf16=strategy.args.bf16,
@@ -901,15 +901,15 @@ class ActorModelRayActor(BasePPORole):
             temperature=strategy.args.temperature,
             use_liger_kernel=strategy.args.use_liger_kernel,
         )
-        strategy.print(actor)
+        strategy.print(ray.get(actor_handle))
 
         # configure tokenizer
         self.tokenizer = get_tokenizer(
-            pretrain, actor.model, "left", strategy, use_fast=not strategy.args.disable_fast_tokenizer
+            pretrain, ray.get(actor_handle), "left", strategy, use_fast=not strategy.args.disable_fast_tokenizer
         )
 
         if args.enable_ema:
-            ema_model = Actor(
+            ema_model_handle = ray.remote(Actor).remote(
                 pretrain,
                 use_flash_attention_2=strategy.args.flash_attn,
                 bf16=strategy.args.bf16,
@@ -918,11 +918,11 @@ class ActorModelRayActor(BasePPORole):
                 packing_samples=strategy.args.packing_samples,
             )
         else:
-            ema_model = None
+            ema_model_handle = None
 
         # configure optimizer
         actor_optim = strategy.create_optimizer(
-            actor, lr=args.actor_learning_rate, betas=strategy.args.adam_betas, weight_decay=args.l2
+            ray.get(actor_handle), lr=args.actor_learning_rate, betas=strategy.args.adam_betas, weight_decay=args.l2
         )
 
         # prepare_datasets
@@ -944,9 +944,10 @@ class ActorModelRayActor(BasePPORole):
         )
 
         if args.gradient_checkpointing:
-            actor.gradient_checkpointing_enable(
+            fn_handle = actor_handle.gradient_checkpointing_enable.remote(
                 gradient_checkpointing_kwargs={"use_reentrant": args.gradient_checkpointing_use_reentrant}
             )
+            ray.get(fn_handle)
 
         # prepare models/optimizers...
         self.actor, self.actor_optim, self.actor_scheduler = strategy.prepare(
@@ -954,9 +955,9 @@ class ActorModelRayActor(BasePPORole):
             is_rlhf=True,
         )
 
-        if ema_model:
-            ema_model._offload = True
-            self.ema_model = strategy.prepare(ema_model, is_rlhf=True)
+        if ema_model_handle:
+            ema_model_handle._offload = True
+            self.ema_model = strategy.prepare(ema_model_handle, is_rlhf=True)
         else:
             self.ema_model = None
 
@@ -964,13 +965,13 @@ class ActorModelRayActor(BasePPORole):
         self.consumed_samples = 0
         ckpt_path = os.path.join(args.ckpt_path, "_actor")
         if args.load_checkpoint and os.path.exists(ckpt_path):
-            _, states = strategy.load_ckpt(self.actor.model, ckpt_path)
+            _, states = strategy.load_ckpt(ray.get(actor_handle), ckpt_path)
             self.consumed_samples = states["consumed_samples"]
             strategy.print(f"Loaded the checkpoint: {ckpt_path}, consumed_samples: {self.consumed_samples}")
 
         # initial offload
         if strategy.args.deepspeed_enable_sleep:
-            offload_deepspeed_states(self.actor.model)
+            offload_deepspeed_states(ray.get(actor_handle))
 
     def prepare_datasets(self):
         strategy = self.strategy
