@@ -16,6 +16,7 @@ from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
 from vllm.inputs import TokensPrompt
 from openai import OpenAI
 from anthropic import Anthropic
+from tenacity import retry, stop_after_attempt, wait_exponential
 import json
 import ray
 import logging
@@ -39,15 +40,60 @@ class DelayedFunction:
     args: Iterable[Any]
     kwargs: dict[str, Any]
 
-
 @dataclass
 class AgentConversation:
     messages: List[Message]
     tokens_by_turn: List[Dict[str, Any]]
     first_prompt_tokens: List[int]
     all_tokens: List[int]
+    
+class TimeMetrics:
+    time_initializing_environments: Optional[float]
+    time_doing_environment_steps: Optional[List[float]]
+    time_generating_completions: Optional[List[float]]
+    time_evaluating_is_done: Optional[List[float]]
+    time_computing_rewards: Optional[float]
+    everything_start_time: Optional[float]
+    init_env_start_time: Optional[float]
+    compute_rewards_start_time: Optional[float]
+    total_time: Optional[float]
+    
+    def __init__(self):
+        self.everything_start_time = perf_counter()
 
-
+        self.time_doing_environment_steps = []
+        self.time_generating_completions = []
+        self.time_evaluating_is_done = []
+    
+    def finish_and_log(self):
+        self.total_time = perf_counter() - self.everything_start_time
+        
+        logger.info(f"Rollout completed in {int(self.total_time)} seconds. Breakdown of time spent:")
+        logger.info(
+            f"Generating completions with vllm: {int(self.time_generating_completions)} seconds ({self.time_generating_completions / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_generating_completions)})"
+        )
+        logger.info(
+            f"Initializing environments: {int(self.time_initializing_environments)} seconds ({self.time_initializing_environments / self.total_time:.0%})"
+        )
+        logger.info(
+            f"Doing environment steps: {int(sum(self.time_doing_environment_steps))} seconds ({sum(self.time_doing_environment_steps) / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_doing_environment_steps)})"
+        )
+        logger.info(
+            f"Evaluating whether environments are done: {int(sum(self.time_evaluating_is_done))} seconds ({sum(self.time_evaluating_is_done) / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_evaluating_is_done)})"
+        )
+        logger.info(f"Computing rewards: {int(self.time_computing_rewards)} ({self.time_computing_rewards / self.total_time:.0%})")
+        unaccounted_for_time = (
+            self.total_time
+            - sum(self.time_generating_completions)
+            - self.time_initializing_environments
+            - sum(self.time_doing_environment_steps)
+            - sum(self.time_evaluating_is_done)
+            - self.time_computing_rewards
+        )
+        logger.info(
+            f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / self.total_time:.0%})"
+        )
+    
 class AgentInterface(ABC):
     def __init__(
         self,
@@ -61,7 +107,9 @@ class AgentInterface(ABC):
         openai_or_anthropic_model: str | None = None,
         anthropic_thinking: Any = None,
         truncate_prompt_tokens: Optional[int] = None,
-        **kwargs,
+        stop_on_truncation: bool = False,
+        length_penalty: float = 0.0,
+        stop_strings: Optional[List[str]] = None,
     ):
         self.num_envs = len(full_data)
         self.full_data = full_data
@@ -74,24 +122,27 @@ class AgentInterface(ABC):
         self.openai_or_anthropic_model = openai_or_anthropic_model
         self.anthropic_thinking = anthropic_thinking
         self.tokenizer = None
-
+        self.stop_on_truncation = stop_on_truncation
+        self.length_penalty = length_penalty
+        self.stop_strings = stop_strings
+        
+        if stop_strings is not None:
+            self.sampling_params.stop = stop_strings
+            self.sampling_params.include_stop_str_in_output = True
+        
+        self.all_messages = [list() for _ in range(self.num_envs)]
+        self.active_indices = list(range(self.num_envs))
+        self.tokens_by_turn = [list() for _ in range(self.num_envs)]
+        self.total_tokens = [0 for _ in range(self.num_envs)]
+        self.first_prompt_tokens = [None for _ in range(self.num_envs)]
+        self.all_tokens = [[] for _ in range(self.num_envs)]
+        
         # Set truncate_prompt_tokens in sampling_params if provided
         if truncate_prompt_tokens is not None:
             if isinstance(self.llm_engine, vllm.LLM):
                 # Set it in SamplingParams for vLLM
                 self.sampling_params.truncate_prompt_tokens = truncate_prompt_tokens
                 logger.info(f"Set SamplingParams.truncate_prompt_tokens to {truncate_prompt_tokens}")
-
-                # Also try to get tokenizer for manual truncation backup
-                try:
-                    self.tokenizer = self.llm_engine.get_tokenizer()
-                    logger.info(f"Initialized tokenizer for manual input truncation (limit={truncate_prompt_tokens}).")
-                except Exception as e:
-                    logger.warning(
-                        f"Could not get tokenizer from vLLM engine: {e}. "
-                        f"Manual input truncation (limit={truncate_prompt_tokens}) will be disabled."
-                    )
-                    self.tokenizer = None
             else:
                 logger.warning(
                     f"truncate_prompt_tokens ({truncate_prompt_tokens}) provided but LLM engine is not vLLM. "
@@ -108,20 +159,86 @@ class AgentInterface(ABC):
 
         # As an example of full_data, for a given swe_bench task, it is a list of dicts, each with the following keys:
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
+        
+    @abstractmethod
+    def init_state(self, data: dict) -> AgentState:
+        """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
+        pass
+
+    @abstractmethod
+    def get_next_prompt(
+        self, messages: List[Message], state: AgentState
+    ) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
+        """Input:
+        - messages: the messages in the conversation
+        - state: the state of the environment
+
+        Output:
+        - next_prompt: the next prompt to send to the model (can be a list of prompts)
+        - next_state: the updated state of the environment
+
+        Note: an output of None means that the environment is done and the agent should stop generating.
+
+        Get the next prompt to send to the model and updated state.
+        In this function, you should (1) use the model's last message to update the state.
+        Then (2) create the prompt to send to the model, which should probably incorporate observations about the environment.
+        Finally, (3) return the next prompt for the model to send, along with the updated state."""
+        pass
+
+    @abstractmethod
+    def is_done(self, messages: List[Message], state: AgentState) -> bool:
+        """Determine if the conversation is complete"""
+        pass
+
+    @abstractmethod
+    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
+        """Get the reward for the conversation.
+        NOTE: This should not include length penalty!"""
+        pass
+    
+    ### Below are the logical pieces
 
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
-        everything_start_time = perf_counter()
+        ## Initialize time metrics
+        self.time_metrics = TimeMetrics()
 
-        times_doing_environment_steps = []
-        times_generating_completions = []
-        times_evaluating_is_done = []
+        ## Initialize states for all conversations
+        self.states = self._init_all_states()
 
-        # Initialize states for all conversations
+        # Continue until all conversations are complete
+        while self.active_indices:
+            # Get next prompts for all active conversations
+            all_prompts_and_states = self._step_through_all_envs()
+
+            active_conversations = self._process_next_prompts(all_prompts_and_states)
+            
+            # Leave the loop if all conversations are done
+            if len(active_conversations) == 0:
+                break
+
+            outputs, was_truncated = self._generate_all_chat_completions(active_conversations)
+
+            # Process outputs and update states
+            all_is_done = self._check_all_done()
+            
+            self._process_outputs(outputs, was_truncated, all_is_done)
+
+        # Calculate rewards for completed conversations
+        results, results_data = self._calculate_rewards()
+
+        # Upload results to MongoDB after all processing is complete
+        self.log_rollouts_mongodb(results_data)
+
+        self.time_metrics.finish_and_log()
+        
+        return results
+    
+    def _init_all_states(self) -> list[AgentState]:
+        ## Initialize states for all conversations (remove llm engine before sending through Ray)
         llm_engine = self.llm_engine
         self.llm_engine = None
 
-        init_env_start_time = perf_counter()
-        # states = ray.get([init_state_remote.remote(self, data) for data in self.full_data])
+        self.time_metrics.init_env_start_time = perf_counter()
         states = self.run_environment_calls_in_parallel(
             DelayedFunction(
                 function=self.__class__.init_state,
@@ -131,166 +248,160 @@ class AgentInterface(ABC):
             )
             for data in self.full_data
         )
-        init_env_end_time = perf_counter()
-        time_initializing_environments = init_env_end_time - init_env_start_time
+        self.time_metrics.time_initializing_environments = perf_counter() - self.time_metrics.init_env_start_time
 
+        # Restore llm engine
         self.llm_engine = llm_engine
 
-        all_messages = [list() for _ in range(self.num_envs)]
-        active_indices = list(range(self.num_envs))
-
-        tokens_by_turn = [list() for _ in range(self.num_envs)]
-        total_tokens = [0 for _ in range(self.num_envs)]
-        first_prompt_tokens = [None for _ in range(self.num_envs)]
-        all_tokens = [[] for _ in range(self.num_envs)]
-        all_tokens_text = [[] for _ in range(self.num_envs)]
-        # Continue until all conversations are complete
-        while active_indices:
-            # Get next prompts for all active conversations
-            try:
-                # Temporarily remove vllm engine before sending through Ray
-                llm_engine = self.llm_engine
-                self.llm_engine = None
-
-                env_step_start_time = perf_counter()
-                # all_prompts_and_states = ray.get(
-                #    [
-                #         get_next_prompt_remote.remote(self, messages=all_messages[idx], state=states[idx])
-                #         for idx in active_indices
-                #     ]
-                # )
-                all_prompts_and_states = self.run_environment_calls_in_parallel(
-                    DelayedFunction(
-                        function=self.__class__.get_next_prompt,
-                        remote_function=get_next_prompt_remote,
-                        args=(self,),
-                        kwargs={"messages": all_messages[idx], "state": states[idx]},
-                    )
-                    for idx in active_indices
-                )
-                env_step_end_time = perf_counter()
-                times_doing_environment_steps.append(env_step_end_time - env_step_start_time)
-
-                self.llm_engine = llm_engine
-            except Exception as e:
-                self.llm_engine = llm_engine  # Restore in case of error
-                logger.error(f"Error getting prompts: {str(e)}")
-                raise
-
-            active_conversations = []
-            indices_to_remove = []
-            for i, idx in enumerate(active_indices):
-                result = all_prompts_and_states[i]
-                if result is None:
-                    active_indices.remove(idx)
-                    continue
-
-                prompt, states[idx] = result
-                if prompt is None or states[idx] is None:
-                    # The environment is done, so we don't need to generate any more prompts
-                    # active_indices.remove(idx)
-                    indices_to_remove.append(idx)
-                    continue
-                if isinstance(prompt, list):
-                    all_messages[idx].extend(prompt)
-                elif isinstance(prompt, dict):
-                    all_messages[idx].append(prompt)
-                else:
-                    raise ValueError(f"Invalid prompt type: {type(prompt)}")
-                active_conversations.append(all_messages[idx])
-
-            for idx in indices_to_remove:
-                active_indices.remove(idx)
-
-            # Leave the loop if all conversations are done
-            if len(active_conversations) == 0:
-                break
-
-            generate_start_time = perf_counter()
-            # Batch generate responses
-            # TODO: Maybe use their tool API instead of handrolling?
-            outputs = self._generate_chat_completions(active_conversations)
-            # outputs = self.llm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
-            generate_end_time = perf_counter()
-            times_generating_completions.append(generate_end_time - generate_start_time)
-
-            # Process outputs and update states
+        return states
+    
+    def _step_through_all_envs(self) -> list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]:
+        try:
+            # Temporarily remove vllm engine before sending through Ray
             llm_engine = self.llm_engine
             self.llm_engine = None
 
-            is_done_start_time = perf_counter()
-            # all_is_done = ray.get(
-            #     [is_done_remote.remote(self, messages=all_messages[idx], state=states[idx]) for idx in active_indices]
-            # )
-            all_is_done = self.run_environment_calls_in_parallel(
+            env_step_start_time = perf_counter()
+
+            all_prompts_and_states = self.run_environment_calls_in_parallel(
                 DelayedFunction(
-                    function=self.__class__.is_done,
-                    remote_function=is_done_remote,
+                    function=self.__class__.get_next_prompt,
+                    remote_function=get_next_prompt_remote,
                     args=(self,),
-                    kwargs={"messages": all_messages[idx], "state": states[idx]},
+                    kwargs={"messages": self.all_messages[idx], "state": self.states[idx]},
                 )
-                for idx in active_indices
+                for idx in self.active_indices
             )
-            is_done_end_time = perf_counter()
-            times_evaluating_is_done.append(is_done_end_time - is_done_start_time)
+            env_step_end_time = perf_counter()
+            self.time_metrics.time_doing_environment_steps.append(env_step_end_time - env_step_start_time)
 
             self.llm_engine = llm_engine
-            new_active_indices = []
-            for i, output in enumerate(outputs):
-                real_idx = active_indices[i]
-                if total_tokens[real_idx] == 0:
-                    first_prompt_tokens[real_idx] = output.prompt_token_ids
+        except Exception as e:
+            self.llm_engine = llm_engine  # Restore in case of error
+            logger.error(f"Error getting prompts: {str(e)}")
+            raise
+        
+        return all_prompts_and_states
+    
+    def _process_next_prompts(self, all_prompts_and_states: list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]) -> list[AgentConversation]:
+        active_conversations = []
+        indices_to_remove = []
+        for i, idx in enumerate(self.active_indices):
+            result = all_prompts_and_states[i]
+            if result is None:
+                self.active_indices.remove(idx)
+                continue
 
-                input_tokens = output.prompt_token_ids[total_tokens[real_idx] :]
-                output_tokens = output.outputs[0].token_ids
+            prompt, self.states[idx] = result
+            if prompt is None or self.states[idx] is None:
+                # The environment is done, so we don't need to generate any more prompts
+                # active_indices.remove(idx)
+                indices_to_remove.append(idx)
+                continue
+            if isinstance(prompt, list):
+                self.all_messages[idx].extend(prompt)
+            elif isinstance(prompt, dict):
+                self.all_messages[idx].append(prompt)
+            else:
+                raise ValueError(f"Invalid prompt type: {type(prompt)}")
+            active_conversations.append(self.all_messages[idx])
 
-                generation_starter_text = output.prompt[-10:]
-                if "think" in generation_starter_text.lower():
-                    output_message = {"role": "assistant", "content": "<think>" + output.outputs[0].text}
-                else:
-                    output_message = {"role": "assistant", "content": output.outputs[0].text}
+        for idx in indices_to_remove:
+            self.active_indices.remove(idx)
+            
+        return active_conversations
+    
+    def _generate_all_chat_completions(self, active_conversations: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]:
+        generate_start_time = perf_counter()
+        # Batch generate responses
+        # TODO: Maybe use their tool API instead of handrolling?
+        if isinstance(self.llm_engine, vllm.LLM) and self.stop_on_truncation:
+            outputs, was_truncated = self._generate_chat_completions(active_conversations)
+        else:
+            outputs = self._generate_chat_completions(active_conversations)
+            was_truncated = [False] * len(outputs)
+        # outputs = self.llm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
+        generate_end_time = perf_counter()
+        self.time_metrics.time_generating_completions.append(generate_end_time - generate_start_time)
+        
+        return outputs, was_truncated
+    
+    def _check_all_done(self) -> list[bool]:
+        llm_engine = self.llm_engine
+        self.llm_engine = None
 
-                all_messages[real_idx].append(output_message)
-                tokens_by_turn[real_idx].append({"input_tokens": input_tokens, "output_tokens": output_tokens})
-                total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
+        is_done_start_time = perf_counter()
 
-                all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-                all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
-                if not all_is_done[i]:
-                    new_active_indices.append(real_idx)
+        all_is_done = self.run_environment_calls_in_parallel(
+            DelayedFunction(
+                function=self.__class__.is_done,
+                remote_function=is_done_remote,
+                args=(self,),
+                kwargs={"messages": self.all_messages[idx], "state": self.states[idx]},
+            )
+            for idx in self.active_indices
+        )
+        is_done_end_time = perf_counter()
+        
+        self.time_metrics.time_evaluating_is_done.append(is_done_end_time - is_done_start_time)
+        self.llm_engine = llm_engine
+        
+        return all_is_done
+            
+    def _process_outputs(self, outputs: list[RequestOutput], was_truncated: list[bool], all_is_done: list[bool]) -> None:
+        new_active_indices = []
+        for i, output in enumerate(outputs):
+            real_idx = self.active_indices[i]
+            if self.total_tokens[real_idx] == 0:
+                self.first_prompt_tokens[real_idx] = output.prompt_token_ids
 
-            active_indices = new_active_indices
+            input_tokens = output.prompt_token_ids[self.total_tokens[real_idx] :]
+            output_tokens = output.outputs[0].token_ids
 
-        # Calculate rewards for completed conversations
+            # generation_starter_text = output.prompt[-10:]
+            # if "think" in generation_starter_text.lower():
+            #     output_message = {"role": "assistant", "content": "<think>" + output.outputs[0].text}
+            # else:
+            #     output_message = {"role": "assistant", "content": output.outputs[0].text}
+            output_message = {"role": "assistant", "content": output.outputs[0].text}
+            self.all_messages[real_idx].append(output_message)
+            self.tokens_by_turn[real_idx].append({"input_tokens": input_tokens, "output_tokens": output_tokens})
+            self.total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
+
+            self.all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
+            #all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
+            if self.stop_on_truncation and was_truncated[i]:
+                all_is_done[i] = True
+                
+            if not all_is_done[i]:
+                new_active_indices.append(real_idx)
+
+        self.active_indices = new_active_indices
+        
+    def _calculate_rewards(self) -> Tuple[list[Tuple[AgentConversation, Reward]], list[dict]]:
         results = []
         llm_engine = self.llm_engine
         self.llm_engine = None
 
-        rewards_start_time = perf_counter()
-        # all_rewards = ray.get(
-        #     [
-        #         get_reward_remote.remote(self, messages=all_messages[idx], state=states[idx])
-        #         for idx in range(self.num_envs)
-        #     ]
-        # )
+        self.time_metrics.compute_rewards_start_time = perf_counter()
+
         all_rewards = self.run_environment_calls_in_parallel(
             DelayedFunction(
                 function=self.__class__.get_reward,
                 remote_function=get_reward_remote,
                 args=(self,),
-                kwargs={"messages": all_messages[idx], "state": states[idx]},
+                kwargs={"messages": self.all_messages[idx], "state": self.states[idx]},
             )
             for idx in range(self.num_envs)
         )
-        rewards_end_time = perf_counter()
-        time_computing_rewards = rewards_end_time - rewards_start_time
+        self.time_metrics.time_computing_rewards = perf_counter() - self.time_metrics.compute_rewards_start_time
 
         self.llm_engine = llm_engine
 
         # Create results list
         results_data = []
         for i, (messages, tokens_by_turn_one_env, fpt, aot) in enumerate(
-            zip(all_messages, tokens_by_turn, first_prompt_tokens, all_tokens)
+            zip(self.all_messages, self.tokens_by_turn, self.first_prompt_tokens, self.all_tokens)
         ):
             reward = all_rewards[i]
             conversation = AgentConversation(
@@ -302,46 +413,13 @@ class AgentInterface(ABC):
             results_data.append(
                 {
                     "messages": messages,
-                    "all_text": all_tokens_text[i],
+                    #"all_text": all_tokens_text[i],
                     "reward": float(reward),
                     "task_prompt": messages[0]["content"],
                 }
             )
-
-        # Upload results to MongoDB after all processing is complete
         
-        self.log_rollouts_mongodb(results_data)
-
-        everything_end_time = perf_counter()
-        total_time = everything_end_time - everything_start_time
-
-        logger.info(f"Rollout completed in {int(total_time)} seconds. Breakdown of time spent:")
-        logger.info(
-            f"Generating completions with vllm: {int(sum(times_generating_completions))} seconds ({sum(times_generating_completions) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_generating_completions)})"
-        )
-        logger.info(
-            f"Initializing environments: {int(time_initializing_environments)} seconds ({time_initializing_environments / total_time:.0%})"
-        )
-        logger.info(
-            f"Doing environment steps: {int(sum(times_doing_environment_steps))} seconds ({sum(times_doing_environment_steps) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_doing_environment_steps)})"
-        )
-        logger.info(
-            f"Evaluating whether environments are done: {int(sum(times_evaluating_is_done))} seconds ({sum(times_evaluating_is_done) / total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in times_evaluating_is_done)})"
-        )
-        logger.info(f"Computing rewards: {int(time_computing_rewards)} ({time_computing_rewards / total_time:.0%})")
-        unaccounted_for_time = (
-            total_time
-            - sum(times_generating_completions)
-            - time_initializing_environments
-            - sum(times_doing_environment_steps)
-            - sum(times_evaluating_is_done)
-            - time_computing_rewards
-        )
-        logger.info(
-            f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / total_time:.0%})"
-        )
-
-        return results
+        return results, results_data
     
     def log_rollouts_mongodb(self, results_data: list[dict]) -> None:
         mongo_params = [self.mongo_uri, self.mongo_db_name, self.mongo_collection_name]
@@ -363,9 +441,15 @@ class AgentInterface(ABC):
             except Exception as e:
                 logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
 
-    def _generate_chat_completions(self, messages: list[list[Message]]) -> list[RequestOutput]:
+    def _generate_chat_completions(self, messages: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
         if isinstance(self.llm_engine, vllm.LLM):
-            return self._generate_chat_completions_vllm(messages)
+             #vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
+            return self._vllm_chat_with_truncation(
+                engine=self.llm_engine, 
+                messages=messages, 
+                sampling_params=self.sampling_params, 
+                truncation_amt=self.sampling_params.truncate_prompt_tokens
+            )  
         if isinstance(self.llm_engine, OpenAI):
             return self._generate_chat_completions_openai(messages)
         if isinstance(self.llm_engine, Anthropic):
@@ -390,75 +474,9 @@ class AgentInterface(ABC):
             merged_messages.append(message)
 
         return merged_messages
-
-    def _generate_chat_completions_vllm(self, messages: list[list[Message]]) -> list[RequestOutput]:
-        processed_messages = []
-        truncation_limit = getattr(self.sampling_params, 'truncate_prompt_tokens', None)
-
-        # Check if manual truncation is needed (limit set and tokenizer available)
-        if self.tokenizer and truncation_limit:
-            logger.debug(f"Applying manual truncation with limit: {truncation_limit}")
-            for conversation in messages:
-                # Make a copy to modify
-                truncated_conversation = list(conversation)
-
-                while True: # Loop until conversation fits or cannot be truncated further
-                    try:
-                        # Apply chat template and tokenize
-                        token_ids = self.tokenizer.apply_chat_template(
-                            truncated_conversation,
-                            tokenize=True,
-                            add_generation_prompt=False # vLLM likely adds this
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Could not apply chat template for manual truncation: {e}. "
-                            f"Skipping manual truncation for this conversation: {truncated_conversation[0]['content'][:50]}..."
-                        )
-                        # Use the current state of truncated_conversation before the error
-                        break
-
-                    # Check if token count is within the limit
-                    if len(token_ids) <= truncation_limit:
-                        # Conversation fits, break the inner loop
-                        break
-                    else:
-                        # Token count exceeds limit, try removing the oldest message
-                        if len(truncated_conversation) > 1:
-                            # Remove the first message (oldest)
-                            removed_message = truncated_conversation.pop(0)
-                            logger.debug(f"Manual truncation removed message: {removed_message['role']} - {removed_message['content'][:50]}... (Current tokens: {len(token_ids)})")
-                        else:
-                            # Only one message left, and it's still too long
-                            logger.warning(
-                                f"Single remaining message exceeds truncation limit ({len(token_ids)} > {truncation_limit}). "
-                                f"Cannot truncate further manually. Passing potentially long message to vLLM."
-                            )
-                            break # Stop manual truncation attempts
-
-                # Add the potentially manually truncated conversation to the list
-                processed_messages.append(truncated_conversation)
-
-        else:
-            # No manual truncation needed (limit not set, tokenizer unavailable, or not vLLM)
-            processed_messages = messages
-            if truncation_limit and not self.tokenizer:
-                 logger.debug("Manual truncation skipped: tokenizer not available.")
-            elif not truncation_limit:
-                 logger.debug("Manual truncation skipped: truncate_prompt_tokens not set.")
-
-
-        # Call vLLM chat with the processed messages and original sampling_params
-        # vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
-        logger.debug(f"Calling vLLM chat with {len(processed_messages)} conversations. SamplingParams includes truncate_prompt_tokens={truncation_limit}")
-        return self._vllm_chat_with_truncation(
-            self.llm_engine, 
-            messages=processed_messages, 
-            sampling_params=self.sampling_params, 
-            truncation_amt=truncation_limit
-        )    
     
     def _vllm_chat_with_truncation(
+        self,
         engine: vllm.LLM,
         messages: list[list[Message]],
         sampling_params: SamplingParams,
@@ -470,7 +488,7 @@ class AgentInterface(ABC):
         continue_final_message: bool = False,
         tools: Optional[list[dict[str, Any]]] = None,
         truncation_amt: Optional[int] = None
-    ) -> list[RequestOutput]:
+    ) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
         """
         Generate responses for a chat conversation.
 
@@ -515,10 +533,11 @@ class AgentInterface(ABC):
         Returns:
             A list of ``RequestOutput`` objects containing the generated
             responses in the same order as the input messages.
+            Optionally, a list of booleans indicating whether each prompt was truncated.
         """
-        list_of_messages: list[list[ChatCompletionMessageParam]]
+        list_of_messages: list[list[ChatCompletionMessageParam]] = messages
 
-        tokenizer = engine.get_tokenizer(lora_request)
+        tokenizer = engine.get_tokenizer()
         model_config = engine.llm_engine.get_model_config()
         resolved_content_format = resolve_chat_template_content_format(
             chat_template,
@@ -529,6 +548,8 @@ class AgentInterface(ABC):
         )
 
         prompts: list[TokensPrompt] = []
+        
+        was_truncated: List[bool] = []
 
         for msgs in list_of_messages:
             # NOTE: _parse_chat_message_content_parts() currently doesn't
@@ -559,23 +580,35 @@ class AgentInterface(ABC):
             if truncation_amt is not None and len(prompt_token_ids) > truncation_amt:
                 prompt_token_ids = prompt_token_ids[:truncation_amt]
                 logger.warning(f"Truncated prompt from {len(prompt_token_ids)} tokens to {truncation_amt} tokens.")
+                was_truncated.append(True)
+            else:
+                was_truncated.append(False)
             
             prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
 
             prompts.append(prompt)
 
-        return engine.generate(
+        outputs = engine.generate(
             prompts,
             sampling_params=sampling_params,
             use_tqdm=use_tqdm,
             lora_request=lora_request,
         )
+        
+        if truncation_amt is not None:
+            return outputs, was_truncated
+        else:
+            return outputs
 
     def _generate_chat_completions_openai(self, messages: list[list[Message]]) -> list[RequestOutput]:
         assert self.openai_or_anthropic_model is not None, (
             "AgentInterface.openai_or_anthropic_model should be provided on initialization if AgentInterface.llm_engine is of type OpenAI."
         )
 
+        @retry(
+            stop=stop_after_attempt(8),
+            wait=wait_exponential(multiplier=15, min=1),
+        )
         def single_completion(conversation: list[Message]) -> RequestOutput:
             conversation = self._merge_tool_and_user_messages(conversation)
 
@@ -614,6 +647,10 @@ class AgentInterface(ABC):
             "AgentInterface.openai_or_anthropic_model should be provided on initialization if AgentInterface.llm_engine is of type Anthropic."
         )
 
+        @retry(
+            stop=stop_after_attempt(8),
+            wait=wait_exponential(multiplier=15, min=1),
+        )
         def single_completion(conversation: list[Message]) -> RequestOutput:
             conversation = self._merge_tool_and_user_messages(conversation)
 
@@ -670,40 +707,6 @@ class AgentInterface(ABC):
                 completions.append(future.result())
         return completions
 
-    @abstractmethod
-    def init_state(self, data: dict) -> AgentState:
-        """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
-        pass
-
-    @abstractmethod
-    def get_next_prompt(
-        self, messages: List[Message], state: AgentState
-    ) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
-        """Input:
-        - messages: the messages in the conversation
-        - state: the state of the environment
-
-        Output:
-        - next_prompt: the next prompt to send to the model (can be a list of prompts)
-        - next_state: the updated state of the environment
-
-        Note: an output of None means that the environment is done and the agent should stop generating.
-
-        Get the next prompt to send to the model and updated state.
-        In this function, you should (1) use the model's last message to update the state.
-        Then (2) create the prompt to send to the model, which should probably incorporate observations about the environment.
-        Finally, (3) return the next prompt for the model to send, along with the updated state."""
-        pass
-
-    @abstractmethod
-    def is_done(self, messages: List[Message], state: AgentState) -> bool:
-        """Determine if the conversation is complete"""
-        pass
-
-    @abstractmethod
-    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
-        pass
-
     def run_environment_calls_in_parallel(self, calls: Iterable[DelayedFunction]) -> list[Any]:
         if self.environment_parallelism is None:
             return [call.function(*call.args, **call.kwargs) for call in calls]
@@ -724,7 +727,14 @@ class AgentInterface(ABC):
         raise ValueError(
             f"Invalid value `{self.environment_parallelism}` of AgentInterface.environment_parallelism. It should be either 'ray', 'threading', or None."
         )
-
+        
+    def _length_penalty(self, conversation: list[Message]) -> float:
+        total_assistant_message_length = sum(
+            len(message["content"])
+            for message in conversation
+            if message["role"] == "assistant"
+        )
+        return total_assistant_message_length * self.length_penalty
 
 @ray.remote
 def init_state_remote(agent: AgentInterface, data: dict) -> AgentState:
@@ -733,7 +743,7 @@ def init_state_remote(agent: AgentInterface, data: dict) -> AgentState:
 
 @ray.remote
 def get_reward_remote(agent: AgentInterface, messages: List[Message], state: AgentState) -> Reward:
-    return agent.get_reward(messages, state)
+    return agent.get_reward(messages, state) + agent._length_penalty(messages)
 
 
 @ray.remote
