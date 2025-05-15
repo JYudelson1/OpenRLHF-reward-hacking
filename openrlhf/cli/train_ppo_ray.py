@@ -120,7 +120,7 @@ def train(args):
             actor_num_nodes=args.actor_num_nodes,
             actor_num_gpus_per_node=args.actor_num_gpus_per_node,
             max_cpus=args.max_cpus,
-            truncate_prompt_tokens=args.prompt_max_len + args.generate_max_len,
+            truncate_prompt_tokens=args.prompt_max_len,
         )
 
     actor_model = PPORayActorGroup(

@@ -109,6 +109,7 @@ class AgentInterface(ABC):
         truncate_prompt_tokens: Optional[int] = None,
         stop_on_truncation: bool = False,
         length_penalty: float = 0.0,
+        stop_strings: Optional[List[str]] = None,
     ):
         self.num_envs = len(full_data)
         self.full_data = full_data
@@ -122,10 +123,15 @@ class AgentInterface(ABC):
         self.anthropic_thinking = anthropic_thinking
         self.tokenizer = None
         self.stop_on_truncation = stop_on_truncation
+        self.length_penalty = length_penalty
+        self.stop_strings = stop_strings
+        
+        if stop_strings is not None:
+            self.sampling_params.stop = stop_strings
+            self.sampling_params.include_stop_str_in_output = True
         
         self.all_messages = [list() for _ in range(self.num_envs)]
         self.active_indices = list(range(self.num_envs))
-
         self.tokens_by_turn = [list() for _ in range(self.num_envs)]
         self.total_tokens = [0 for _ in range(self.num_envs)]
         self.first_prompt_tokens = [None for _ in range(self.num_envs)]
