@@ -58,7 +58,16 @@ class TimeMetrics:
     compute_rewards_start_time: Optional[float]
     total_time: Optional[float]
     
-    def log_time_metrics(self):
+    def __init__(self):
+        self.everything_start_time = perf_counter()
+
+        self.time_doing_environment_steps = []
+        self.time_generating_completions = []
+        self.time_evaluating_is_done = []
+    
+    def finish_and_log(self):
+        self.total_time = perf_counter() - self.everything_start_time
+        
         logger.info(f"Rollout completed in {int(self.total_time)} seconds. Breakdown of time spent:")
         logger.info(
             f"Generating completions with vllm: {int(self.time_generating_completions)} seconds ({self.time_generating_completions / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_generating_completions)})"
@@ -113,6 +122,15 @@ class AgentInterface(ABC):
         self.anthropic_thinking = anthropic_thinking
         self.tokenizer = None
         self.stop_on_truncation = stop_on_truncation
+        
+        self.all_messages = [list() for _ in range(self.num_envs)]
+        self.active_indices = list(range(self.num_envs))
+
+        self.tokens_by_turn = [list() for _ in range(self.num_envs)]
+        self.total_tokens = [0 for _ in range(self.num_envs)]
+        self.first_prompt_tokens = [None for _ in range(self.num_envs)]
+        self.all_tokens = [[] for _ in range(self.num_envs)]
+        
         # Set truncate_prompt_tokens in sampling_params if provided
         if truncate_prompt_tokens is not None:
             if isinstance(self.llm_engine, vllm.LLM):
@@ -175,20 +193,46 @@ class AgentInterface(ABC):
     ### Below are the logical pieces
 
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
-        
         ## Initialize time metrics
-        time_metrics = TimeMetrics()
-        time_metrics.everything_start_time = perf_counter()
+        self.time_metrics = TimeMetrics()
 
-        time_metrics.time_doing_environment_steps = []
-        time_metrics.time_generating_completions = []
-        time_metrics.time_evaluating_is_done = []
+        ## Initialize states for all conversations
+        self.states = self._init_all_states()
 
+        # Continue until all conversations are complete
+        while self.active_indices:
+            # Get next prompts for all active conversations
+            all_prompts_and_states = self._step_through_all_envs()
+
+            active_conversations = self._process_next_prompts(all_prompts_and_states)
+            
+            # Leave the loop if all conversations are done
+            if len(active_conversations) == 0:
+                break
+
+            outputs, was_truncated = self._generate_all_chat_completions(active_conversations)
+
+            # Process outputs and update states
+            all_is_done = self._check_all_done()
+            
+            self._process_outputs(outputs, was_truncated, all_is_done)
+
+        # Calculate rewards for completed conversations
+        results, results_data = self._calculate_rewards()
+
+        # Upload results to MongoDB after all processing is complete
+        self.log_rollouts_mongodb(results_data)
+
+        self.time_metrics.finish_and_log()
+        
+        return results
+    
+    def _init_all_states(self) -> list[AgentState]:
         ## Initialize states for all conversations (remove llm engine before sending through Ray)
         llm_engine = self.llm_engine
         self.llm_engine = None
 
-        time_metrics.init_env_start_time = perf_counter()
+        self.time_metrics.init_env_start_time = perf_counter()
         states = self.run_environment_calls_in_parallel(
             DelayedFunction(
                 function=self.__class__.init_state,
@@ -198,158 +242,160 @@ class AgentInterface(ABC):
             )
             for data in self.full_data
         )
-        time_metrics.time_initializing_environments = perf_counter() - time_metrics.init_env_start_time
+        self.time_metrics.time_initializing_environments = perf_counter() - self.time_metrics.init_env_start_time
 
         # Restore llm engine
         self.llm_engine = llm_engine
 
-        all_messages = [list() for _ in range(self.num_envs)]
-        active_indices = list(range(self.num_envs))
-
-        tokens_by_turn = [list() for _ in range(self.num_envs)]
-        total_tokens = [0 for _ in range(self.num_envs)]
-        first_prompt_tokens = [None for _ in range(self.num_envs)]
-        all_tokens = [[] for _ in range(self.num_envs)]
-        # Continue until all conversations are complete
-        while active_indices:
-            # Get next prompts for all active conversations
-            try:
-                # Temporarily remove vllm engine before sending through Ray
-                llm_engine = self.llm_engine
-                self.llm_engine = None
-
-                env_step_start_time = perf_counter()
-
-                all_prompts_and_states = self.run_environment_calls_in_parallel(
-                    DelayedFunction(
-                        function=self.__class__.get_next_prompt,
-                        remote_function=get_next_prompt_remote,
-                        args=(self,),
-                        kwargs={"messages": all_messages[idx], "state": states[idx]},
-                    )
-                    for idx in active_indices
-                )
-                env_step_end_time = perf_counter()
-                time_metrics.time_doing_environment_steps.append(env_step_end_time - env_step_start_time)
-
-                self.llm_engine = llm_engine
-            except Exception as e:
-                self.llm_engine = llm_engine  # Restore in case of error
-                logger.error(f"Error getting prompts: {str(e)}")
-                raise
-
-            active_conversations = []
-            indices_to_remove = []
-            for i, idx in enumerate(active_indices):
-                result = all_prompts_and_states[i]
-                if result is None:
-                    active_indices.remove(idx)
-                    continue
-
-                prompt, states[idx] = result
-                if prompt is None or states[idx] is None:
-                    # The environment is done, so we don't need to generate any more prompts
-                    # active_indices.remove(idx)
-                    indices_to_remove.append(idx)
-                    continue
-                if isinstance(prompt, list):
-                    all_messages[idx].extend(prompt)
-                elif isinstance(prompt, dict):
-                    all_messages[idx].append(prompt)
-                else:
-                    raise ValueError(f"Invalid prompt type: {type(prompt)}")
-                active_conversations.append(all_messages[idx])
-
-            for idx in indices_to_remove:
-                active_indices.remove(idx)
-
-            # Leave the loop if all conversations are done
-            if len(active_conversations) == 0:
-                break
-
-            generate_start_time = perf_counter()
-            # Batch generate responses
-            # TODO: Maybe use their tool API instead of handrolling?
-            if isinstance(self.llm_engine, vllm.LLM) and self.stop_on_truncation:
-                outputs, was_truncated = self._generate_chat_completions(active_conversations)
-            else:
-                outputs = self._generate_chat_completions(active_conversations)
-            # outputs = self.llm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
-            generate_end_time = perf_counter()
-            time_metrics.time_generating_completions.append(generate_end_time - generate_start_time)
-
-            # Process outputs and update states
+        return states
+    
+    def _step_through_all_envs(self) -> list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]:
+        try:
+            # Temporarily remove vllm engine before sending through Ray
             llm_engine = self.llm_engine
             self.llm_engine = None
 
-            is_done_start_time = perf_counter()
+            env_step_start_time = perf_counter()
 
-            all_is_done = self.run_environment_calls_in_parallel(
+            all_prompts_and_states = self.run_environment_calls_in_parallel(
                 DelayedFunction(
-                    function=self.__class__.is_done,
-                    remote_function=is_done_remote,
+                    function=self.__class__.get_next_prompt,
+                    remote_function=get_next_prompt_remote,
                     args=(self,),
-                    kwargs={"messages": all_messages[idx], "state": states[idx]},
+                    kwargs={"messages": self.all_messages[idx], "state": self.states[idx]},
                 )
-                for idx in active_indices
+                for idx in self.active_indices
             )
-            is_done_end_time = perf_counter()
-            time_metrics.time_evaluating_is_done.append(is_done_end_time - is_done_start_time)
+            env_step_end_time = perf_counter()
+            self.time_metrics.time_doing_environment_steps.append(env_step_end_time - env_step_start_time)
 
             self.llm_engine = llm_engine
-            new_active_indices = []
-            for i, output in enumerate(outputs):
-                real_idx = active_indices[i]
-                if total_tokens[real_idx] == 0:
-                    first_prompt_tokens[real_idx] = output.prompt_token_ids
+        except Exception as e:
+            self.llm_engine = llm_engine  # Restore in case of error
+            logger.error(f"Error getting prompts: {str(e)}")
+            raise
+        
+        return all_prompts_and_states
+    
+    def _process_next_prompts(self, all_prompts_and_states: list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]) -> list[AgentConversation]:
+        active_conversations = []
+        indices_to_remove = []
+        for i, idx in enumerate(self.active_indices):
+            result = all_prompts_and_states[i]
+            if result is None:
+                self.active_indices.remove(idx)
+                continue
 
-                input_tokens = output.prompt_token_ids[total_tokens[real_idx] :]
-                output_tokens = output.outputs[0].token_ids
+            prompt, self.states[idx] = result
+            if prompt is None or self.states[idx] is None:
+                # The environment is done, so we don't need to generate any more prompts
+                # active_indices.remove(idx)
+                indices_to_remove.append(idx)
+                continue
+            if isinstance(prompt, list):
+                self.all_messages[idx].extend(prompt)
+            elif isinstance(prompt, dict):
+                self.all_messages[idx].append(prompt)
+            else:
+                raise ValueError(f"Invalid prompt type: {type(prompt)}")
+            active_conversations.append(self.all_messages[idx])
 
-                # generation_starter_text = output.prompt[-10:]
-                # if "think" in generation_starter_text.lower():
-                #     output_message = {"role": "assistant", "content": "<think>" + output.outputs[0].text}
-                # else:
-                #     output_message = {"role": "assistant", "content": output.outputs[0].text}
-                output_message = {"role": "assistant", "content": output.outputs[0].text}
-                all_messages[real_idx].append(output_message)
-                tokens_by_turn[real_idx].append({"input_tokens": input_tokens, "output_tokens": output_tokens})
-                total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
+        for idx in indices_to_remove:
+            self.active_indices.remove(idx)
+            
+        return active_conversations
+    
+    def _generate_all_chat_completions(self, active_conversations: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]:
+        generate_start_time = perf_counter()
+        # Batch generate responses
+        # TODO: Maybe use their tool API instead of handrolling?
+        if isinstance(self.llm_engine, vllm.LLM) and self.stop_on_truncation:
+            outputs, was_truncated = self._generate_chat_completions(active_conversations)
+        else:
+            outputs = self._generate_chat_completions(active_conversations)
+            was_truncated = [False] * len(outputs)
+        # outputs = self.llm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
+        generate_end_time = perf_counter()
+        self.time_metrics.time_generating_completions.append(generate_end_time - generate_start_time)
+        
+        return outputs, was_truncated
+    
+    def _check_all_done(self) -> list[bool]:
+        llm_engine = self.llm_engine
+        self.llm_engine = None
 
-                all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-                #all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
-                if self.stop_on_truncation and was_truncated[i]:
-                    all_is_done[i] = True
-                    
-                if not all_is_done[i]:
-                    new_active_indices.append(real_idx)
+        is_done_start_time = perf_counter()
 
-            active_indices = new_active_indices
+        all_is_done = self.run_environment_calls_in_parallel(
+            DelayedFunction(
+                function=self.__class__.is_done,
+                remote_function=is_done_remote,
+                args=(self,),
+                kwargs={"messages": self.all_messages[idx], "state": self.states[idx]},
+            )
+            for idx in self.active_indices
+        )
+        is_done_end_time = perf_counter()
+        
+        self.time_metrics.time_evaluating_is_done.append(is_done_end_time - is_done_start_time)
+        self.llm_engine = llm_engine
+        
+        return all_is_done
+            
+    def _process_outputs(self, outputs: list[RequestOutput], was_truncated: list[bool], all_is_done: list[bool]) -> None:
+        new_active_indices = []
+        for i, output in enumerate(outputs):
+            real_idx = self.active_indices[i]
+            if self.total_tokens[real_idx] == 0:
+                self.first_prompt_tokens[real_idx] = output.prompt_token_ids
 
-        # Calculate rewards for completed conversations
+            input_tokens = output.prompt_token_ids[self.total_tokens[real_idx] :]
+            output_tokens = output.outputs[0].token_ids
+
+            # generation_starter_text = output.prompt[-10:]
+            # if "think" in generation_starter_text.lower():
+            #     output_message = {"role": "assistant", "content": "<think>" + output.outputs[0].text}
+            # else:
+            #     output_message = {"role": "assistant", "content": output.outputs[0].text}
+            output_message = {"role": "assistant", "content": output.outputs[0].text}
+            self.all_messages[real_idx].append(output_message)
+            self.tokens_by_turn[real_idx].append({"input_tokens": input_tokens, "output_tokens": output_tokens})
+            self.total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
+
+            self.all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
+            #all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
+            if self.stop_on_truncation and was_truncated[i]:
+                all_is_done[i] = True
+                
+            if not all_is_done[i]:
+                new_active_indices.append(real_idx)
+
+        self.active_indices = new_active_indices
+        
+    def _calculate_rewards(self) -> Tuple[list[Tuple[AgentConversation, Reward]], list[dict]]:
         results = []
         llm_engine = self.llm_engine
         self.llm_engine = None
 
-        time_metrics.compute_rewards_start_time = perf_counter()
+        self.time_metrics.compute_rewards_start_time = perf_counter()
 
         all_rewards = self.run_environment_calls_in_parallel(
             DelayedFunction(
                 function=self.__class__.get_reward,
                 remote_function=get_reward_remote,
                 args=(self,),
-                kwargs={"messages": all_messages[idx], "state": states[idx]},
+                kwargs={"messages": self.all_messages[idx], "state": self.states[idx]},
             )
             for idx in range(self.num_envs)
         )
-        time_metrics.time_computing_rewards = perf_counter() - time_metrics.compute_rewards_start_time
+        self.time_metrics.time_computing_rewards = perf_counter() - self.time_metrics.compute_rewards_start_time
 
         self.llm_engine = llm_engine
 
         # Create results list
         results_data = []
         for i, (messages, tokens_by_turn_one_env, fpt, aot) in enumerate(
-            zip(all_messages, tokens_by_turn, first_prompt_tokens, all_tokens)
+            zip(self.all_messages, self.tokens_by_turn, self.first_prompt_tokens, self.all_tokens)
         ):
             reward = all_rewards[i]
             conversation = AgentConversation(
@@ -366,16 +412,8 @@ class AgentInterface(ABC):
                     "task_prompt": messages[0]["content"],
                 }
             )
-
-        # Upload results to MongoDB after all processing is complete
         
-        self.log_rollouts_mongodb(results_data)
-
-        time_metrics.total_time = perf_counter() - time_metrics.everything_start_time
-        time_metrics.log_time_metrics()
-        
-        
-        return results
+        return results, results_data
     
     def log_rollouts_mongodb(self, results_data: list[dict]) -> None:
         mongo_params = [self.mongo_uri, self.mongo_db_name, self.mongo_collection_name]
