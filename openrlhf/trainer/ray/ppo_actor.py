@@ -85,7 +85,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             log_dir = os.path.join(self.strategy.args.use_tensorboard, self.strategy.args.wandb_run_name)
             self._tensorboard = SummaryWriter(log_dir=log_dir)
 
-        self.experience_maker = RemoteExperienceMaker(
+        self.experience_maker_handle = ray.remote(RemoteExperienceMaker).remote(
             self.actor,
             self.critic,
             self.reward_model,
@@ -217,9 +217,8 @@ class ActorPPOTrainer(BasePPOTrainer):
             )
 
             for rand_prompts in self.prompts_dataloader:
-                for i, experience in enumerate(
-                    self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
-                ):
+                experiences = ray.get(self.experience_maker_handle.make_experience_list.remote(rand_prompts, **self.generate_kwargs))
+                for i, experience in enumerate(experiences):
                     if i == 0:
                         output = self.tokenizer.batch_decode(
                             experience.sequences[0].unsqueeze(0), skip_special_tokens=True
@@ -272,12 +271,10 @@ class ActorPPOTrainer(BasePPOTrainer):
             )
 
             for (rollout_num, rand_prompts) in enumerate(self.prompts_dataloader):
-                rm_fn = self.experience_maker.reward_fn
-                del self.experience_maker.reward_fn
-                rollout_ref = make_experience_list_remote.remote(
-                    self.experience_maker, rand_prompts, **self.generate_kwargs
+                
+                rollout_ref = self.experience_maker_handle.make_experience_list.remote(
+                    rand_prompts, **self.generate_kwargs
                 )
-                self.experience_maker.reward_fn = rm_fn
                 if rollout_num > 0:
                     train_ref = train_remote.remote(self, steps, pbar, args)
                     rollout_experiences, _ = ray.get([rollout_ref, train_ref])
@@ -330,7 +327,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
     def ppo_train(self, global_steps):
         # 1. ensure all experience makers done
-        self.experience_maker.flush()
+        ray.get(self.experience_maker_handle.flush.remote())
         torch.distributed.barrier()
         status = {}
 
@@ -661,6 +658,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
         if global_step % args.logging_steps == 0:
+            perf_stats = ray.get(self.experience_maker_handle.get_perf_stats.remote())
             # wandb
             if self._wandb is not None and self.strategy.is_rank_0():
                 logs = {
@@ -670,15 +668,15 @@ class ActorPPOTrainer(BasePPOTrainer):
                         "global_step": global_step,
                     }.items()
                 }
-                if self.experience_maker.perf_stats is not None:
-                    logs.update({f"perf/experience_maker/{k}": v for k, v in self.experience_maker.perf_stats.items()})
+                if perf_stats is not None:
+                    logs.update({f"perf/experience_maker/{k}": v for k, v in perf_stats.items()})
                 self._wandb.log(logs)
             # TensorBoard
             elif self._tensorboard is not None and self.strategy.is_rank_0():
                 for k, v in logs_dict.items():
                     self._tensorboard.add_scalar(f"train/{k}", v, global_step)
-                if self.experience_maker.perf_stats is not None:
-                    for k, v in self.experience_maker.perf_stats.items():
+                if perf_stats is not None:
+                    for k, v in perf_stats.items():
                         self._tensorboard.add_scalar(f"perf/experience_maker/{k}", v, global_step)
 
         # TODO: Add evaluation mechanism for PPO
@@ -756,7 +754,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 generate_kwargs = self.generate_kwargs.copy()
                 generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
                 
-                samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
+                samples = ray.get(self.experience_maker_handle.generate_samples.remote(all_prompts, **generate_kwargs))
 
                 self.log_rollouts_wandb([sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval")
 
@@ -786,8 +784,9 @@ class ActorPPOTrainer(BasePPOTrainer):
                 gathered_metrics = [None] * (self.strategy.world_size // self.strategy.ring_attn_size)
                 if self.strategy.ring_attn_group is not None:
                     # Only rank 0 in ring attention group gathers metrics
+                    ring_rank0_group = ray.get(self.experience_maker_handle.ring_rank0_group)
                     torch.distributed.all_gather_object(
-                        gathered_metrics, local_metrics, group=self.experience_maker.ring_rank0_group
+                        gathered_metrics, local_metrics, group=ring_rank0_group
                     )
                 else:
                     torch.distributed.all_gather_object(gathered_metrics, local_metrics)
@@ -1157,12 +1156,6 @@ class ActorModelRayActor(BasePPORole):
 
 def custom_collate_fn(batch):
     return batch
-
-## Ray Remote Functions
-
-@ray.remote
-def make_experience_list_remote(experience_maker: RemoteExperienceMaker, prompts, **generate_kwargs):
-    return experience_maker.make_experience_list(prompts, **generate_kwargs)
 
 @ray.remote
 def train_remote(trainer: ActorPPOTrainer, steps, pbar, args):

@@ -1058,3 +1058,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if self.critic is not None:
             ray.get(self._ref)
             self._ref = None
+            
+    def get_perf_stats(self):
+        return self.perf_stats
