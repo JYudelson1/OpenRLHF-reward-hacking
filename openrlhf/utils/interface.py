@@ -21,7 +21,7 @@ import json
 import ray
 import logging
 from dataclasses import dataclass
-
+from sys import stderr
 from pymongo import MongoClient
 from datetime import datetime
 from vllm.transformers_utils.tokenizer import get_tokenizer
@@ -609,6 +609,7 @@ class AgentInterface(ABC):
         @retry(
             stop=stop_after_attempt(8),
             wait=wait_exponential(multiplier=15, min=1),
+            before_sleep=lambda retry_state: print(f"Calling OpenAI API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}", file=stderr)
         )
         def single_completion(conversation: list[Message]) -> RequestOutput:
             conversation = self._merge_tool_and_user_messages(conversation)
@@ -651,6 +652,7 @@ class AgentInterface(ABC):
         @retry(
             stop=stop_after_attempt(8),
             wait=wait_exponential(multiplier=15, min=1),
+            before_sleep=lambda retry_state: print(f"Calling Anthropic API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}", file=stderr)
         )
         def single_completion(conversation: list[Message]) -> RequestOutput:
             conversation = self._merge_tool_and_user_messages(conversation)
