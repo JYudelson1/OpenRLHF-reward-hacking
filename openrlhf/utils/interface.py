@@ -619,6 +619,7 @@ class AgentInterface(ABC):
                 model=self.openai_or_anthropic_model,  # type: ignore
                 temperature=self.sampling_params.temperature,
                 max_completion_tokens=self.sampling_params.max_tokens,
+                stop=self.stop_strings,
             )
             return RequestOutput(
                 request_id="",
@@ -668,6 +669,9 @@ class AgentInterface(ABC):
 
             if self.anthropic_thinking is not None:
                 api_kwargs["thinking"] = self.anthropic_thinking
+                
+            if self.stop_strings is not None:
+                api_kwargs["stop_sequences"] = self.stop_strings
 
             completion = self.llm_engine.messages.create(  # type: ignore
                 messages=conversation,  # type: ignore
