@@ -1,5 +1,7 @@
+from itertools import pairwise
+import json
 import os
-import time
+from time import perf_counter
 import queue
 from collections import defaultdict
 from typing import Any, List
@@ -25,9 +27,16 @@ def get_all_env_variables():
     return os.environ
 
 
+def cumulative_sum(xs):
+    sum = 0
+    yield sum
+    for x in xs:
+        sum += x
+        yield sum
+
+
 @ray.remote
 class LLMRayActor:
-
     def __init__(self, *args, bundle_indices: list = None, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
@@ -42,6 +51,13 @@ class LLMRayActor:
             # when the distributed_executor_backend is not ray and
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
+            
+        if kwargs.get("truncate_prompt_tokens") is not None:
+            self.truncate_prompt_tokens = kwargs.get("truncate_prompt_tokens")
+            del kwargs["truncate_prompt_tokens"]
+        else:
+            self.truncate_prompt_tokens = None
+            del kwargs["truncate_prompt_tokens"]
 
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
@@ -55,7 +71,7 @@ class LLMRayActor:
         self.requests = {}
         self.responses = {}
         self.full_data = {}
-        
+
         # Extract MongoDB configuration
         self.mongo_uri = kwargs.pop("mongo_uri", None)
         self.mongo_db_name = kwargs.pop("mongo_db_name", None)
@@ -69,6 +85,8 @@ class LLMRayActor:
             os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
         self.llm = vllm.LLM(*args, **kwargs)
+
+        self.rollouts = None
 
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray):
         return self.llm.collective_rpc(
@@ -91,79 +109,56 @@ class LLMRayActor:
     def wake_up(self):
         self.llm.wake_up()
 
-    def add_requests(self, actor_rank, *, sampling_params, prompt_token_ids, multiturn=False, env_maker=None, full_data=None):
-        # """
-        # Save the requests from actors and generate responses when all actors have sent their requests
-        # """
-        # start_time = time.time()
-        # logger.info(f"Engine {id(self)} received request from actor {actor_rank}, counter={self.actor_counter}/{self.num_actors}")
-        
-        # self.requests[actor_rank] = prompt_token_ids
-        # self.full_data[actor_rank] = full_data
-        # self.actor_counter += 1
-        # if self.actor_counter == self.num_actors:
-        #     start_time = time.time()
-        #     logger.info(f"Engine {id(self)} starting generation for all actors at {start_time}")
-        #     assert len(self.requests) == self.num_actors
-        #     num_requests = []
-        #     requests = []
-            
-        #     if not multiturn:
-        #         for actor_rank, request in self.requests.items():
-        #             num_requests.append((actor_rank, len(request)))
-        #             requests.extend(request)
-        #     else:
-        #         for actor_rank, data in self.full_data.items():
-        #             num_requests.append((actor_rank, len(data)))
-        #             requests.extend(data)
+    def reset_rollout_cache(self) -> None:
+        self.env_data_for_rollout = {}
+        self.rollouts = None
 
-        #     if len(requests) > 0:
-        #         # For now we assume that all requests have the same sampling params
-        #         if not multiturn:
-        #             responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=requests)
-        #         else:
-        #             env = env_maker(full_data=requests, sampling_params=sampling_params, vllm_engine=self.llm)
-        #             responses = env.generate_many()
-        #     else:
-        #         responses = []
-                
-        #     logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")    
+    def remember_env_data_for_rollout(self, rank: int, data_for_rank: list[dict]) -> None:
+        assert hasattr(self, "env_data_for_rollout"), (
+            "You must call LLMRayActor.reset_rollout_cache before calling LLMRayActor.remember_env_data_for_rollout"
+        )
 
-        #     offset = 0
-        #     self.responses = {}
-        #     for actor_rank, num in num_requests:
-        #         self.responses[actor_rank] = responses[offset : offset + num]
-        #         offset += num
+        print(f"LLMRayActor.remember_env_data_for_rollout called with {self=} {rank=} {len(data_for_rank)=}")
 
-        #     self.actor_counter = 0
-        #     self.requests = {}
-        
-        """
-        Process the request immediately and return the results.
-        No actor counting or waiting for multiple actors - just direct processing.
-        """
-        start_time = time.time()
-        logger.info(f"Engine {id(self)} processing request from actor {actor_rank}")
+        self.env_data_for_rollout[rank] = data_for_rank
 
-        # Generate responses immediately
-        if not multiturn:
-            responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
-        else:
-            # Pass MongoDB configuration to the environment
-            env = env_maker(
-                full_data=full_data, 
-                sampling_params=sampling_params, 
-                vllm_engine=self.llm,
-                mongo_uri=self.mongo_uri,
-                mongo_db_name=self.mongo_db_name,
-                mongo_collection_name=self.mongo_collection_name
+    def generate_env_rollout(self, rank: int, sampling_params, env_maker) -> list:
+        print(f"LLMRayActor.generate_env_rollout called with {self=} {rank=}")
+
+        if self.rollouts is not None:
+            return self.rollouts[rank]
+
+        assert hasattr(self, "env_data_for_rollout"), (
+            "You must call LLMRayActor.reset_rollout_cache before calling LLMRayActor.generate_env_rollout"
+        )
+        assert all(data_for_rank is not None for data_for_rank in self.env_data_for_rollout), (
+            "You must call LLMRayActor.remember_env_data_for_rollout for each rank before calling LLMRayActor.generate_env_rollout"
+        )
+
+        env = env_maker(
+            full_data=sum(self.env_data_for_rollout.values(), []),
+            sampling_params=sampling_params,
+            llm_engine=self.llm,
+            mongo_uri=self.mongo_uri,
+            mongo_db_name=self.mongo_db_name,
+            mongo_collection_name=self.mongo_collection_name,
+            truncate_prompt_tokens=self.truncate_prompt_tokens,
+        )
+
+        rollouts = env.generate_many()
+
+        self.rollouts = {
+            rank: rollouts[i:j]
+            for rank, (i, j) in zip(
+                self.env_data_for_rollout.keys(),
+                pairwise(cumulative_sum(len(data_for_rank) for data_for_rank in self.env_data_for_rollout.values())),
+                strict=True,
             )
-            responses = env.generate_many()
-            
-        logger.info(f"Engine {id(self)} completed generation in {time.time() - start_time:.2f}s")
-        
-        # Return the responses directly
-        return responses
+        }
+
+        self.env_data_for_rollout = {}
+
+        return self.rollouts[rank]
 
     def get_responses(self, actor_rank):
         """
@@ -188,6 +183,12 @@ def create_vllm_engines(
     mongo_uri=None,
     mongo_db_name=None,
     mongo_collection_name=None,
+    rollout_batch_size=None,
+    n_samples_per_prompt=None,
+    actor_num_nodes=None,
+    actor_num_gpus_per_node=None,
+    max_cpus=None,
+    truncate_prompt_tokens=None,
 ):
     import vllm
 
@@ -204,8 +205,16 @@ def create_vllm_engines(
         num_gpus = 0.2
 
     if not use_hybrid_engine:
+        if rollout_batch_size is None or n_samples_per_prompt is None or actor_num_nodes is None or actor_num_gpus_per_node is None or max_cpus is None:
+            cpu_per_actor = 1
+        else:
+            optimal_cpu_amt = rollout_batch_size * n_samples_per_prompt
+            if max_cpus > 0:
+                optimal_cpu_amt = min(optimal_cpu_amt, max_cpus)
+
+            cpu_per_actor = optimal_cpu_amt / (actor_num_nodes * actor_num_gpus_per_node)
         # Create a big placement group to ensure that all engines are packed
-        bundles = [{"GPU": 1, "CPU": 8} for _ in range(num_engines * tensor_parallel_size)]
+        bundles = [{"GPU": 1, "CPU": cpu_per_actor} for _ in range(num_engines * tensor_parallel_size)]
         shared_pg = placement_group(bundles, strategy="PACK")
         ray.get(shared_pg.ready())
 
@@ -225,34 +234,35 @@ def create_vllm_engines(
         else:
             num_actors = num_total_actors // num_engines + int(i < num_total_actors % num_engines)
 
-        vllm_engines.append(
-            LLMRayActor.options(
-                num_cpus=num_gpus,
-                num_gpus=num_gpus,
-                scheduling_strategy=scheduling_strategy,
-            ).remote(
-                model=pretrain,
-                enforce_eager=enforce_eager,
-                worker_extension_cls="openrlhf.trainer.ray.vllm_worker_wrap.WorkerWrap",
-                tensor_parallel_size=tensor_parallel_size,
-                seed=seed + i,
-                distributed_executor_backend=distributed_executor_backend,
-                max_model_len=max_model_len,
-                enable_prefix_caching=enable_prefix_caching,
-                dtype="bfloat16",
-                trust_remote_code=True,
-                full_determinism=full_determinism,
-                num_actors=num_actors,
-                gpu_memory_utilization=gpu_memory_utilization,
-                bundle_indices=bundle_indices,
-                num_gpus=0.2 if use_hybrid_engine else 1,
-                enable_sleep_mode=vllm_enable_sleep,
-                noset_visible_devices=noset_visible_devices,
-                mongo_uri=mongo_uri,
-                mongo_db_name=mongo_db_name,
-                mongo_collection_name=mongo_collection_name,
-            )
+        engine = LLMRayActor.options(
+            num_cpus=num_gpus,
+            num_gpus=num_gpus,
+            scheduling_strategy=scheduling_strategy,
+        ).remote(
+            model=pretrain,
+            enforce_eager=enforce_eager,
+            worker_extension_cls="openrlhf.trainer.ray.vllm_worker_wrap.WorkerWrap",
+            tensor_parallel_size=tensor_parallel_size,
+            seed=seed + i,
+            distributed_executor_backend=distributed_executor_backend,
+            max_model_len=max_model_len,
+            enable_prefix_caching=enable_prefix_caching,
+            dtype="bfloat16",
+            trust_remote_code=True,
+            full_determinism=full_determinism,
+            num_actors=num_actors,
+            gpu_memory_utilization=gpu_memory_utilization,
+            bundle_indices=bundle_indices,
+            num_gpus=0.2 if use_hybrid_engine else 1,
+            enable_sleep_mode=vllm_enable_sleep,
+            noset_visible_devices=noset_visible_devices,
+            mongo_uri=mongo_uri,
+            mongo_db_name=mongo_db_name,
+            mongo_collection_name=mongo_collection_name,
+            truncate_prompt_tokens=truncate_prompt_tokens,
         )
+        
+        vllm_engines.append(engine)
 
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)

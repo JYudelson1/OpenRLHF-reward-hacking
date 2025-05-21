@@ -16,6 +16,7 @@ from openrlhf.models.utils import compute_approx_kl, compute_reward, masked_mean
 from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.remote_rm_utils import remote_rm_fn_ray
 from openrlhf.utils import AgentConversation
+
 logger = init_logger(__name__)
 
 
@@ -60,6 +61,7 @@ class Experience:
     action_mask: Optional[torch.BoolTensor]
     info: Optional[dict]
     kl: Optional[torch.Tensor] = None
+    json_rollouts: list | None = None
 
     @torch.no_grad()
     def to_device(self, device: torch.device):
@@ -120,10 +122,11 @@ class Samples:
     response_length: torch.Tensor
     total_length: torch.Tensor
     reward: Optional[List[float]]
-    solutions: Optional[List[str]]    
+    solutions: Optional[List[str]]
     pad_len: Optional[int]
+    json_rollouts: list | None = None
 
-    
+
 class BaseExperienceMaker(ABC):
     """
     Base experience maker that only handles initialization.
@@ -200,9 +203,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             self.custom_reward_func = ray.remote(self.custom_reward_func)
 
     @torch.no_grad()
-    def make_experience_list(
-        self, all_prompts: Union[str, List[str]], **generate_kwargs
-    ) -> List[Experience]:
+    def make_experience_list(self, all_prompts: Union[str, List[str]], **generate_kwargs) -> List[Experience]:
         """
         Make a list of experience with the micro_rollout_batch_size.
 
@@ -248,7 +249,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # Make experiences (models forward: logprobs, values, rewards, and kl divergence)
         experiences = self.make_experience(samples_list)
-        
 
         # Process experiences (reward shaping, etc.)
         experiences = self.compute_advantages_and_returns(experiences, **generate_kwargs)
@@ -266,7 +266,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         """
         Turn samples into experience by calculating logprobs, values, rewards, and kl divergence.
         """
-        
+
         args = self.strategy.args
         self.actor.eval()
         device = torch.cuda.current_device()
@@ -387,7 +387,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         base_action_log_probs_list, value_list, rewards_list = ref_values[0], ref_values[1], ref_values[2]
         if self.remote_rm_url is not None and isinstance(rewards_list, torch.Tensor):
             rewards_list = rewards_list.chunk(len(samples_list))
-            
 
         # Avoid CUDA OOM when colocate models
         if args.colocate_actor_ref or args.colocate_all_models:
@@ -483,7 +482,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 samples.action_mask,
                 info,
                 kl,
-        )
+                json_rollouts=samples.json_rollouts,
+            )
 
             experiences.append(experience)
 
@@ -541,7 +541,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 action_mask=experience.action_mask,
                 num_actions=num_actions,
                 reward_clip_range=args.reward_clip_range,
-                sample_packing=args.packing_samples
+                sample_packing=args.packing_samples,
             )
 
             if self.advantage_estimator == "gae":
@@ -687,12 +687,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         #     # TODO: THIS MIGHT BE WRONG
         #     if action_mask.size(1) == rewards.size(1):
         #         rewards = action_mask * rewards
-            #     # Truncate action_mask to match rewards, for packed samples
-            #     if action_mask.size(1) > rewards.size(1):
-            #         action_mask = action_mask[:, action_mask.size(1) - rewards.size(1):]
-            #     else:
-            #         assert False, "rewards has more elements than action_mask"
-            
+        #     # Truncate action_mask to match rewards, for packed samples
+        #     if action_mask.size(1) > rewards.size(1):
+        #         action_mask = action_mask[:, action_mask.size(1) - rewards.size(1):]
+        #     else:
+        #         assert False, "rewards has more elements than action_mask"
 
         # Calculate returns by accumulating discounted rewards
         for t in reversed(range(response_length)):
@@ -727,7 +726,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         all_prompts = [example["prompts"] for example in all_examples]
         full_data = [example.get("full_data", None) for example in all_examples]
         all_solutions = [example.get("solution", None) for example in all_examples]
-        
+
         all_prompts = sum([[prompt] * args.n_samples_per_prompt for prompt in all_prompts], [])
         all_solutions = sum([[solution] * args.n_samples_per_prompt for solution in all_solutions], [])
         samples_list = []
@@ -751,13 +750,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
     def _generate_vllm(self, all_examples: List[dict], **kwargs) -> List[Samples]:
         from vllm import SamplingParams
-        
+
         all_prompts = [example["prompts"] for example in all_examples]
         full_data = [example.get("full_data", None) for example in all_examples]
         all_solutions = [example.get("solution", None) for example in all_examples]
-        
+
         # prompt_token_id_map = {}
-        # prompt_token_ids = self.tokenize_fn(all_prompts, self.prompt_max_len, padding=False)["input_ids"] 
+        # prompt_token_ids = self.tokenize_fn(all_prompts, self.prompt_max_len, padding=False)["input_ids"]
         # for i, prompt_tokens in enumerate(prompt_token_ids):
         #     prompt_token_id_map[str(prompt_tokens)] = i
 
@@ -789,27 +788,18 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         all_full_data = sum([[datum] * args.n_samples_per_prompt for datum in full_data], [])
         all_solutions = sum([[solution] * args.n_samples_per_prompt for solution in all_solutions], [])
         assert len(all_prompts) == len(all_full_data) == len(all_solutions)
-        
-        # Distribute requests to engines and collect responses to outputs
-        refs = []
-        batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
-        for i, llm in enumerate(llms):
-            prompt_token_ids = all_prompt_token_ids[i * batch_size : (i + 1) * batch_size]
 
-            if vars(self.strategy.args).get("env_file", False):
-                datum = all_full_data[i * batch_size : (i + 1) * batch_size]
-                refs.append(
-                    llm.add_requests.remote(rank, sampling_params=sampling_params, multiturn=True, full_data=datum, env_maker=self.strategy.args.env_maker, prompt_token_ids=None)
-                )
-            else:
-                refs.append(
-                    llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
-                )
-        if vars(self.strategy.args).get("env_file", False):
-            outputs = ray.get(refs)
-            all_outputs = sum(outputs, [])
-        else:
-            all_outputs = ray.get(refs)
+        # Distribute requests to engines and collect responses to outputs
+        all_outputs = self._generate_vllm_bare(
+            rank=rank,
+            world_size=world_size,
+            all_prompt_token_ids=all_prompt_token_ids,
+            all_full_data=all_full_data,
+            llms=llms,
+            sampling_params=sampling_params,
+        )
+
+        json_rollouts = [{"rollout": conversation.messages, "reward": reward} for conversation, reward in all_outputs]
 
         # Waiting for all requests to be sent
         if self.strategy.ring_attn_group is not None:
@@ -842,7 +832,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 # | token token token token token | token token [EOS] [PAD] |
                 # | [PAD] [PAD] [PAD] token token | token token token [EOS] |
                 # |<---------- prompt ----------->|<-------- answer ------->|
-                assert (full_data[0] is None), "RL environments currently only supported with sample packing"
+                assert full_data[0] is None, "RL environments currently only supported with sample packing"
                 max_input_len, max_output_len = 0, 0
                 for output in outputs:
                     max_input_len = max(max_input_len, len(output.prompt_token_ids))
@@ -883,6 +873,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         reward=None,
                         solutions=solutions.copy() if solutions[0] is not None else None,
                         pad_len=None,
+                        json_rollouts=json_rollouts,
                     )
                 )
             else:
@@ -894,10 +885,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 sequences = []
                 packed_seq_lens = []
                 attention_mask = []  # For sequence identification
-                action_masks = []    # For masking assistant responses
+                action_masks = []  # For masking assistant responses
                 num_actions = []
-                
-                
+
                 if full_data[0] is not None:
                     # Sequence packing with multiple turns
                     # rewards = []
@@ -906,22 +896,22 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     #     current_action_mask = []
                     #     total_len = 0
                     #     rewards.append(reward)
-                        
+
                     #     # Process each turn in the conversation
                     #     for turn in conversation.tokens_by_turn:
                     #         prompt_tokens = turn["input_tokens"]
                     #         response_tokens = turn["output_tokens"]
-                            
+
                     #         # Add tokens to sequence
                     #         current_seq.extend(prompt_tokens)
                     #         current_seq.extend(response_tokens)
-                            
+
                     #         # Mark which tokens are from assistant (1) vs user (0)
                     #         current_action_mask.extend([False] * (len(prompt_tokens) - 1))  # User prompt
                     #         current_action_mask.extend(([True] * len(response_tokens)) + [False])  # Assistant response
-                            
+
                     #         total_len += len(prompt_tokens) + len(response_tokens)
-                        
+
                     #     # Store sequence info
                     #     sequences.extend(current_seq)
                     #     packed_seq_lens.append(total_len)
@@ -952,7 +942,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         attention_mask.extend([i + 1] * (input_len + output_len))
 
                         num_actions.append(max(1, output_len))
-                
+
                 # pad seq makes the sequence a multiple of ring_attention_size.
                 pad_len = None
                 if self.strategy.ring_attn_group is not None:
@@ -982,6 +972,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             reward=rewards,
                             solutions=solutions.copy() if solutions[0] is not None else None,
                             pad_len=pad_len,
+                            json_rollouts=json_rollouts,
                         )
                     )
                 else:
@@ -1001,10 +992,54 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             total_length=total_length,
                             reward=rewards,
                             solutions=solutions.copy() if solutions[0] is not None else None,
-                            pad_len=None
+                            pad_len=None,
+                            json_rollouts=json_rollouts,
                         )
                     )
         return samples_list
+
+    def _generate_vllm_bare(self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params):
+        print(
+            f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
+        )
+
+        has_environment = vars(self.strategy.args).get("env_file", False)
+        batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
+
+        if has_environment:
+            ray.get([llm.reset_rollout_cache.remote() for llm in llms])
+
+            torch.distributed.barrier()
+            torch.cuda.synchronize()
+
+            ray.get(
+                [
+                    llm.remember_env_data_for_rollout.remote(
+                        rank=rank, data_for_rank=all_full_data[i_llm * batch_size : (i_llm + 1) * batch_size]
+                    )
+                    for i_llm, llm in enumerate(llms)
+                ]
+            )
+
+            torch.distributed.barrier()
+            torch.cuda.synchronize()
+
+            outputs = ray.get(
+                [
+                    llm.generate_env_rollout.remote(
+                        rank=rank, sampling_params=sampling_params, env_maker=self.strategy.args.env_maker
+                    )
+                    for llm in llms
+                ]
+            )
+
+            torch.distributed.barrier()
+            torch.cuda.synchronize()
+
+            return sum(outputs, [])
+
+        else:
+            assert False, "TO DO: implement this"
 
     def flush(self):
         "Ensure all experience has been send to critic"

@@ -112,6 +112,7 @@ def blending_datasets(
     # merge datasets
     if strategy.is_rank_0():
         print(train_data_list)
+        
 
     train_dataset = interleave_datasets(
         train_data_list,
@@ -119,6 +120,9 @@ def blending_datasets(
         seed=seed,
         stopping_strategy=stopping_strategy,
     )
+    
+    if strategy.is_rank_0():
+        print(f"There are {len(train_dataset)} samples in train dataset")
 
     if return_eval:
         eval_dataset = interleave_datasets(
@@ -127,6 +131,8 @@ def blending_datasets(
             seed=seed,
             stopping_strategy=stopping_strategy,
         )
+        if strategy.is_rank_0():
+            print(f"There are {len(eval_dataset)} samples in eval dataset")
         return {"train": train_dataset, "validation": eval_dataset}
     else:
         return train_dataset
