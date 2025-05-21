@@ -110,6 +110,7 @@ class AgentInterface(ABC):
         stop_on_truncation: bool = False,
         length_penalty: float = 0.0,
         stop_strings: Optional[List[str]] = None,
+        max_steps: Optional[int] = None,
     ):
         self.num_envs = len(full_data)
         self.full_data = full_data
@@ -125,6 +126,7 @@ class AgentInterface(ABC):
         self.stop_on_truncation = stop_on_truncation
         self.length_penalty = length_penalty
         self.stop_strings = stop_strings
+        self.max_steps = max_steps
         
         if stop_strings is not None:
             self.sampling_params.stop = stop_strings
@@ -136,6 +138,7 @@ class AgentInterface(ABC):
         self.total_tokens = [0 for _ in range(self.num_envs)]
         self.first_prompt_tokens = [None for _ in range(self.num_envs)]
         self.all_tokens = [[] for _ in range(self.num_envs)]
+        self.num_steps = [0 for _ in range(self.num_envs)]
         
         # Set truncate_prompt_tokens in sampling_params if provided
         if truncate_prompt_tokens is not None:
