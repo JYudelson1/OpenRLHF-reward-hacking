@@ -373,8 +373,16 @@ class AgentInterface(ABC):
 
             self.all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
             #all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
+            
+            # Stop reason: truncation
             if self.stop_on_truncation and was_truncated[i]:
                 all_is_done[i] = True
+                
+            # Stop reason: max steps
+            if self.max_steps is not None:
+                self.num_steps[real_idx] += 1
+                if self.num_steps[real_idx] >= self.max_steps:
+                    all_is_done[i] = True
                 
             if not all_is_done[i]:
                 new_active_indices.append(real_idx)
