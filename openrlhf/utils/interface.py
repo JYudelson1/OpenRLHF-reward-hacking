@@ -70,7 +70,7 @@ class TimeMetrics:
         
         logger.info(f"Rollout completed in {int(self.total_time)} seconds. Breakdown of time spent:")
         logger.info(
-            f"Generating completions with vllm: {int(self.time_generating_completions)} seconds ({self.time_generating_completions / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_generating_completions)})"
+            f"Generating completions with vllm: {int(sum(self.time_generating_completions))} seconds ({sum(self.time_generating_completions) / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_generating_completions)})"
         )
         logger.info(
             f"Initializing environments: {int(self.time_initializing_environments)} seconds ({self.time_initializing_environments / self.total_time:.0%})"
