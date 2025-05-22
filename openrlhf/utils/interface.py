@@ -170,12 +170,13 @@ class AgentInterface(ABC):
 
     @abstractmethod
     def get_next_prompt(
-        self, messages: List[Message], state: AgentState
+        self, messages: List[Message], state: AgentState, num_steps: int
     ) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
         """Input:
         - messages: the messages in the conversation
         - state: the state of the environment
-
+        - num_steps: the number of steps taken so far
+        
         Output:
         - next_prompt: the next prompt to send to the model (can be a list of prompts)
         - next_state: the updated state of the environment
@@ -271,7 +272,7 @@ class AgentInterface(ABC):
                     function=self.__class__.get_next_prompt,
                     remote_function=get_next_prompt_remote,
                     args=(self,),
-                    kwargs={"messages": self.all_messages[idx], "state": self.states[idx]},
+                    kwargs={"messages": self.all_messages[idx], "state": self.states[idx], "num_steps": self.num_steps[idx]},
                 )
                 for idx in self.active_indices
             )
@@ -771,6 +772,6 @@ def is_done_remote(agent: AgentInterface, messages: List[Message], state: AgentS
 
 @ray.remote
 def get_next_prompt_remote(
-    agent: AgentInterface, messages: List[Message], state: AgentState
+    agent: AgentInterface, messages: List[Message], state: AgentState, num_steps: int
 ) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
-    return agent.get_next_prompt(messages, state)
+    return agent.get_next_prompt(messages, state, num_steps)
