@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from itertools import count
+import threading
 from time import perf_counter
 from typing import *
 import ray.remote_function
@@ -8,11 +11,13 @@ import vllm
 from vllm import CompletionOutput, SamplingParams
 from vllm.outputs import RequestOutput
 from vllm.lora.request import LoRARequest
-from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
-                                         ChatTemplateContentFormatOption,
-                                         apply_hf_chat_template,
-                                         parse_chat_messages,
-                                         resolve_chat_template_content_format)
+from vllm.entrypoints.chat_utils import (
+    ChatCompletionMessageParam,
+    ChatTemplateContentFormatOption,
+    apply_hf_chat_template,
+    parse_chat_messages,
+    resolve_chat_template_content_format,
+)
 from vllm.inputs import TokensPrompt
 from openai import OpenAI
 from anthropic import Anthropic
@@ -40,13 +45,412 @@ class DelayedFunction:
     args: Iterable[Any]
     kwargs: dict[str, Any]
 
+
 @dataclass
 class AgentConversation:
     messages: List[Message]
     tokens_by_turn: List[Dict[str, Any]]
     first_prompt_tokens: List[int]
     all_tokens: List[int]
-    
+    total_tokens: int
+
+    @staticmethod
+    def empty() -> "AgentConversation":
+        return AgentConversation(messages=[], tokens_by_turn=[], first_prompt_tokens=[], all_tokens=[], total_tokens=0)
+
+    def append_assistant_message_and_tokens(self, vllm_output: RequestOutput) -> None:
+        self.messages.append({"role": "assistant", "content": vllm_output.outputs[0].text})
+        output_tokens = vllm_output.outputs[0].token_ids
+        input_tokens = vllm_output.prompt_token_ids[self.total_tokens :]
+        self.tokens_by_turn.append({"input_tokens": input_tokens, "output_tokens": output_tokens})
+        if self.total_tokens == 0:
+            self.first_prompt_tokens = vllm_output.prompt_token_ids
+        self.all_tokens = list(vllm_output.prompt_token_ids) + list(vllm_output.outputs[0].token_ids)
+        self.total_tokens += len(input_tokens) + len(output_tokens)
+
+
+class ThreadedAgentInterface(ABC):
+    def __init__(
+        self,
+        full_data: list[dict],
+        sampling_params: SamplingParams,
+        llm_engine: vllm.AsyncLLMEngine | OpenAI | Anthropic,
+        # truncate_prompt_tokens: int | None = None, # just let the user provide this in sampling_params. uncomment this (and the subsequent commented block in this function which handles those two parameters) if commenting this created a bug
+        # stop_on_truncation: bool = False,
+        stop_strings: list[str] | None = None,
+        length_penalty: float = 0.0,
+        max_steps: int | None = None,
+    ) -> None:
+        self.full_data = full_data
+        self.sampling_params = sampling_params
+        self.llm_engine = llm_engine
+        # if isinstance(llm_engine, vllm.LLM):
+        #     self.thread_safe_llm = ThreadSafeLLM(llm_engine)
+        self.length_penalty = length_penalty
+        self.stop_strings = stop_strings
+        self.max_steps = max_steps
+
+        if stop_strings is not None:
+            self.sampling_params.stop = stop_strings
+            self.sampling_params.include_stop_str_in_output = True
+
+        self._llm_engine_request_id_counter = 0
+
+        # just let the user provide this in sampling_params. uncomment this (and the arguments truncate_prompt_tokens and stop_on_truncation to __init__) if commenting this created a bug
+        # self.truncate_prompt_tokens = truncate_prompt_tokens
+        # self.stop_on_truncation = stop_on_truncation
+        # if truncate_prompt_tokens is not None:
+        #    if isinstance(self.llm_engine, vllm.LLM):
+        #         self.sampling_params.truncate_prompt_tokens = truncate_prompt_tokens
+        #         logger.info(f"Set SamplingParams.truncate_prompt_tokens to {truncate_prompt_tokens}")
+        #    else:
+        #         logger.warning(
+        #             f"truncate_prompt_tokens ({truncate_prompt_tokens}) provided but LLM engine is not vLLM. "
+        #             "This parameter will be ignored for both SamplingParams and manual truncation."
+        #         )
+
+    @abstractmethod
+    def init_state(self, data: dict) -> AgentState:
+        """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
+        pass
+
+    @abstractmethod
+    def get_next_prompt(
+        self, messages: list[Message], state: AgentState
+    ) -> tuple[list[Message] | Message | None, AgentState]:
+        """Input:
+        - messages: the messages in the conversation
+        - state: the state of the environment
+
+        Output:
+        - next_prompt: the next prompt to send to the model (can be a list of prompts)
+        - next_state: the updated state of the environment
+
+        Note: an output of None means that the environment is done and the agent should stop generating.
+
+        Get the next prompt to send to the model and updated state.
+        In this function, you should (1) use the model's last message to update the state.
+        Then (2) create the prompt to send to the model, which should probably incorporate observations about the environment.
+        Finally, (3) return the next prompt for the model to send, along with the updated state."""
+        pass
+
+    @abstractmethod
+    def is_done(self, messages: List[Message], state: AgentState) -> bool:
+        """Determine if the conversation is complete"""
+        pass
+
+    @abstractmethod
+    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
+        """Get the reward for the conversation.
+        NOTE: This should not include length penalty!"""
+        pass
+
+    def generate_many(self) -> list[tuple[AgentConversation, Reward]]:
+        self.generation_id = 0
+        self.start_time = perf_counter()
+
+        # async def workload():
+        #     return await asyncio.gather(*[self._generate_single_rollout(data) for data in self.full_data])
+
+        # return asyncio.run(workload())
+
+        # with ThreadPoolExecutor() as executor:
+        #     return list(executor.map(self._generate_single_rollout, self.full_data))
+
+        return [self._generate_single_rollout(data) for data in self.full_data]
+
+    def _generate_single_rollout(self, data: dict) -> tuple[AgentConversation, Reward]:
+        state = self.init_state(data)
+        conversation = AgentConversation.empty()
+
+        for step in range(self.max_steps) if self.max_steps is not None else count():
+            x = self.get_next_prompt(messages=conversation.messages, state=state)
+
+            if x is None:
+                break
+            new_user_messages, state = x
+            if new_user_messages is None:
+                break
+            if not isinstance(new_user_messages, list):
+                new_user_messages = [new_user_messages]
+
+            conversation.messages += new_user_messages
+
+            generation_id = self.generation_id
+            self.generation_id += 1
+            print(f"STARTING generation: state:{state} id:{generation_id} time:{perf_counter() - self.start_time}")
+            vllm_output = self._generate_chat_completion(conversation.messages)
+            conversation.append_assistant_message_and_tokens(vllm_output)
+            print(f"FINISHED generation: state:{state} id:{generation_id} time:{perf_counter() - self.start_time}")
+
+            if self.is_done(messages=conversation.messages, state=state):
+                break
+
+        reward = self.get_reward(messages=conversation.messages, state=state)
+
+        return conversation, reward
+
+    async def _chat_with_truncation(
+        self,
+        messages: list[Message],
+        sampling_params: SamplingParams,
+        lora_request: Optional[LoRARequest] = None,
+        chat_template: Optional[str] = None,
+        chat_template_content_format: ChatTemplateContentFormatOption = "auto",
+        add_generation_prompt: bool = True,
+        continue_final_message: bool = False,
+        tools: Optional[list[dict[str, Any]]] = None,
+        truncation_amt: Optional[int] = None,
+    ) -> Tuple[RequestOutput, bool] | RequestOutput:
+        """
+        Generate responses for a chat conversation.
+
+        The chat conversation is converted into a text prompt using the
+        tokenizer and calls the :meth:`generate` method to generate the
+        responses.
+
+        Multi-modal inputs can be passed in the same way you would pass them
+        to the OpenAI API.
+
+        Args:
+            messages: A list of conversations or a single conversation.
+
+              - Each conversation is represented as a list of messages.
+              - Each message is a dictionary with 'role' and 'content' keys.
+
+            sampling_params: The sampling parameters for text generation.
+                If None, we use the default sampling parameters. When it
+                is a single value, it is applied to every prompt. When it
+                is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
+            use_tqdm: Whether to use tqdm to display the progress bar.
+            lora_request: LoRA request to use for generation, if any.
+            chat_template: The template to use for structuring the chat.
+              If not provided, the model's default chat template will be used.
+            chat_template_content_format: The format to render message content.
+
+              - "string" will render the content as a string.
+                Example: ``"Who are you?"``
+              - "openai" will render the content as a list of dictionaries,
+                similar to OpenAI schema.
+                Example: ``[{"type": "text", "text": "Who are you?"}]``
+
+            add_generation_prompt: If True, adds a generation template
+                to each message.
+            continue_final_message: If True, continues the final message in
+                the conversation instead of starting a new one. Cannot be
+                ``True`` if ``add_generation_prompt`` is also ``True``.
+            mm_processor_kwargs: Multimodal processor kwarg overrides for this
+                chat request. Only used for offline requests.
+
+        Returns:
+            A list of ``RequestOutput`` objects containing the generated
+            responses in the same order as the input messages.
+            Optionally, a list of booleans indicating whether each prompt was truncated.
+        """
+
+        tokenizer = await self.llm_engine.get_tokenizer()
+        model_config = await self.llm_engine.get_model_config()
+        resolved_content_format = resolve_chat_template_content_format(
+            chat_template,
+            tools,
+            chat_template_content_format,
+            tokenizer,
+            trust_remote_code=model_config.trust_remote_code,
+        )
+
+        # NOTE: _parse_chat_message_content_parts() currently doesn't
+        # handle mm_processor_kwargs, since there is no implementation in
+        # the chat message parsing for it.
+        conversation, _ = parse_chat_messages(
+            messages,
+            model_config,
+            tokenizer,
+            content_format=resolved_content_format,
+        )
+
+        prompt_str = apply_hf_chat_template(
+            tokenizer,
+            trust_remote_code=model_config.trust_remote_code,
+            conversation=conversation,
+            chat_template=chat_template,
+            tools=tools,
+            add_generation_prompt=add_generation_prompt,
+            continue_final_message=continue_final_message,
+        )
+        # Special tokens are already included in chat templates so
+        # should not be added by the tokenizer in this case.
+        prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+
+        # Truncate the prompt if necessary
+        truncate = truncation_amt is not None and len(prompt_token_ids) > truncation_amt
+        if truncate:
+            old_len = len(prompt_token_ids)
+            prompt_token_ids = prompt_token_ids[:truncation_amt]
+            logger.warning(f"Truncated prompt from {old_len} tokens to {truncation_amt} tokens.")
+
+        prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
+
+        # TO DO: with self._lock():
+        request_id = str(self._llm_engine_request_id_counter)
+        self._llm_engine_request_id_counter += 1
+
+        outputs = self.llm_engine.generate(
+            prompt,
+            sampling_params=sampling_params,
+            request_id=request_id,
+            lora_request=lora_request,
+        )
+
+        async for output in outputs:
+            print(f"{output.request_id} {output.outputs[0].text}")
+            final_outputs = output
+
+        if truncation_amt is not None:
+            return final_outputs, truncate
+        else:
+            return final_outputs
+
+    def _generate_chat_completion(self, messages: list[Message]) -> RequestOutput:
+        return asyncio.run(self._chat_with_truncation(
+            messages=messages,
+            sampling_params=self.sampling_params,
+            truncation_amt=self.sampling_params.truncate_prompt_tokens,
+        ))
+        # return self.thread_safe_llm.chat_with_truncation(
+        #     messages=messages,
+        #     sampling_params=self.sampling_params,
+        #     truncation_amt=self.sampling_params.truncate_prompt_tokens,
+        # )
+
+
+class ThreadSafeLLM:
+    def __init__(self, llm_engine: vllm.AsyncLLMEngine) -> None:
+        self.llm_engine = llm_engine
+        self._lock = threading.Lock()
+        self.request_id_counter = 0
+
+    def chat_with_truncation(
+        self,
+        messages: list[Message],
+        sampling_params: SamplingParams,
+        lora_request: Optional[LoRARequest] = None,
+        chat_template: Optional[str] = None,
+        chat_template_content_format: ChatTemplateContentFormatOption = "auto",
+        add_generation_prompt: bool = True,
+        continue_final_message: bool = False,
+        tools: Optional[list[dict[str, Any]]] = None,
+        truncation_amt: Optional[int] = None,
+    ) -> Tuple[RequestOutput, bool] | RequestOutput:
+        """
+        Generate responses for a chat conversation.
+
+        The chat conversation is converted into a text prompt using the
+        tokenizer and calls the :meth:`generate` method to generate the
+        responses.
+
+        Multi-modal inputs can be passed in the same way you would pass them
+        to the OpenAI API.
+
+        Args:
+            messages: A list of conversations or a single conversation.
+
+              - Each conversation is represented as a list of messages.
+              - Each message is a dictionary with 'role' and 'content' keys.
+
+            sampling_params: The sampling parameters for text generation.
+                If None, we use the default sampling parameters. When it
+                is a single value, it is applied to every prompt. When it
+                is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
+            use_tqdm: Whether to use tqdm to display the progress bar.
+            lora_request: LoRA request to use for generation, if any.
+            chat_template: The template to use for structuring the chat.
+              If not provided, the model's default chat template will be used.
+            chat_template_content_format: The format to render message content.
+
+              - "string" will render the content as a string.
+                Example: ``"Who are you?"``
+              - "openai" will render the content as a list of dictionaries,
+                similar to OpenAI schema.
+                Example: ``[{"type": "text", "text": "Who are you?"}]``
+
+            add_generation_prompt: If True, adds a generation template
+                to each message.
+            continue_final_message: If True, continues the final message in
+                the conversation instead of starting a new one. Cannot be
+                ``True`` if ``add_generation_prompt`` is also ``True``.
+            mm_processor_kwargs: Multimodal processor kwarg overrides for this
+                chat request. Only used for offline requests.
+
+        Returns:
+            A list of ``RequestOutput`` objects containing the generated
+            responses in the same order as the input messages.
+            Optionally, a list of booleans indicating whether each prompt was truncated.
+        """
+        tokenizer = self.llm_engine.get_tokenizer()
+        model_config = self.llm_engine.llm_engine.get_model_config()
+        resolved_content_format = resolve_chat_template_content_format(
+            chat_template,
+            tools,
+            chat_template_content_format,
+            tokenizer,
+            trust_remote_code=model_config.trust_remote_code,
+        )
+
+        # NOTE: _parse_chat_message_content_parts() currently doesn't
+        # handle mm_processor_kwargs, since there is no implementation in
+        # the chat message parsing for it.
+        conversation, _ = parse_chat_messages(
+            messages,
+            model_config,
+            tokenizer,
+            content_format=resolved_content_format,
+        )
+
+        prompt_str = apply_hf_chat_template(
+            tokenizer,
+            trust_remote_code=model_config.trust_remote_code,
+            conversation=conversation,
+            chat_template=chat_template,
+            tools=tools,
+            add_generation_prompt=add_generation_prompt,
+            continue_final_message=continue_final_message,
+        )
+        # Special tokens are already included in chat templates so
+        # should not be added by the tokenizer in this case.
+        prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+
+        # Truncate the prompt if necessary
+        truncate = truncation_amt is not None and len(prompt_token_ids) > truncation_amt
+        if truncate:
+            old_len = len(prompt_token_ids)
+            prompt_token_ids = prompt_token_ids[:truncation_amt]
+            logger.warning(f"Truncated prompt from {old_len} tokens to {truncation_amt} tokens.")
+
+        prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
+
+        outputs = self.llm_engine.generate(
+            [prompt],
+            sampling_params=sampling_params,
+            lora_request=lora_request,
+        )[0]
+
+        if truncation_amt is not None:
+            return outputs, truncate
+        else:
+            return outputs
+
+    def generate(
+        self, prompt: str, sampling_params: SamplingParams, lora_request: LoRARequest | None = None
+    ) -> list[RequestOutput]:
+        with self._lock:
+            self.llm_engine.llm_engine.add_request(
+                self.request_id_counter, prompt, sampling_params, lora_request=lora_request
+            )
+            self.request_id_counter += 1
+
+
 class TimeMetrics:
     time_initializing_environments: Optional[float]
     time_doing_environment_steps: Optional[List[float]]
@@ -57,17 +461,17 @@ class TimeMetrics:
     init_env_start_time: Optional[float]
     compute_rewards_start_time: Optional[float]
     total_time: Optional[float]
-    
+
     def __init__(self):
         self.everything_start_time = perf_counter()
 
         self.time_doing_environment_steps = []
         self.time_generating_completions = []
         self.time_evaluating_is_done = []
-    
+
     def finish_and_log(self):
         self.total_time = perf_counter() - self.everything_start_time
-        
+
         logger.info(f"Rollout completed in {int(self.total_time)} seconds. Breakdown of time spent:")
         logger.info(
             f"Generating completions with vllm: {int(sum(self.time_generating_completions))} seconds ({sum(self.time_generating_completions) / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_generating_completions)})"
@@ -81,7 +485,9 @@ class TimeMetrics:
         logger.info(
             f"Evaluating whether environments are done: {int(sum(self.time_evaluating_is_done))} seconds ({sum(self.time_evaluating_is_done) / self.total_time:.0%}, breakdown by step: {', '.join(str(int(t)) for t in self.time_evaluating_is_done)})"
         )
-        logger.info(f"Computing rewards: {int(self.time_computing_rewards)} ({self.time_computing_rewards / self.total_time:.0%})")
+        logger.info(
+            f"Computing rewards: {int(self.time_computing_rewards)} ({self.time_computing_rewards / self.total_time:.0%})"
+        )
         unaccounted_for_time = (
             self.total_time
             - sum(self.time_generating_completions)
@@ -93,7 +499,8 @@ class TimeMetrics:
         logger.info(
             f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / self.total_time:.0%})"
         )
-    
+
+
 class AgentInterface(ABC):
     def __init__(
         self,
@@ -127,11 +534,11 @@ class AgentInterface(ABC):
         self.length_penalty = length_penalty
         self.stop_strings = stop_strings
         self.max_steps = max_steps
-        
+
         if stop_strings is not None:
             self.sampling_params.stop = stop_strings
             self.sampling_params.include_stop_str_in_output = True
-        
+
         self.all_messages = [list() for _ in range(self.num_envs)]
         self.active_indices = list(range(self.num_envs))
         self.tokens_by_turn = [list() for _ in range(self.num_envs)]
@@ -139,7 +546,7 @@ class AgentInterface(ABC):
         self.first_prompt_tokens = [None for _ in range(self.num_envs)]
         self.all_tokens = [[] for _ in range(self.num_envs)]
         self.num_steps = [0 for _ in range(self.num_envs)]
-        
+
         # Set truncate_prompt_tokens in sampling_params if provided
         if truncate_prompt_tokens is not None:
             if isinstance(self.llm_engine, vllm.LLM):
@@ -162,7 +569,7 @@ class AgentInterface(ABC):
 
         # As an example of full_data, for a given swe_bench task, it is a list of dicts, each with the following keys:
         # "repo", "instance_id", "base_commit", "patch", "test_patch", "problem_statement", "hints_text", "version", "FAIL_TO_PASS", "PASS_TO_PASS", "environment_setup_commit"
-        
+
     @abstractmethod
     def init_state(self, data: dict) -> AgentState:
         """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
@@ -198,8 +605,61 @@ class AgentInterface(ABC):
         """Get the reward for the conversation.
         NOTE: This should not include length penalty!"""
         pass
-    
+
     ### Below are the logical pieces
+
+    def generate_many_async(self) -> list[tuple[AgentConversation, Reward]]:
+        async def workload() -> list[tuple[AgentConversation, Reward]]:
+            return await asyncio.gather(*[self._generate_single_rollout(data) for data in self.full_data])
+
+        return asyncio.run(workload())
+
+    async def _generate_single_rollout(self, data: dict) -> tuple[AgentConversation, Reward]:
+        state = self.init_state(data)
+        messages: list[Message] = []
+        tokens_by_turn = []
+        total_tokens = 0
+
+        for i in count():
+            x = self.get_next_prompt(messages, state)
+            if x is None:
+                break
+            new_user_messages, state = x
+            if new_user_messages is None:
+                break
+            if not isinstance(new_user_messages, list):
+                new_user_messages = [new_user_messages]
+
+            messages += new_user_messages
+
+            output, was_truncated = self._generate_chat_completions_with_vllm(messages)
+            new_assistant_message = output.outputs[0].text
+            output_tokens = output.outputs[0].token_ids
+            input_tokens = output.prompt_token_ids[total_tokens:]
+            tokens_by_turn.append({"input_tokens": input_tokens, "output_tokens": output_tokens})
+            total_tokens += len(input_tokens) + len(output_tokens)
+            if i == 0:
+                first_prompt_tokens = output.prompt_token_ids
+            if was_truncated:
+                break
+
+            messages.append({"role": "assistant", "content": new_assistant_message})
+
+            if self.is_done(messages, state):
+                break
+
+        # to do: what if break was encountered on the first iteration?
+        all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
+
+        reward = self.get_reward(messages, state)
+
+        agent_conversation = AgentConversation(
+            messages=messages,
+            tokens_by_turn=tokens_by_turn,
+            first_prompt_tokens=first_prompt_tokens,
+            all_tokens=all_tokens,
+        )
+        return agent_conversation, reward
 
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
         ## Initialize time metrics
@@ -214,7 +674,7 @@ class AgentInterface(ABC):
             all_prompts_and_states = self._step_through_all_envs()
 
             active_conversations = self._process_next_prompts(all_prompts_and_states)
-            
+
             # Leave the loop if all conversations are done
             if len(active_conversations) == 0:
                 break
@@ -223,7 +683,7 @@ class AgentInterface(ABC):
 
             # Process outputs and update states
             all_is_done = self._check_all_done()
-            
+
             self._process_outputs(outputs, was_truncated, all_is_done)
 
         # Calculate rewards for completed conversations
@@ -233,9 +693,9 @@ class AgentInterface(ABC):
         self.log_rollouts_mongodb(results_data)
 
         self.time_metrics.finish_and_log()
-        
+
         return results
-    
+
     def _init_all_states(self) -> list[AgentState]:
         ## Initialize states for all conversations (remove llm engine before sending through Ray)
         llm_engine = self.llm_engine
@@ -257,8 +717,10 @@ class AgentInterface(ABC):
         self.llm_engine = llm_engine
 
         return states
-    
-    def _step_through_all_envs(self) -> list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]:
+
+    def _step_through_all_envs(
+        self,
+    ) -> list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]:
         try:
             # Temporarily remove vllm engine before sending through Ray
             llm_engine = self.llm_engine
@@ -283,10 +745,15 @@ class AgentInterface(ABC):
             self.llm_engine = llm_engine  # Restore in case of error
             logger.error(f"Error getting prompts: {str(e)}")
             raise
-        
+
         return all_prompts_and_states
-    
-    def _process_next_prompts(self, all_prompts_and_states: list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]) -> list[AgentConversation]:
+
+    def _process_next_prompts(
+        self,
+        all_prompts_and_states: list[
+            Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]
+        ],
+    ) -> list[AgentConversation]:
         active_conversations = []
         indices_to_remove = []
         for i, idx in enumerate(self.active_indices):
@@ -311,10 +778,12 @@ class AgentInterface(ABC):
 
         for idx in indices_to_remove:
             self.active_indices.remove(idx)
-            
+
         return active_conversations
-    
-    def _generate_all_chat_completions(self, active_conversations: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]:
+
+    def _generate_all_chat_completions(
+        self, active_conversations: list[list[Message]]
+    ) -> Tuple[list[RequestOutput], List[bool]]:
         generate_start_time = perf_counter()
         # Batch generate responses
         # TODO: Maybe use their tool API instead of handrolling?
@@ -326,9 +795,9 @@ class AgentInterface(ABC):
         # outputs = self.llm_engine.chat(messages=active_conversations, sampling_params=self.sampling_params)
         generate_end_time = perf_counter()
         self.time_metrics.time_generating_completions.append(generate_end_time - generate_start_time)
-        
+
         return outputs, was_truncated
-    
+
     def _check_all_done(self) -> list[bool]:
         llm_engine = self.llm_engine
         self.llm_engine = None
@@ -345,13 +814,15 @@ class AgentInterface(ABC):
             for idx in self.active_indices
         )
         is_done_end_time = perf_counter()
-        
+
         self.time_metrics.time_evaluating_is_done.append(is_done_end_time - is_done_start_time)
         self.llm_engine = llm_engine
-        
+
         return all_is_done
-            
-    def _process_outputs(self, outputs: list[RequestOutput], was_truncated: list[bool], all_is_done: list[bool]) -> None:
+
+    def _process_outputs(
+        self, outputs: list[RequestOutput], was_truncated: list[bool], all_is_done: list[bool]
+    ) -> None:
         new_active_indices = []
         for i, output in enumerate(outputs):
             real_idx = self.active_indices[i]
@@ -372,23 +843,23 @@ class AgentInterface(ABC):
             self.total_tokens[real_idx] += len(input_tokens) + len(output_tokens)
 
             self.all_tokens[real_idx] = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-            #all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
-            
+            # all_tokens_text[real_idx] = output.prompt + output.outputs[0].text
+
             # Stop reason: truncation
             if self.stop_on_truncation and was_truncated[i]:
                 all_is_done[i] = True
-                
+
             # Stop reason: max steps
             if self.max_steps is not None:
                 self.num_steps[real_idx] += 1
                 if self.num_steps[real_idx] >= self.max_steps:
                     all_is_done[i] = True
-                
+
             if not all_is_done[i]:
                 new_active_indices.append(real_idx)
 
         self.active_indices = new_active_indices
-        
+
     def _calculate_rewards(self) -> Tuple[list[Tuple[AgentConversation, Reward]], list[dict]]:
         results = []
         llm_engine = self.llm_engine
@@ -424,14 +895,14 @@ class AgentInterface(ABC):
             results_data.append(
                 {
                     "messages": messages,
-                    #"all_text": all_tokens_text[i],
+                    # "all_text": all_tokens_text[i],
                     "reward": float(reward),
                     "task_prompt": messages[0]["content"],
                 }
             )
-        
+
         return results, results_data
-    
+
     def log_rollouts_mongodb(self, results_data: list[dict]) -> None:
         mongo_params = [self.mongo_uri, self.mongo_db_name, self.mongo_collection_name]
         if all(mongo_params):
@@ -452,15 +923,17 @@ class AgentInterface(ABC):
             except Exception as e:
                 logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
 
-    def _generate_chat_completions(self, messages: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
+    def _generate_chat_completions(
+        self, messages: list[list[Message]]
+    ) -> Tuple[list[RequestOutput], List[bool]] | list[RequestOutput]:
         if isinstance(self.llm_engine, vllm.LLM):
-             #vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
+            # vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
             return self._vllm_chat_with_truncation(
-                engine=self.llm_engine, 
-                messages=messages, 
-                sampling_params=self.sampling_params, 
-                truncation_amt=self.sampling_params.truncate_prompt_tokens
-            )  
+                engine=self.llm_engine,
+                messages=messages,
+                sampling_params=self.sampling_params,
+                truncation_amt=self.sampling_params.truncate_prompt_tokens,
+            )
         if isinstance(self.llm_engine, OpenAI):
             return self._generate_chat_completions_openai(messages)
         if isinstance(self.llm_engine, Anthropic):
@@ -485,7 +958,21 @@ class AgentInterface(ABC):
             merged_messages.append(message)
 
         return merged_messages
-    
+
+    def _generate_chat_completions_with_vllm(self, messages: list[Message]) -> tuple[RequestOutput, bool]:
+        result = self._vllm_chat_with_truncation(
+            engine=self.llm_engine,
+            messages=[messages],
+            sampling_params=self.sampling_params,
+            truncation_amt=self.sampling_params.truncate_prompt_tokens,
+        )
+        if isinstance(result, tuple):
+            outputs, were_truncated = result
+            return outputs[0], were_truncated[0]
+        outputs = result
+        was_truncated = False
+        return outputs[0], was_truncated
+
     def _vllm_chat_with_truncation(
         self,
         engine: vllm.LLM,
@@ -498,8 +985,8 @@ class AgentInterface(ABC):
         add_generation_prompt: bool = True,
         continue_final_message: bool = False,
         tools: Optional[list[dict[str, Any]]] = None,
-        truncation_amt: Optional[int] = None
-    ) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
+        truncation_amt: Optional[int] = None,
+    ) -> Tuple[list[RequestOutput], List[bool]] | list[RequestOutput]:
         """
         Generate responses for a chat conversation.
 
@@ -559,7 +1046,7 @@ class AgentInterface(ABC):
         )
 
         prompts: list[TokensPrompt] = []
-        
+
         was_truncated: List[bool] = []
 
         for msgs in list_of_messages:
@@ -584,9 +1071,8 @@ class AgentInterface(ABC):
             )
             # Special tokens are already included in chat templates so
             # should not be added by the tokenizer in this case.
-            prompt_token_ids = tokenizer.encode(prompt_str,
-                                                add_special_tokens=False)
-            
+            prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+
             # Truncate the prompt if necessary
             if truncation_amt is not None and len(prompt_token_ids) > truncation_amt:
                 old_len = len(prompt_token_ids)
@@ -595,7 +1081,7 @@ class AgentInterface(ABC):
                 was_truncated.append(True)
             else:
                 was_truncated.append(False)
-            
+
             prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
 
             prompts.append(prompt)
@@ -606,7 +1092,7 @@ class AgentInterface(ABC):
             use_tqdm=use_tqdm,
             lora_request=lora_request,
         )
-        
+
         if truncation_amt is not None:
             return outputs, was_truncated
         else:
@@ -620,7 +1106,10 @@ class AgentInterface(ABC):
         @retry(
             stop=stop_after_attempt(8),
             wait=wait_exponential(multiplier=15, min=1),
-            before_sleep=lambda retry_state: print(f"Calling OpenAI API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}", file=stderr)
+            before_sleep=lambda retry_state: print(
+                f"Calling OpenAI API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}",
+                file=stderr,
+            ),
         )
         def single_completion(conversation: list[Message]) -> RequestOutput:
             conversation = self._merge_tool_and_user_messages(conversation)
@@ -664,7 +1153,10 @@ class AgentInterface(ABC):
         @retry(
             stop=stop_after_attempt(8),
             wait=wait_exponential(multiplier=15, min=1),
-            before_sleep=lambda retry_state: print(f"Calling Anthropic API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}", file=stderr)
+            before_sleep=lambda retry_state: print(
+                f"Calling Anthropic API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}",
+                file=stderr,
+            ),
         )
         def single_completion(conversation: list[Message]) -> RequestOutput:
             conversation = self._merge_tool_and_user_messages(conversation)
@@ -680,7 +1172,7 @@ class AgentInterface(ABC):
 
             if self.anthropic_thinking is not None:
                 api_kwargs["thinking"] = self.anthropic_thinking
-                
+
             if self.stop_strings is not None:
                 api_kwargs["stop_sequences"] = self.stop_strings
 
@@ -745,14 +1237,13 @@ class AgentInterface(ABC):
         raise ValueError(
             f"Invalid value `{self.environment_parallelism}` of AgentInterface.environment_parallelism. It should be either 'ray', 'threading', or None."
         )
-        
+
     def _length_penalty(self, conversation: list[Message]) -> float:
         total_assistant_message_length = sum(
-            len(message["content"])
-            for message in conversation
-            if message["role"] == "assistant"
+            len(message["content"]) for message in conversation if message["role"] == "assistant"
         )
         return total_assistant_message_length * self.length_penalty
+
 
 @ray.remote
 def init_state_remote(agent: AgentInterface, data: dict) -> AgentState:

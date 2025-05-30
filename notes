@@ -1,0 +1,21 @@
+init_state
+
+while True:
+    get_next_prompt
+    if returned None:
+        break
+
+    chat_completion
+    if truncated:
+        break
+
+    is_done
+    if done:
+        break
+
+    if step > max_steps:
+        break
+
+
+at most max_steps calls to chat_completion
+
