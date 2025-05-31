@@ -319,6 +319,9 @@ class ThreadedAgentInterface(ABC):
 
         print("DEBUG: 8")
 
+        print(f'{prompt=} {sampling_params=} {request_id=} {lora_request=}')
+        print(f"{outputs=}")
+
         async for output in outputs:
             print(f"{output.request_id} {output.outputs[0].text}")
             final_outputs = output
