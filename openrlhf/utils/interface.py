@@ -249,6 +249,8 @@ class ThreadedAgentInterface(ABC):
             Optionally, a list of booleans indicating whether each prompt was truncated.
         """
 
+        print("DEBUG: 1")
+
         tokenizer = await self.llm_engine.get_tokenizer()
         model_config = await self.llm_engine.get_model_config()
         resolved_content_format = resolve_chat_template_content_format(
@@ -259,6 +261,9 @@ class ThreadedAgentInterface(ABC):
             trust_remote_code=model_config.trust_remote_code,
         )
 
+        print("DEBUG: 2")
+
+
         # NOTE: _parse_chat_message_content_parts() currently doesn't
         # handle mm_processor_kwargs, since there is no implementation in
         # the chat message parsing for it.
@@ -268,6 +273,8 @@ class ThreadedAgentInterface(ABC):
             tokenizer,
             content_format=resolved_content_format,
         )
+
+        print("DEBUG: 3")
 
         prompt_str = apply_hf_chat_template(
             tokenizer,
@@ -282,6 +289,8 @@ class ThreadedAgentInterface(ABC):
         # should not be added by the tokenizer in this case.
         prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
 
+        print("DEBUG: 4")
+
         # Truncate the prompt if necessary
         truncate = truncation_amt is not None and len(prompt_token_ids) > truncation_amt
         if truncate:
@@ -289,11 +298,17 @@ class ThreadedAgentInterface(ABC):
             prompt_token_ids = prompt_token_ids[:truncation_amt]
             logger.warning(f"Truncated prompt from {old_len} tokens to {truncation_amt} tokens.")
 
+        print("DEBUG: 5")
+
         prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
+
+        print("DEBUG: 6")
 
         # TO DO: with self._lock():
         request_id = str(self._llm_engine_request_id_counter)
         self._llm_engine_request_id_counter += 1
+
+        print("DEBUG: 7")
 
         outputs = self.llm_engine.generate(
             prompt,
@@ -302,7 +317,7 @@ class ThreadedAgentInterface(ABC):
             lora_request=lora_request,
         )
 
-        print("DEBUG: 1")
+        print("DEBUG: 8")
 
         async for output in outputs:
             print(f"{output.request_id} {output.outputs[0].text}")
