@@ -302,6 +302,8 @@ class ThreadedAgentInterface(ABC):
             lora_request=lora_request,
         )
 
+        print("DEBUG: 1")
+
         async for output in outputs:
             print(f"{output.request_id} {output.outputs[0].text}")
             final_outputs = output
