@@ -145,7 +145,7 @@ class ThreadedAgentInterface(ABC):
         NOTE: This should not include length penalty!"""
         pass
 
-    def generate_many(self) -> list[tuple[AgentConversation, Reward]]:
+    async def generate_many(self) -> list[tuple[AgentConversation, Reward]]:
         self.generation_id = 0
         self.start_time = perf_counter()
 
@@ -157,9 +157,9 @@ class ThreadedAgentInterface(ABC):
         # with ThreadPoolExecutor() as executor:
         #     return list(executor.map(self._generate_single_rollout, self.full_data))
 
-        return [self._generate_single_rollout(data) for data in self.full_data]
+        return [await self._generate_single_rollout(data) for data in self.full_data]
 
-    def _generate_single_rollout(self, data: dict) -> tuple[AgentConversation, Reward]:
+    async def _generate_single_rollout(self, data: dict) -> tuple[AgentConversation, Reward]:
         state = self.init_state(data)
         conversation = AgentConversation.empty()
 
@@ -179,7 +179,7 @@ class ThreadedAgentInterface(ABC):
             generation_id = self.generation_id
             self.generation_id += 1
             print(f"STARTING generation: state:{state} id:{generation_id} time:{perf_counter() - self.start_time}")
-            vllm_output = self._generate_chat_completion(conversation.messages)
+            vllm_output = await self._generate_chat_completion(conversation.messages)
             conversation.append_assistant_message_and_tokens(vllm_output)
             print(f"FINISHED generation: state:{state} id:{generation_id} time:{perf_counter() - self.start_time}")
 
@@ -331,12 +331,12 @@ class ThreadedAgentInterface(ABC):
         else:
             return final_outputs
 
-    def _generate_chat_completion(self, messages: list[Message]) -> RequestOutput:
-        return asyncio.run(self._chat_with_truncation(
+    async def _generate_chat_completion(self, messages: list[Message]) -> RequestOutput:
+        return await self._chat_with_truncation(
             messages=messages,
             sampling_params=self.sampling_params,
             truncation_amt=self.sampling_params.truncate_prompt_tokens,
-        ))
+        )
         # return self.thread_safe_llm.chat_with_truncation(
         #     messages=messages,
         #     sampling_params=self.sampling_params,
