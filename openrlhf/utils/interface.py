@@ -331,6 +331,7 @@ class AgentInterface(ABC):
         generate_end_time = perf_counter()
         self.time_metrics.time_generating_completions.append(generate_end_time - generate_start_time)
         
+        print(f"{outputs=} {was_truncated=}")
         return outputs, was_truncated
     
     def _check_all_done(self) -> list[bool]:
