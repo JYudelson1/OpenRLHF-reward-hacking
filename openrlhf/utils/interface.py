@@ -146,7 +146,7 @@ class AgentInterface(ABC):
         
         # Set truncate_prompt_tokens in sampling_params if provided
         if truncate_prompt_tokens is not None:
-            if isinstance(self.llm_engine, vllm.LLM):
+            if True: # isinstance(self.llm_engine, vllm.LLM):
                 # Set it in SamplingParams for vLLM
                 self.sampling_params.truncate_prompt_tokens = truncate_prompt_tokens
                 logger.info(f"Set SamplingParams.truncate_prompt_tokens to {truncate_prompt_tokens}")
