@@ -604,9 +604,9 @@ class AgentInterface(ABC):
 
             prompts.append(prompt)
 
-        print(f"{prompts=}")
+        outputs = [None] * len(prompts)
 
-        for prompt in prompts:
+        for i, prompt in enumerate(prompts):
             outputs = engine.generate(
                 prompt,
                 sampling_params,
@@ -615,10 +615,12 @@ class AgentInterface(ABC):
                 lora_request=lora_request,
             )
 
-            print(f"{outputs=}")
-
             async for output in outputs:
-                print(f"{output=}")
+                if output.finished:
+                    assert outputs[i] is None
+                    outputs[i] = output
+
+        assert all(output is not None for output in outputs)
             
         if truncation_amt is not None:
             return outputs, was_truncated
