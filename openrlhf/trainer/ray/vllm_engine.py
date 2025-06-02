@@ -107,10 +107,10 @@ class LLMRayActor:
         self.llm.llm_engine.reset_prefix_cache()
 
     def sleep(self, level=1):
-        self.llm.sleep(level=level)
+        self.async_event_loop.run_until_complete(self.llm.sleep(level=level))
 
     def wake_up(self):
-        self.llm.wake_up()
+        self.async_event_loop.run_until_complete(self.llm.wake_up())
 
     def reset_rollout_cache(self) -> None:
         self.env_data_for_rollout = {}
