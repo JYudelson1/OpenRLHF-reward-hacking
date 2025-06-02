@@ -100,7 +100,7 @@ class AgentInterface(ABC):
         self,
         full_data: List[dict],
         sampling_params: SamplingParams,
-        llm_engine: vllm.AsyncLLM | OpenAI | Anthropic,
+        llm_engine: vllm.AsyncLLMEngine | vllm.v1.engine.AsyncLLM | OpenAI | Anthropic,
         async_event_loop: asyncio.AbstractEventLoop,
         mongo_uri: Optional[str] = None,
         mongo_db_name: Optional[str] = None,
@@ -321,7 +321,7 @@ class AgentInterface(ABC):
         generate_start_time = perf_counter()
         # Batch generate responses
         # TODO: Maybe use their tool API instead of handrolling?
-        if isinstance(self.llm_engine, vllm.AsyncLLM) and self.stop_on_truncation:
+        if isinstance(self.llm_engine, (vllm.AsyncLLMEngine, vllm.v1.engine.AsyncLLM)) and self.stop_on_truncation:
             outputs, was_truncated = self._generate_chat_completions(active_conversations)
         else:
             outputs = self._generate_chat_completions(active_conversations)
@@ -491,7 +491,7 @@ class AgentInterface(ABC):
     
     async def _vllm_chat_with_truncation(
         self,
-        engine: vllm.AsyncLLM,
+        engine: vllm.AsyncLLMEngine | vllm.v1.engine.AsyncLLM,
         messages: list[list[Message]],
         sampling_params: SamplingParams,
         use_tqdm: bool = True,
