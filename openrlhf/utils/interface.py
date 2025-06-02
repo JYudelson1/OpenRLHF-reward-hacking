@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from time import perf_counter
 from typing import *
+from uuid import uuid4
 import ray.remote_function
 import vllm
 from vllm import CompletionOutput, SamplingParams
@@ -606,6 +607,7 @@ class AgentInterface(ABC):
         outputs = engine.generate(
             prompts,
             sampling_params=sampling_params,
+            request_id=str(uuid4()),
             # use_tqdm=use_tqdm,
             lora_request=lora_request,
         )
