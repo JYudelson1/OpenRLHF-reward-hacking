@@ -607,15 +607,13 @@ class AgentInterface(ABC):
         outputs = [None] * len(prompts)
 
         for i, prompt in enumerate(prompts):
-            outputs = engine.generate(
+            for output in engine.generate(
                 prompt,
                 sampling_params,
                 str(uuid4()),
                 # use_tqdm=use_tqdm,
                 lora_request=lora_request,
-            )
-
-            async for output in outputs:
+            ):
                 if output.finished:
                     assert outputs[i] is None
                     outputs[i] = output
