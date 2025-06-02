@@ -118,6 +118,7 @@ class AgentInterface(ABC):
         self.full_data = full_data
         self.sampling_params = sampling_params
         self.llm_engine = llm_engine
+        self.async_event_loop = async_event_loop
         self.mongo_uri = mongo_uri
         self.mongo_db_name = mongo_db_name
         self.mongo_collection_name = mongo_collection_name
