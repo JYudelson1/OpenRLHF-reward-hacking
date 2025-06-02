@@ -283,8 +283,8 @@ if __name__ == "__main__":
     )
 
     # Checkpoints
-    # parser.add_argument("--eval_steps", type=int, default=-1)
-    parser.add_argument("--eval_ratio", type=float, default=0.03)
+    parser.add_argument("--eval_steps", type=int, default=-1)
+    # parser.add_argument("--eval_ratio", type=float, default=0.03)
     
     parser.add_argument("--save_steps", type=int, default=-1)
     parser.add_argument("--logging_steps", type=int, default=1)
