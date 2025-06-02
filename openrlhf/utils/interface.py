@@ -604,6 +604,8 @@ class AgentInterface(ABC):
 
             prompts.append(prompt)
 
+        print(f"{prompts=}")
+
         outputs = engine.generate(
             prompts,
             sampling_params,
