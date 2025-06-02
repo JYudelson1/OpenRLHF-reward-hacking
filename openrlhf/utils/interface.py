@@ -614,7 +614,7 @@ class AgentInterface(ABC):
 
         print(f"{outputs=}")
 
-        for output in outputs:
+        async for output in outputs:
             print(f"{output=}")
         
         if truncation_amt is not None:
