@@ -457,7 +457,7 @@ class AgentInterface(ABC):
                 logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
 
     def _generate_chat_completions(self, messages: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
-        if isinstance(self.llm_engine, vllm.v1.engine.async_llm.AsyncLLM):
+        if not isinstance(self.llm_engine, (OpenAI, Anthropic)):
              #vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
             return self.async_event_loop.run_until_complete(self._vllm_chat_with_truncation(
                 engine=self.llm_engine, 
