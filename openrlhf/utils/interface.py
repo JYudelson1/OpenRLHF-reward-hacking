@@ -100,7 +100,7 @@ class AgentInterface(ABC):
         self,
         full_data: List[dict],
         sampling_params: SamplingParams,
-        llm_engine: vllm.LLM | OpenAI | Anthropic,
+        llm_engine: vllm.AsyncLLM | OpenAI | Anthropic,
         async_event_loop: asyncio.AbstractEventLoop,
         mongo_uri: Optional[str] = None,
         mongo_db_name: Optional[str] = None,
@@ -204,13 +204,7 @@ class AgentInterface(ABC):
     
     ### Below are the logical pieces
 
-    async def add(self, x, y) -> int:
-        return x + y
-
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
-        s = self.async_event_loop.run_until_complete(self.add(1, 2))
-        print(f'{s=}')
-
         ## Initialize time metrics
         self.time_metrics = TimeMetrics()
 
@@ -327,7 +321,7 @@ class AgentInterface(ABC):
         generate_start_time = perf_counter()
         # Batch generate responses
         # TODO: Maybe use their tool API instead of handrolling?
-        if isinstance(self.llm_engine, vllm.LLM) and self.stop_on_truncation:
+        if isinstance(self.llm_engine, vllm.AsyncLLM) and self.stop_on_truncation:
             outputs, was_truncated = self._generate_chat_completions(active_conversations)
         else:
             outputs = self._generate_chat_completions(active_conversations)
@@ -464,12 +458,12 @@ class AgentInterface(ABC):
     def _generate_chat_completions(self, messages: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
         if isinstance(self.llm_engine, vllm.LLM):
              #vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
-            return self._vllm_chat_with_truncation(
+            return self.async_event_loop.run_until_complete(self._vllm_chat_with_truncation(
                 engine=self.llm_engine, 
                 messages=messages, 
                 sampling_params=self.sampling_params, 
                 truncation_amt=self.sampling_params.truncate_prompt_tokens
-            )  
+            ))
         if isinstance(self.llm_engine, OpenAI):
             return self._generate_chat_completions_openai(messages)
         if isinstance(self.llm_engine, Anthropic):
@@ -495,9 +489,9 @@ class AgentInterface(ABC):
 
         return merged_messages
     
-    def _vllm_chat_with_truncation(
+    async def _vllm_chat_with_truncation(
         self,
-        engine: vllm.LLM,
+        engine: vllm.AsyncLLM,
         messages: list[list[Message]],
         sampling_params: SamplingParams,
         use_tqdm: bool = True,
@@ -557,7 +551,7 @@ class AgentInterface(ABC):
         """
         list_of_messages: list[list[ChatCompletionMessageParam]] = messages
 
-        tokenizer = engine.get_tokenizer()
+        tokenizer = await engine.get_tokenizer()
         model_config = engine.llm_engine.get_model_config()
         resolved_content_format = resolve_chat_template_content_format(
             chat_template,
@@ -615,6 +609,11 @@ class AgentInterface(ABC):
             use_tqdm=use_tqdm,
             lora_request=lora_request,
         )
+
+        print(f"{outputs=}")
+
+        for output in outputs:
+            print(f"{output=}")
         
         if truncation_amt is not None:
             return outputs, was_truncated

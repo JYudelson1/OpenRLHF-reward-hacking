@@ -85,7 +85,8 @@ class LLMRayActor:
             # https://github.com/vllm-project/vllm/blob/effc5d24fae10b29996256eb7a88668ff7941aed/examples/offline_inference/reproduciblity.py#L11
             os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
-        self.llm = vllm.LLM(*args, **kwargs)
+        # self.llm = vllm.LLM(*args, **kwargs)
+        self.llm = vllm.AsyncLLMEngine.from_engine_args(vllm.AsyncEngineArgs(*args, **kwargs))
         self.async_event_loop = asyncio.new_event_loop()
 
         self.rollouts = None
