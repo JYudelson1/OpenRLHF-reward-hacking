@@ -223,7 +223,9 @@ class AgentInterface(ABC):
             if len(active_conversations) == 0:
                 break
 
-            outputs, was_truncated = self._generate_all_chat_completions(active_conversations)
+            x = self._generate_all_chat_completions(active_conversations)
+            print(f"{x=}")
+            outputs, was_truncated = x
 
             # Process outputs and update states
             all_is_done = self._check_all_done()
