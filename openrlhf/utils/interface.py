@@ -204,7 +204,13 @@ class AgentInterface(ABC):
     
     ### Below are the logical pieces
 
+    async def add(self, x, y) -> int:
+        return x + y
+
     def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
+        s = self.async_event_loop.run_until_complete(self.add(1, 2))
+        print(f'{s=}')
+
         ## Initialize time metrics
         self.time_metrics = TimeMetrics()
 
