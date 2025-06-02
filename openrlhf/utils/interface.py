@@ -606,19 +606,20 @@ class AgentInterface(ABC):
 
         print(f"{prompts=}")
 
-        outputs = engine.generate(
-            prompts,
-            sampling_params,
-            str(uuid4()),
-            # use_tqdm=use_tqdm,
-            lora_request=lora_request,
-        )
+        for prompt in prompts:
+            outputs = engine.generate(
+                prompt,
+                sampling_params,
+                str(uuid4()),
+                # use_tqdm=use_tqdm,
+                lora_request=lora_request,
+            )
 
-        print(f"{outputs=}")
+            print(f"{outputs=}")
 
-        async for output in outputs:
-            print(f"{output=}")
-        
+            async for output in outputs:
+                print(f"{output=}")
+            
         if truncation_amt is not None:
             return outputs, was_truncated
         else:
