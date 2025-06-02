@@ -207,22 +207,27 @@ class AgentInterface(ABC):
 
         ## Initialize states for all conversations
         self.states = self._init_all_states()
+        print(f"generate_many: {self.states=}")
 
         # Continue until all conversations are complete
         while self.active_indices:
             # Get next prompts for all active conversations
             all_prompts_and_states = self._step_through_all_envs()
+            print(f"generate_many: {all_prompts_and_states=}")
 
             active_conversations = self._process_next_prompts(all_prompts_and_states)
+            print(f"generate_many: {active_conversations=}")
             
             # Leave the loop if all conversations are done
             if len(active_conversations) == 0:
                 break
 
             outputs, was_truncated = self._generate_all_chat_completions(active_conversations)
+            print(f"generate_many: {outputs=} {was_truncated=}")
 
             # Process outputs and update states
             all_is_done = self._check_all_done()
+            print(f"generate_many: {all_is_done=}")
             
             self._process_outputs(outputs, was_truncated, all_is_done)
 
