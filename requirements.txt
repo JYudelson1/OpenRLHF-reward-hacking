@@ -12,12 +12,12 @@ optree>=0.13.0
 packaging
 peft
 pynvml>=12.0.0
-ray[default]
+ray[default]==2.44.0
 tensorboard
 torch
 torchmetrics
 tqdm
-transformers
+transformers==4.50.0
 transformers_stream_generator
 wandb
 wheel
