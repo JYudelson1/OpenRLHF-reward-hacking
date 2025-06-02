@@ -92,19 +92,19 @@ class LLMRayActor:
         self.rollouts = None
 
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray):
-        return self.llm.collective_rpc(
+        return self.async_event_loop.run_until_complete(self.llm.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
-        )
+        ))
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        return self.async_event_loop.run_until_complete(self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache)))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        return self.async_event_loop.run_until_complete(self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)))
 
     def reset_prefix_cache(self):
-        self.llm.llm_engine.reset_prefix_cache()
+        self.async_event_loop.run_until_complete(self.llm.reset_prefix_cache())
 
     def sleep(self, level=1):
         self.async_event_loop.run_until_complete(self.llm.sleep(level=level))
