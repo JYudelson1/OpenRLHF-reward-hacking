@@ -607,7 +607,7 @@ class AgentInterface(ABC):
         outputs = [None] * len(prompts)
 
         for i, prompt in enumerate(prompts):
-            for output in engine.generate(
+            async for output in engine.generate(
                 prompt,
                 sampling_params,
                 str(uuid4()),
