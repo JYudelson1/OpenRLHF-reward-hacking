@@ -606,7 +606,7 @@ class AgentInterface(ABC):
         outputs = engine.generate(
             prompts,
             sampling_params=sampling_params,
-            use_tqdm=use_tqdm,
+            # use_tqdm=use_tqdm,
             lora_request=lora_request,
         )
 
