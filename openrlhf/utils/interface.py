@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -100,6 +101,7 @@ class AgentInterface(ABC):
         full_data: List[dict],
         sampling_params: SamplingParams,
         llm_engine: vllm.LLM | OpenAI | Anthropic,
+        async_event_loop: asyncio.AbstractEventLoop,
         mongo_uri: Optional[str] = None,
         mongo_db_name: Optional[str] = None,
         mongo_collection_name: Optional[str] = None,

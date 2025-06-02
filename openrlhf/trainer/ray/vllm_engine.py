@@ -1,3 +1,4 @@
+import asyncio
 from itertools import pairwise
 import json
 import os
@@ -85,6 +86,7 @@ class LLMRayActor:
             os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
         self.llm = vllm.LLM(*args, **kwargs)
+        self.async_event_loop = asyncio.new_event_loop()
 
         self.rollouts = None
 
@@ -139,6 +141,7 @@ class LLMRayActor:
             full_data=sum(self.env_data_for_rollout.values(), []),
             sampling_params=sampling_params,
             llm_engine=self.llm,
+            async_event_loop=self.async_event_loop,
             mongo_uri=self.mongo_uri,
             mongo_db_name=self.mongo_db_name,
             mongo_collection_name=self.mongo_collection_name,
