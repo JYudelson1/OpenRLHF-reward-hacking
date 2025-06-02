@@ -589,6 +589,7 @@ class AgentInterface(ABC):
                 tools=tools,
                 add_generation_prompt=add_generation_prompt,
                 continue_final_message=continue_final_message,
+                model_config=model_config,
             )
             # Special tokens are already included in chat templates so
             # should not be added by the tokenizer in this case.
