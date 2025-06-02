@@ -623,6 +623,8 @@ class AgentInterface(ABC):
 
         assert all(output is not None for output in outputs)
             
+        print(f"{truncation_amt=}")
+
         if truncation_amt is not None:
             return outputs, was_truncated
         else:
