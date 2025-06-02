@@ -14,7 +14,7 @@ peft
 pynvml>=12.0.0
 ray[default]==2.44.0
 tensorboard
-torch
+torch==2.7.0
 torchmetrics
 tqdm
 transformers==4.51.1
