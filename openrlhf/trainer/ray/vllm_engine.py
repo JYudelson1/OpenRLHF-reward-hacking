@@ -148,6 +148,7 @@ class LLMRayActor:
             full_data=sum(self.env_data_for_rollout.values(), []),
             sampling_params=sampling_params,
             llm_engine=self.llm_engine,
+            async_event_loop=self.async_event_loop,
             mongo_uri=self.mongo_uri,
             mongo_db_name=self.mongo_db_name,
             mongo_collection_name=self.mongo_collection_name,
