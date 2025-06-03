@@ -23,7 +23,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import json
 import ray
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from sys import stderr
 from pymongo import MongoClient
 from datetime import datetime
@@ -36,9 +36,264 @@ Reward = float
 AgentState = Any  # State needed to track conversation progress
 
 
-            
+@dataclass
+class AgentConversation:
+    messages: list[Message] = field(default_initializer=lambda: [])
+    tokens_by_turn: list[dict[str, Any]] = field(default_initializer=lambda: []) # to do: better type hint than Any
+    first_prompt_tokens: list[int] = field(default_initializer=lambda: [])
+    all_tokens: list[int] = field(default_initializer=lambda: [])
+    n_tokens: int = 0
+    n_assistant_tokens: int = 0
+    was_truncated: bool = False
+
+class AsyncLLMInterface(ABC):
+    @abstractmethod
+    async def generate_assistant_message(self, conversation: AgentConversation) -> None:
+        pass
 
 
+@dataclass(frozen=True)
+class AsyncVLLM(AsyncLLMInterface):
+    llm_engine: vllm.AsyncLLMEngine
+    sampling_params: SamplingParams
+
+    async def generate_assistant_message(self, conversation: AgentConversation) -> None:
+        output, was_truncated = await self._vllm_chat_with_truncation(conversation.messages)
+
+        if conversation.n_tokens == 0:
+            conversation.first_prompt_tokens = output.prompt_token_ids
+        
+        input_tokens = output.prompt_token_ids[conversation.n_tokens:]
+        output_tokens = output.outputs[0].token_ids
+
+        output_message = {"role": "assistant", "content": output.outputs[0].text}
+        conversation.messages.append(output_message)
+        conversation.tokens_by_turn.append({"input_tokens": input_tokens, "output_tokens": output_tokens})
+        conversation.n_tokens += len(input_tokens) + len(output_tokens)
+        conversation.n_assistant_tokens += len(output_tokens)
+
+        conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
+        
+        if was_truncated:
+            conversation.was_truncated = True
+
+    async def _vllm_chat_with_truncation(
+        self,
+        messages: list[Message],
+        lora_request: Optional[LoRARequest] = None,
+        chat_template: Optional[str] = None,
+        chat_template_content_format: ChatTemplateContentFormatOption = "auto",
+        add_generation_prompt: bool = True,
+        continue_final_message: bool = False,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> tuple[RequestOutput, bool]:
+        """
+        Generate responses for a chat conversation.
+
+        The chat conversation is converted into a text prompt using the
+        tokenizer and calls the :meth:`generate` method to generate the
+        responses.
+
+        Multi-modal inputs can be passed in the same way you would pass them
+        to the OpenAI API.
+
+        Args:
+            messages: A list of conversations or a single conversation.
+
+              - Each conversation is represented as a list of messages.
+              - Each message is a dictionary with 'role' and 'content' keys.
+
+            sampling_params: The sampling parameters for text generation.
+                If None, we use the default sampling parameters. When it
+                is a single value, it is applied to every prompt. When it
+                is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
+            use_tqdm: Whether to use tqdm to display the progress bar.
+            lora_request: LoRA request to use for generation, if any.
+            chat_template: The template to use for structuring the chat.
+              If not provided, the model's default chat template will be used.
+            chat_template_content_format: The format to render message content.
+
+              - "string" will render the content as a string.
+                Example: ``"Who are you?"``
+              - "openai" will render the content as a list of dictionaries,
+                similar to OpenAI schema.
+                Example: ``[{"type": "text", "text": "Who are you?"}]``
+
+            add_generation_prompt: If True, adds a generation template
+                to each message.
+            continue_final_message: If True, continues the final message in
+                the conversation instead of starting a new one. Cannot be
+                ``True`` if ``add_generation_prompt`` is also ``True``.
+            mm_processor_kwargs: Multimodal processor kwarg overrides for this
+                chat request. Only used for offline requests.
+
+        Returns:
+            A list of ``RequestOutput`` objects containing the generated
+            responses in the same order as the input messages.
+            Optionally, a list of booleans indicating whether each prompt was truncated.
+        """
+
+        tokenizer = await self.llm_engine.get_tokenizer()
+        model_config = await self.llm_engine.get_model_config()
+        resolved_content_format = resolve_chat_template_content_format(
+            chat_template,
+            tools,
+            chat_template_content_format,
+            tokenizer,
+            model_config=model_config,
+            trust_remote_code=model_config.trust_remote_code,
+        )
+
+        # NOTE: _parse_chat_message_content_parts() currently doesn't
+        # handle mm_processor_kwargs, since there is no implementation in
+        # the chat message parsing for it.
+        conversation, _ = parse_chat_messages(
+            messages,
+            model_config,
+            tokenizer,
+            content_format=resolved_content_format,
+        )
+
+        prompt_str = apply_hf_chat_template(
+            tokenizer,
+            trust_remote_code=model_config.trust_remote_code,
+            conversation=conversation,
+            chat_template=chat_template,
+            tools=tools,
+            model_config=model_config,
+            add_generation_prompt=add_generation_prompt,
+            continue_final_message=continue_final_message,
+        )
+        # Special tokens are already included in chat templates so
+        # should not be added by the tokenizer in this case.
+        prompt_token_ids = tokenizer.encode(prompt_str,
+                                            add_special_tokens=False)
+        
+        # Truncate the prompt if necessary
+        was_truncated = (
+            self.sampling_params.truncate_prompt_tokens is not None
+            and len(prompt_token_ids) > self.sampling_params.truncate_prompt_tokens
+        )
+        if was_truncated:
+            old_len = len(prompt_token_ids)
+            prompt_token_ids = prompt_token_ids[:self.sampling_params.truncate_prompt_tokens]
+            logger.warning(f"Truncated prompt from {old_len} tokens to {self.sampling_params.truncate_prompt_tokens} tokens.")
+        
+        prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
+
+        request_id = str(uuid4())
+
+        output_generator = self.llm_engine.generate(
+            prompt,
+            sampling_params=self.sampling_params,
+            request_id=request_id,
+            lora_request=lora_request,
+        )
+
+        finished_output = None
+
+        async for output in output_generator:
+            assert output.request_id == request_id
+            if not output.finished:
+                continue
+            assert finished_output is None
+            finished_output = output
+
+        assert finished_output is not None
+    
+        return finished_output, was_truncated
+
+
+class AgentInterface(ABC):
+    def __init__(
+        self,
+        length_penalty: float = 0.0,
+        stop_strings: list[str] | None = None,
+        max_steps: int | None = None,
+        stop_on_truncation: bool = False,
+    ) -> None:
+        assert length_penalty <= 0
+        self.length_penalty = length_penalty
+        self.stop_strings = stop_strings
+        self.max_steps = max_steps
+        self.stop_on_truncation = stop_on_truncation
+
+    @abstractmethod
+    def init_state(self, data: dict) -> AgentState:
+        """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
+        pass
+
+    @abstractmethod
+    def get_next_prompt(
+        self, messages: List[Message], state: AgentState
+    ) -> tuple[list[Message] | Message | None, AgentState]:
+        """Input:
+        - messages: the messages in the conversation
+        - state: the state of the environment
+
+        Output:
+        - next_prompt: the next prompt to send to the model (can be a list of prompts)
+        - next_state: the updated state of the environment
+
+        Note: an output of None means that the environment is done and the agent should stop generating.
+
+        Get the next prompt to send to the model and updated state.
+        In this function, you should (1) use the model's last message to update the state.
+        Then (2) create the prompt to send to the model, which should probably incorporate observations about the environment.
+        Finally, (3) return the next prompt for the model to send, along with the updated state."""
+        pass
+
+    @abstractmethod
+    def is_done(self, messages: List[Message], state: AgentState) -> bool:
+        """Determine if the conversation is complete"""
+        pass
+
+    @abstractmethod
+    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
+        """Get the reward for the conversation.
+        NOTE: This should not include length penalty!"""
+        pass
+
+    async def generate_rollouts(
+        self, llm: AsyncLLMInterface, full_data: list[dict]
+    ) -> list[tuple[AgentConversation, Reward]]:
+        return asyncio.gather(
+            *[self._generate_single_rollout(data=data, llm=llm) for data in full_data]
+        )
+    
+    async def _generate_single_rollout(self, data: dict, llm: AsyncLLMInterface) -> tuple[AgentConversation, Reward]:
+        state = self.init_state(data)
+        conversation = AgentConversation()
+
+        for step in count():
+            new_messages, state = self.get_next_prompt(messages=conversation.messages, state=state)
+            if new_messages is None:
+                break
+            if not isinstance(new_messages, list):
+                new_messages = [new_messages]
+
+            if self.max_steps is not None and step >= self.max_steps: # TO DO: check if there is an off by 1 bug here
+                return
+            if self.is_done(messages=conversation.messages, state=state):
+                continue
+            if self.stop_on_truncation and conversation.was_truncated:
+                continue
+
+            conversation.messages += new_messages
+
+            await llm.generate_assistant_message(conversation)
+
+        reward = self.get_reward(messages=conversation.messages, state=state)
+
+        reward += self.length_penalty * conversation.n_assistant_tokens
+
+        return conversation, reward
+
+
+
+
+'''
 @dataclass
 class DelayedFunction:
     function: Callable
@@ -47,7 +302,7 @@ class DelayedFunction:
     kwargs: dict[str, Any]
 
 @dataclass
-class AgentConversation:
+class OldAgentConversation:
     messages: List[Message]
     tokens_by_turn: List[Dict[str, Any]]
     first_prompt_tokens: List[int]
@@ -102,7 +357,7 @@ class TimeMetrics:
             f"Unaccounted for (should be close to zero): {int(unaccounted_for_time)} ({unaccounted_for_time / self.total_time:.0%})"
         )
     
-class AgentInterface(ABC):
+class OldAgentInterface(ABC):
     def __init__(
         self,
         full_data: List[dict],
@@ -211,7 +466,7 @@ class AgentInterface(ABC):
     
     ### Below are the logical pieces
 
-    def generate_many(self) -> List[Tuple[AgentConversation, Reward]]:
+    def generate_many(self) -> List[Tuple[OldAgentConversation, Reward]]:
         ## Initialize time metrics
         self.time_metrics = TimeMetrics()
 
@@ -296,7 +551,7 @@ class AgentInterface(ABC):
         
         return all_prompts_and_states
     
-    def _process_next_prompts(self, all_prompts_and_states: list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]) -> list[AgentConversation]:
+    def _process_next_prompts(self, all_prompts_and_states: list[Tuple[Optional[Tuple[List[Message], AgentState]], Optional[Tuple[List[Message], AgentState]]]]) -> list[OldAgentConversation]:
         active_conversations = []
         indices_to_remove = []
         for i, idx in enumerate(self.active_indices):
@@ -399,7 +654,7 @@ class AgentInterface(ABC):
 
         self.active_indices = new_active_indices
         
-    def _calculate_rewards(self) -> Tuple[list[Tuple[AgentConversation, Reward]], list[dict]]:
+    def _calculate_rewards(self) -> Tuple[list[Tuple[OldAgentConversation, Reward]], list[dict]]:
         results = []
         llm_engine = self.llm_engine
         self.llm_engine = None
@@ -425,7 +680,7 @@ class AgentInterface(ABC):
             zip(self.all_messages, self.tokens_by_turn, self.first_prompt_tokens, self.all_tokens)
         ):
             reward = all_rewards[i]
-            conversation = AgentConversation(
+            conversation = OldAgentConversation(
                 messages=messages, tokens_by_turn=tokens_by_turn_one_env, first_prompt_tokens=fpt, all_tokens=aot
             )
             results.append((conversation, reward))
@@ -804,3 +1059,4 @@ def get_next_prompt_remote(
     agent: AgentInterface, messages: List[Message], state: AgentState
 ) -> Optional[Tuple[Union[List[Message], Message], AgentState]]:
     return agent.get_next_prompt(messages, state)
+'''

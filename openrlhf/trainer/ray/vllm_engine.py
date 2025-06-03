@@ -13,6 +13,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from vllm.inputs import TokensPrompt
 
 from openrlhf.utils.logging_utils import init_logger
+from openrlhf.utils.interface import AsyncVLLM
 
 from .utils import ray_noset_visible_devices
 
@@ -144,6 +145,17 @@ class LLMRayActor:
             "You must call LLMRayActor.remember_env_data_for_rollout for each rank before calling LLMRayActor.generate_env_rollout"
         )
 
+        # self.truncate_prompt_tokens ???????
+        assert self.truncate_prompt_tokens == sampling_params.truncate_prompt_tokens
+
+        env = env_maker()
+        full_data = sum(self.env_data_for_rollout.values(), [])
+        async_llm = AsyncVLLM(llm_engine=self.llm_engine, sampling_params=sampling_params)
+        rollouts = self.async_event_loop.run_until_complete(
+            env.generate_rollouts(llm=async_llm, full_data=full_data)
+        )
+
+        """
         env = env_maker(
             full_data=sum(self.env_data_for_rollout.values(), []),
             sampling_params=sampling_params,
@@ -156,6 +168,7 @@ class LLMRayActor:
         )
 
         rollouts = env.generate_many()
+        """
 
         self.rollouts = {
             rank: rollouts[i:j]
