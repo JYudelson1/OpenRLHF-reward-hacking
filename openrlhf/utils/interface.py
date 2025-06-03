@@ -580,6 +580,7 @@ class AgentInterface(ABC):
                 conversation=conversation,
                 chat_template=chat_template,
                 tools=tools,
+                model_config=model_config,
                 add_generation_prompt=add_generation_prompt,
                 continue_final_message=continue_final_message,
             )
