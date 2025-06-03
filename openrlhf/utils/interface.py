@@ -213,7 +213,7 @@ class AgentInterface(ABC):
         max_steps: int | None = None,
         stop_on_truncation: bool = False,
     ) -> None:
-        assert length_penalty <= 0
+        assert length_penalty >= 0
         self.length_penalty = length_penalty
         self.stop_strings = stop_strings
         self.max_steps = max_steps
@@ -286,7 +286,7 @@ class AgentInterface(ABC):
 
         reward = self.get_reward(messages=conversation.messages, state=state)
 
-        reward += self.length_penalty * conversation.n_assistant_tokens
+        reward -= self.length_penalty * conversation.n_assistant_tokens
 
         return conversation, reward
 
