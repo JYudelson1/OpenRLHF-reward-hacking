@@ -66,6 +66,8 @@ class TimeMetrics:
         self.time_evaluating_is_done = []
     
     def finish_and_log(self):
+        return
+
         self.total_time = perf_counter() - self.everything_start_time
         
         logger.info(f"Rollout completed in {int(self.total_time)} seconds. Breakdown of time spent:")
