@@ -38,10 +38,10 @@ AgentState = Any  # State needed to track conversation progress
 
 @dataclass
 class AgentConversation:
-    messages: list[Message] = field(default_initializer=lambda: [])
-    tokens_by_turn: list[dict[str, Any]] = field(default_initializer=lambda: []) # to do: better type hint than Any
-    first_prompt_tokens: list[int] = field(default_initializer=lambda: [])
-    all_tokens: list[int] = field(default_initializer=lambda: [])
+    messages: list[Message] = field(default_factory=lambda: [])
+    tokens_by_turn: list[dict[str, Any]] = field(default_factory=lambda: []) # to do: better type hint than Any
+    first_prompt_tokens: list[int] = field(default_factory=lambda: [])
+    all_tokens: list[int] = field(default_factory=lambda: [])
     n_tokens: int = 0
     n_assistant_tokens: int = 0
     was_truncated: bool = False
