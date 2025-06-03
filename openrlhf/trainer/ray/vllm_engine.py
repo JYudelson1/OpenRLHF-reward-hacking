@@ -145,8 +145,10 @@ class LLMRayActor:
             "You must call LLMRayActor.remember_env_data_for_rollout for each rank before calling LLMRayActor.generate_env_rollout"
         )
 
-        # self.truncate_prompt_tokens ???????
-        assert self.truncate_prompt_tokens == sampling_params.truncate_prompt_tokens
+        # TO DO: truncate_prompt_tokens should only be in sampling_params
+        # assert self.truncate_prompt_tokens == sampling_params.truncate_prompt_tokens
+        if self.truncate_prompt_tokens is not None:
+            sampling_params.truncate_prompt_tokens = self.truncate_prompt_tokens
 
         env = env_maker()
         full_data = sum(self.env_data_for_rollout.values(), [])
