@@ -103,7 +103,7 @@ class AgentInterface(ABC):
         self,
         full_data: List[dict],
         sampling_params: SamplingParams,
-        llm_engine: vllm.AsyncLLMEngine | vllm.v1.engine.async_llm.AsyncLLM | OpenAI | Anthropic,
+        llm_engine: vllm.AsyncLLMEngine | OpenAI | Anthropic,
         async_event_loop: asyncio.AbstractEventLoop,
         mongo_uri: Optional[str] = None,
         mongo_db_name: Optional[str] = None,
@@ -148,7 +148,7 @@ class AgentInterface(ABC):
         
         # Set truncate_prompt_tokens in sampling_params if provided
         if truncate_prompt_tokens is not None:
-            if isinstance(self.llm_engine, vllm.LLM):
+            if not isinstance(self.llm_engine, (OpenAI, Anthropic)):
                 # Set it in SamplingParams for vLLM
                 self.sampling_params.truncate_prompt_tokens = truncate_prompt_tokens
                 logger.info(f"Set SamplingParams.truncate_prompt_tokens to {truncate_prompt_tokens}")
@@ -324,7 +324,7 @@ class AgentInterface(ABC):
         generate_start_time = perf_counter()
         # Batch generate responses
         # TODO: Maybe use their tool API instead of handrolling?
-        if isinstance(self.llm_engine, vllm.LLM) and self.stop_on_truncation:
+        if not isinstance(self.llm_engine, (OpenAI, Anthropic)) and self.stop_on_truncation:
             outputs, was_truncated = self._generate_chat_completions(active_conversations)
         else:
             outputs = self._generate_chat_completions(active_conversations)
@@ -459,7 +459,7 @@ class AgentInterface(ABC):
                 logger.error(f"Failed to upload conversations to MongoDB: {str(e)}")
 
     def _generate_chat_completions(self, messages: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
-        if isinstance(self.llm_engine, vllm.LLM):
+        if not isinstance(self.llm_engine, (OpenAI, Anthropic)):
              #vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
             return self.async_event_loop.run_until_complete(
                 self._vllm_chat_with_truncation(
