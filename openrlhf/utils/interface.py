@@ -555,6 +555,7 @@ class AgentInterface(ABC):
             tools,
             chat_template_content_format,
             tokenizer,
+            model_config=model_config,
             trust_remote_code=model_config.trust_remote_code,
         )
 
