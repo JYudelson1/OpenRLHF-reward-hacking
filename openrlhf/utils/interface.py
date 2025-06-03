@@ -258,7 +258,7 @@ class AgentInterface(ABC):
     async def generate_rollouts(
         self, llm: AsyncLLMInterface, full_data: list[dict]
     ) -> list[tuple[AgentConversation, Reward]]:
-        return asyncio.gather(
+        return await asyncio.gather(
             *[self._generate_single_rollout(data=data, llm=llm) for data in full_data]
         )
     
