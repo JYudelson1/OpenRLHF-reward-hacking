@@ -617,7 +617,7 @@ class AgentInterface(ABC):
                 prompts,
                 sampling_params=sampling_params,
                 request_id=str(uuid4()),
-                use_tqdm=use_tqdm,
+                # use_tqdm=use_tqdm,
                 lora_request=lora_request,
             )
 
