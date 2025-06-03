@@ -614,7 +614,7 @@ class AgentInterface(ABC):
 
         for prompt in prompts:
             output_generator = engine.generate(
-                prompts,
+                prompt,
                 sampling_params=sampling_params,
                 request_id=str(uuid4()),
                 # use_tqdm=use_tqdm,
