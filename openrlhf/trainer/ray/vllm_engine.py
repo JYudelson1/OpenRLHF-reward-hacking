@@ -1,4 +1,5 @@
 from itertools import pairwise
+import asyncio
 import json
 import os
 from time import perf_counter
@@ -84,30 +85,38 @@ class LLMRayActor:
             # https://github.com/vllm-project/vllm/blob/effc5d24fae10b29996256eb7a88668ff7941aed/examples/offline_inference/reproduciblity.py#L11
             os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
-        self.llm = vllm.LLM(*args, **kwargs)
+        # self.llm = vllm.LLM(*args, **kwargs)
+        self.async_event_loop = asyncio.new_event_loop()
+        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(vllm.AsyncEngineArgs(*args, **kwargs))
 
         self.rollouts = None
 
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray):
-        return self.llm.collective_rpc(
-            "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+        return self.async_event_loop.run_until_complete(
+            self.llm_engine.collective_rpc(
+                "init_process_group",
+                args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+            )
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        return self.async_event_loop.run_until_complete(
+            self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        )
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        return self.async_event_loop.run_until_complete(
+            self.llm_engine.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        )
 
     def reset_prefix_cache(self):
-        self.llm.llm_engine.reset_prefix_cache()
+        self.async_event_loop.run_until_complete(self.llm_engine.reset_prefix_cache())
 
     def sleep(self, level=1):
-        self.llm.sleep(level=level)
+        self.async_event_loop.run_until_complete(self.llm_engine.sleep(level=level))
 
     def wake_up(self):
-        self.llm.wake_up()
+        self.async_event_loop.run_until_complete(self.llm_engine.wake_up())
 
     def reset_rollout_cache(self) -> None:
         self.env_data_for_rollout = {}
@@ -138,7 +147,7 @@ class LLMRayActor:
         env = env_maker(
             full_data=sum(self.env_data_for_rollout.values(), []),
             sampling_params=sampling_params,
-            llm_engine=self.llm,
+            llm_engine=self.llm_engine,
             mongo_uri=self.mongo_uri,
             mongo_db_name=self.mongo_db_name,
             mongo_collection_name=self.mongo_collection_name,

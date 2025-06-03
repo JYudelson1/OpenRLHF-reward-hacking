@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from time import perf_counter
 from typing import *
+from uuid import uuid4
 import ray.remote_function
 import vllm
 from vllm import CompletionOutput, SamplingParams
@@ -101,7 +103,8 @@ class AgentInterface(ABC):
         self,
         full_data: List[dict],
         sampling_params: SamplingParams,
-        llm_engine: vllm.LLM | OpenAI | Anthropic,
+        llm_engine: vllm.AsyncLLMEngine | vllm.v1.engine.async_llm.AsyncLLM | OpenAI | Anthropic,
+        async_event_loop: asyncio.AbstractEventLoop,
         mongo_uri: Optional[str] = None,
         mongo_db_name: Optional[str] = None,
         mongo_collection_name: Optional[str] = None,
@@ -118,6 +121,7 @@ class AgentInterface(ABC):
         self.full_data = full_data
         self.sampling_params = sampling_params
         self.llm_engine = llm_engine
+        self.async_event_loop = async_event_loop
         self.mongo_uri = mongo_uri
         self.mongo_db_name = mongo_db_name
         self.mongo_collection_name = mongo_collection_name
@@ -457,12 +461,14 @@ class AgentInterface(ABC):
     def _generate_chat_completions(self, messages: list[list[Message]]) -> Tuple[list[RequestOutput], List[bool]]|list[RequestOutput]:
         if isinstance(self.llm_engine, vllm.LLM):
              #vLLM will apply its own truncation based on sampling_params.truncate_prompt_tokens if set
-            return self._vllm_chat_with_truncation(
-                engine=self.llm_engine, 
-                messages=messages, 
-                sampling_params=self.sampling_params, 
-                truncation_amt=self.sampling_params.truncate_prompt_tokens
-            )  
+            return self.async_event_loop.run_until_complete(
+                self._vllm_chat_with_truncation(
+                    engine=self.llm_engine, 
+                    messages=messages, 
+                    sampling_params=self.sampling_params, 
+                    truncation_amt=self.sampling_params.truncate_prompt_tokens
+                )
+            )
         if isinstance(self.llm_engine, OpenAI):
             return self._generate_chat_completions_openai(messages)
         if isinstance(self.llm_engine, Anthropic):
@@ -488,7 +494,7 @@ class AgentInterface(ABC):
 
         return merged_messages
     
-    def _vllm_chat_with_truncation(
+    async def _vllm_chat_with_truncation(
         self,
         engine: vllm.LLM,
         messages: list[list[Message]],
@@ -550,8 +556,8 @@ class AgentInterface(ABC):
         """
         list_of_messages: list[list[ChatCompletionMessageParam]] = messages
 
-        tokenizer = engine.get_tokenizer()
-        model_config = engine.llm_engine.get_model_config()
+        tokenizer = await engine.get_tokenizer()
+        model_config = await engine.get_model_config()
         resolved_content_format = resolve_chat_template_content_format(
             chat_template,
             tools,
@@ -604,13 +610,29 @@ class AgentInterface(ABC):
 
             prompts.append(prompt)
 
-        outputs = engine.generate(
-            prompts,
-            sampling_params=sampling_params,
-            use_tqdm=use_tqdm,
-            lora_request=lora_request,
-        )
-        
+        outputs = []
+
+        for prompt in prompts:
+            output_generator = engine.generate(
+                prompts,
+                sampling_params=sampling_params,
+                request_id=str(uuid4()),
+                use_tqdm=use_tqdm,
+                lora_request=lora_request,
+            )
+
+            finished_output = None
+
+            async for output in output_generator:
+                if not output.finished:
+                    continue
+                assert finished_output is None
+                finished_output = output
+
+            assert finished_output is not None
+
+            outputs.append(finished_output)
+            
         if truncation_amt is not None:
             return outputs, was_truncated
         else:
