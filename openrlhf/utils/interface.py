@@ -378,7 +378,7 @@ class RolloutTimeStatistics:
         times.append(self.time_computing_reward_started)
         times.append(self.time_finished)
 
-        assert len(times) == len(self.times_env_steps_started) + len(self.times_computing_is_done_started) + len(self.times_llm_completions_started)
+        assert len(times) == len(self.times_env_steps_started) + len(self.times_computing_is_done_started) + len(self.times_llm_completions_started) + 3
 
         descriptions = (
             ["initializing environment"]
