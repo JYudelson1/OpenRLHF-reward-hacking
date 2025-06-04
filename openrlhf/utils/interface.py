@@ -398,6 +398,8 @@ class RolloutTimeStatistics:
 
 
 def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_filename: str) -> None:
+    print("started making plot")
+
     description_to_color = {
         "initializing environment": "lightblue",
         "environment step": "blue",
@@ -424,6 +426,8 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
             seen_descriptions.add(interval.description)
         
     fig.write_html(save_filename)
+
+    print("done making plot")
     
 
 
