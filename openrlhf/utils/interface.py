@@ -318,7 +318,7 @@ class AgentInterface(ABC):
 
         reward -= self.length_penalty * conversation.n_assistant_tokens
 
-        return conversation, reward
+        return conversation, reward, stats
 
 
 @dataclass(frozen=True)
