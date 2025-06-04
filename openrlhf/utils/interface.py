@@ -303,9 +303,9 @@ class AgentInterface(ABC):
                 return
             stats.on_computing_is_done_start()
             if await self.is_done(messages=conversation.messages, state=state):
-                continue
+                break
             if self.stop_on_truncation and conversation.was_truncated:
-                continue
+                break
 
             conversation.messages += new_messages
 
