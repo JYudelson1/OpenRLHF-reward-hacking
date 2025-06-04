@@ -398,8 +398,6 @@ class RolloutTimeStatistics:
 
 
 def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_filename: str) -> None:
-    print("started making plot")
-
     description_to_color = {
         "initializing environment": "lightblue",
         "environment step": "blue",
@@ -411,7 +409,11 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
     seen_descriptions = set()
 
     fig = Figure()
-    fig.update_layout(title="Time periods spent on different computations during rollout generation.", xaxis_title="time", yaxis_title="rollout")
+    fig.update_layout(
+        title="Time periods spent on different computations during rollout generation.",
+        xaxis_title="time (secondss)",
+        yaxis_title="rollout"
+    )
 
     start_time = min(stat.time_init_env_started for stat in stats)
     for i_rollout, stat in enumerate(stats):
@@ -429,7 +431,7 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
         
     fig.write_html(save_filename)
 
-    print("done making plot")
+    print(f"Saved plot of time periods spent on different computation during rollout generation to '{save_filename}'.")
     
 
 
