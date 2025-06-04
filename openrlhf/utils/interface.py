@@ -20,6 +20,7 @@ from vllm.inputs import TokensPrompt
 from openai import OpenAI
 from anthropic import Anthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
+from plotly.graph_objects import Figure
 import json
 import ray
 import logging
@@ -220,12 +221,12 @@ class AgentInterface(ABC):
         self.stop_on_truncation = stop_on_truncation
 
     @abstractmethod
-    def init_state(self, data: dict) -> AgentState:
+    async def init_state(self, data: dict) -> AgentState:
         """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
         pass
 
     @abstractmethod
-    def get_next_prompt(
+    async def get_next_prompt(
         self, messages: List[Message], state: AgentState
     ) -> tuple[list[Message] | Message | None, AgentState]:
         """Input:
@@ -245,12 +246,12 @@ class AgentInterface(ABC):
         pass
 
     @abstractmethod
-    def is_done(self, messages: List[Message], state: AgentState) -> bool:
+    async def is_done(self, messages: List[Message], state: AgentState) -> bool:
         """Determine if the conversation is complete"""
         pass
 
     @abstractmethod
-    def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
+    async def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
         """Get the reward for the conversation.
         NOTE: This should not include length penalty!"""
         pass
@@ -263,11 +264,11 @@ class AgentInterface(ABC):
         )
     
     async def _generate_single_rollout(self, data: dict, llm: AsyncLLMInterface) -> tuple[AgentConversation, Reward]:
-        state = self.init_state(data)
+        state = await self.init_state(data)
         conversation = AgentConversation()
 
         for step in count():
-            new_messages, state = self.get_next_prompt(messages=conversation.messages, state=state)
+            new_messages, state = await self.get_next_prompt(messages=conversation.messages, state=state)
             if new_messages is None:
                 break
             if not isinstance(new_messages, list):
@@ -275,7 +276,7 @@ class AgentInterface(ABC):
 
             if self.max_steps is not None and step >= self.max_steps: # TO DO: check if there is an off by 1 bug here
                 return
-            if self.is_done(messages=conversation.messages, state=state):
+            if await self.is_done(messages=conversation.messages, state=state):
                 continue
             if self.stop_on_truncation and conversation.was_truncated:
                 continue
@@ -284,13 +285,42 @@ class AgentInterface(ABC):
 
             await llm.generate_assistant_message(conversation)
 
-        reward = self.get_reward(messages=conversation.messages, state=state)
+        reward = await self.get_reward(messages=conversation.messages, state=state)
 
         reward -= self.length_penalty * conversation.n_assistant_tokens
 
         return conversation, reward
 
 
+@dataclass
+class RolloutTimeStatistics:
+    time_init_env_started: float | None = None
+    times_llm_completions_started: list[float] = field(default_factory=lambda: [])
+    times_env_steps_started: list[float] = field(default_factory=lambda: [])
+    time_computing_reward_started: float | None = None
+    time_finished: float | None = None
+
+    def on_init_env_start(self) -> None:
+        self.time_init_env_started = perf_counter()
+
+    def on_llm_completion_start(self) -> None:
+        self.times_llm_completions_started.append(perf_counter())
+
+    def on_env_step_start(self) -> None:
+        self.times_env_steps_started.append(perf_counter())
+
+    def on_reward_start(self) -> None:
+        self.time_computing_reward_started = perf_counter()
+
+    def on_finish(self) -> None:
+        self.time_finished = perf_counter()
+
+
+def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_filename: str) -> None:
+    fig = Figure()
+    fig.update_layou(title="Time periods spent on different computations during rollout generation.")
+    ... # TO DO
+    
 
 
 '''
