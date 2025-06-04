@@ -421,7 +421,8 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
                 x=[interval.start - start_time, interval.end - start_time],
                 y=[i_rollout, i_rollout],
                 name=interval.description,
-                line=dict(color=description_to_color[interval.description], mode="lines"),
+                mode="lines",
+                line=dict(color=description_to_color[interval.description]),
                 showlegend=interval.description not in seen_descriptions
             )
             seen_descriptions.add(interval.description)
