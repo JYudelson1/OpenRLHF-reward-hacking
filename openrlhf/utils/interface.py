@@ -405,7 +405,7 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
         "environment step": "blue",
         "computing is done": "cyan",
         "generating llm completion": "red",
-        "computing reward": "red"
+        "computing reward": "darkblue"
     }
 
     seen_descriptions = set()
