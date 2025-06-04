@@ -344,7 +344,7 @@ class RolloutTimeStatistics:
         self.times_env_steps_started.append(perf_counter())
 
     def on_computing_is_done_start(self) -> None:
-        self.times_computing_is_done_started.append(perf_counter)
+        self.times_computing_is_done_started.append(perf_counter())
 
     def on_llm_completion_start(self) -> None:
         self.times_llm_completions_started.append(perf_counter())
