@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
+import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from itertools import count
+from itertools import count, pairwise, zip_longest
 from time import perf_counter
 from typing import *
 from uuid import uuid4
@@ -21,6 +22,7 @@ from openai import OpenAI
 from anthropic import Anthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 from plotly.graph_objects import Figure
+import traceback
 import json
 import ray
 import logging
@@ -213,12 +215,14 @@ class AgentInterface(ABC):
         stop_strings: list[str] | None = None,
         max_steps: int | None = None,
         stop_on_truncation: bool = False,
+        save_rollout_time_statistics_directory: str | None = "/root/rollout-time-statistics/",
     ) -> None:
         assert length_penalty >= 0
         self.length_penalty = length_penalty
         self.stop_strings = stop_strings
         self.max_steps = max_steps
         self.stop_on_truncation = stop_on_truncation
+        self.save_rollout_time_statistics_directory = save_rollout_time_statistics_directory
 
     @abstractmethod
     async def init_state(self, data: dict) -> AgentState:
@@ -259,15 +263,36 @@ class AgentInterface(ABC):
     async def generate_rollouts(
         self, llm: AsyncLLMInterface, full_data: list[dict]
     ) -> list[tuple[AgentConversation, Reward]]:
-        return await asyncio.gather(
+        results = await asyncio.gather(
             *[self._generate_single_rollout(data=data, llm=llm) for data in full_data]
         )
+
+        if self.save_rollout_time_statistics_directory is not None:
+            try:
+                os.makedirs(self.save_rollout_time_statistics_directory, exist_ok=True)
+                make_rollout_time_statistics_plot(
+                    stats=[stats for conversation, reward, stats in results],
+                    save_filename=os.path.join(
+                        self.save_rollout_time_statistics_directory,
+                        datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".html"
+                    ),
+                )
+            except Exception as e:
+                print("An exception occurred when trying to plot the rollout time statistics.")
+                print("The exception is:", e)
+                traceback.print_exc()
+
+        return [(conversation, reward) for conversation, reward, stats in results]
     
-    async def _generate_single_rollout(self, data: dict, llm: AsyncLLMInterface) -> tuple[AgentConversation, Reward]:
+    async def _generate_single_rollout(self, data: dict, llm: AsyncLLMInterface) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics"]:
+        stats = RolloutTimeStatistics()
+
+        stats.on_init_env_start()
         state = await self.init_state(data)
         conversation = AgentConversation()
 
         for step in count():
+            stats.on_env_step_start()
             new_messages, state = await self.get_next_prompt(messages=conversation.messages, state=state)
             if new_messages is None:
                 break
@@ -276,6 +301,7 @@ class AgentInterface(ABC):
 
             if self.max_steps is not None and step >= self.max_steps: # TO DO: check if there is an off by 1 bug here
                 return
+            stats.on_computing_is_done_start()
             if await self.is_done(messages=conversation.messages, state=state):
                 continue
             if self.stop_on_truncation and conversation.was_truncated:
@@ -283,43 +309,129 @@ class AgentInterface(ABC):
 
             conversation.messages += new_messages
 
+            stats.on_llm_completion_start()
             await llm.generate_assistant_message(conversation)
 
+        stats.on_computing_reward_start()
         reward = await self.get_reward(messages=conversation.messages, state=state)
+        stats.on_finish()
 
         reward -= self.length_penalty * conversation.n_assistant_tokens
 
         return conversation, reward
 
 
+@dataclass(frozen=True)
+class TimeInterval:
+    start: float
+    end: float
+    description: str
+
+
 @dataclass
 class RolloutTimeStatistics:
     time_init_env_started: float | None = None
-    times_llm_completions_started: list[float] = field(default_factory=lambda: [])
     times_env_steps_started: list[float] = field(default_factory=lambda: [])
+    times_computing_is_done_started: list[float] = field(default_factory=lambda: [])
+    times_llm_completions_started: list[float] = field(default_factory=lambda: [])
     time_computing_reward_started: float | None = None
     time_finished: float | None = None
 
     def on_init_env_start(self) -> None:
         self.time_init_env_started = perf_counter()
 
-    def on_llm_completion_start(self) -> None:
-        self.times_llm_completions_started.append(perf_counter())
-
     def on_env_step_start(self) -> None:
         self.times_env_steps_started.append(perf_counter())
 
-    def on_reward_start(self) -> None:
+    def on_computing_is_done_start(self) -> None:
+        self.times_computing_is_done_started.append(perf_counter)
+
+    def on_llm_completion_start(self) -> None:
+        self.times_llm_completions_started.append(perf_counter())
+
+    def on_computing_reward_start(self) -> None:
         self.time_computing_reward_started = perf_counter()
 
     def on_finish(self) -> None:
         self.time_finished = perf_counter()
 
+    def time_intervals(self) -> list[TimeInterval]:
+        assert self.time_init_env_started is not None
+        assert self.time_computing_reward_started is not None
+        assert self.time_finished_started is not None
+        assert len(self.times_env_steps_started) > 0
+        assert len(self.times_env_steps_started) >= len(self.times_computing_is_done_started) >= len(self.times_llm_completions_started)
+        assert len(self.times_env_steps_started) <= len(self.times_llm_completions_started) + 1
+
+        times: list[float] = []
+        times.append(self.time_init_env_started)
+        for step_times in zip_longest(
+            self.times_env_steps_started,
+            self.times_computing_is_done_started,
+            self.times_llm_completions_started,
+            fillvalue=None
+        ):
+            for time in step_times:
+                if time is None:
+                    continue
+                times.append(time)
+        times.append(self.time_computing_reward_started)
+        times.append(self.time_finished)
+
+        assert len(times) == len(self.times_env_steps_started) + len(self.times_computing_is_done_started) + len(self.times_llm_completions_started)
+
+        descriptions = (
+            ["initializing environment"]
+            + (
+                ["environment step", "computing is done", "generating llm completion"]
+                * len(self.times_env_steps_started)
+            )[: len(times) - 3]
+            + ["computing reward"]
+        )
+
+        return [
+            TimeInterval(start=start_time, end=end_time, description=description)
+            for (start_time, end_time), description in zip(pairwise(times), descriptions, strict=True)
+        ]
+        
+
+
 
 def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_filename: str) -> None:
+    for stat in stats:
+        assert stat.time_init_env_started is not None
+        assert stat.time_computing_reward_started is not None
+        assert stat.time_finished_started is not None
+        assert len(stat.times_env_steps_started) > 0
+        assert len(stat.times_env_steps_started) >= len(stat.times_computing_is_done_started) >= len(stat.times_llm_completions_started)
+        assert len(stat.times_env_steps_started) <= len(stat.times_llm_completions_started) + 1
+
+    description_to_color = {
+        "initializing environment": "lightblue",
+        "environment step": "blue",
+        "computing is done": "cyan",
+        "generating llm completion": "red",
+        "computing reward": "red"
+    }
+
+    seen_descriptions = set()
+
     fig = Figure()
-    fig.update_layou(title="Time periods spent on different computations during rollout generation.")
-    ... # TO DO
+    fig.update_layout(title="Time periods spent on different computations during rollout generation.", xaxis_title="time", yaxis_title="rollout")
+
+    start_time = min(stat.time_init_env_started for stat in stats)
+    for i_rollout, stats in enumerate(stats):
+        for interval in stat.time_intervals():
+            fig.add_scatter(
+                x=[interval.start - start_time, interval.end - start_time],
+                y=[i_rollout, i_rollout],
+                name=interval.description,
+                line=dict(color=description_to_color[interval.description], mode="lines"),
+                showlegend=interval.description not in seen_descriptions
+            )
+            seen_descriptions.add(interval.description)
+        
+    fig.write_html(save_filename)
     
 
 
