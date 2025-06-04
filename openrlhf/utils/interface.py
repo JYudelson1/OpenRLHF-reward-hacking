@@ -358,7 +358,7 @@ class RolloutTimeStatistics:
     def time_intervals(self) -> list[TimeInterval]:
         assert self.time_init_env_started is not None
         assert self.time_computing_reward_started is not None
-        assert self.time_finished_started is not None
+        assert self.time_finished is not None
         assert len(self.times_env_steps_started) > 0
         assert len(self.times_env_steps_started) >= len(self.times_computing_is_done_started) >= len(self.times_llm_completions_started)
         assert len(self.times_env_steps_started) <= len(self.times_llm_completions_started) + 1
@@ -398,14 +398,6 @@ class RolloutTimeStatistics:
 
 
 def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_filename: str) -> None:
-    for stat in stats:
-        assert stat.time_init_env_started is not None
-        assert stat.time_computing_reward_started is not None
-        assert stat.time_finished_started is not None
-        assert len(stat.times_env_steps_started) > 0
-        assert len(stat.times_env_steps_started) >= len(stat.times_computing_is_done_started) >= len(stat.times_llm_completions_started)
-        assert len(stat.times_env_steps_started) <= len(stat.times_llm_completions_started) + 1
-
     description_to_color = {
         "initializing environment": "lightblue",
         "environment step": "blue",
@@ -420,7 +412,7 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
     fig.update_layout(title="Time periods spent on different computations during rollout generation.", xaxis_title="time", yaxis_title="rollout")
 
     start_time = min(stat.time_init_env_started for stat in stats)
-    for i_rollout, stats in enumerate(stats):
+    for i_rollout, stat in enumerate(stats):
         for interval in stat.time_intervals():
             fig.add_scatter(
                 x=[interval.start - start_time, interval.end - start_time],
