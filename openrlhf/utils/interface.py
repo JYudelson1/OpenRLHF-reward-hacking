@@ -370,7 +370,7 @@ class AgentInterface(ABC):
                 new_messages = [new_messages]
 
             if self.max_steps is not None and step >= self.max_steps: # TO DO: check if there is an off by 1 bug here
-                return
+                break
             stats.on_computing_is_done_start()
             if await self.is_done(messages=conversation.messages, state=state):
                 break
