@@ -487,7 +487,6 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
 
     start_time = min(stat.time_init_env_started for stat in stats)
     for i_rollout, stat in enumerate(stats):
-        print(stat)
         for interval in stat.time_intervals():
             fig.add_scatter(
                 x=[interval.start - start_time, interval.end - start_time],
