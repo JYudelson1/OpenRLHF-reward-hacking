@@ -64,7 +64,7 @@ class AsyncOpenAILLM(AsyncLLMInterface):
     client: AsyncOpenAI
     model: str
     temperature: float
-    max_tokens: int
+    max_completion_tokens: int
 
     # @retry(
     #     stop=stop_after_attempt(8),
@@ -82,7 +82,7 @@ class AsyncOpenAILLM(AsyncLLMInterface):
             messages=conversation,
             model=self.model,
             temperature=self.temperature,
-            max_completion_tokens=self.max_tokens,
+            max_completion_tokens=self.max_completion_tokens,
             stop=stop_strings,
         )
 
