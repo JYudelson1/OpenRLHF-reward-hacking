@@ -76,10 +76,10 @@ class AsyncOpenAILLM(AsyncLLMInterface):
             conversation: AgentConversation,
             stop_strings: list[str] | None = None,
         ) -> None:
-        conversation = self._merge_tool_and_user_messages(conversation)
+        messages = self._merge_tool_and_user_messages(conversation.messages)
 
         completion = await self.client.chat.completions.create(
-            messages=conversation,
+            messages=messages,
             model=self.model,
             temperature=self.temperature,
             max_completion_tokens=self.max_completion_tokens,
