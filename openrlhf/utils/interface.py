@@ -38,7 +38,6 @@ Message = Dict[str, str]
 Reward = float
 AgentState = Any  # State needed to track conversation progress
 
-
 @dataclass
 class AgentConversation:
     messages: list[Message] = field(default_factory=lambda: [])
@@ -299,7 +298,7 @@ class AgentInterface(ABC):
     def setup_all_sandboxes(self) -> None:
         pass
     
-    def cleanup_all_sandboxes(self) -> None:
+    def cleanup_all_sandboxes(self, all_states: list[AgentState]) -> None:
         pass
 
     @abstractmethod
@@ -357,7 +356,7 @@ class AgentInterface(ABC):
             try:
                 os.makedirs(self.save_rollout_time_statistics_directory, exist_ok=True)
                 make_rollout_time_statistics_plot(
-                    stats=[stats for conversation, reward, stats in results],
+                    stats=[stats for _, _, stats, _ in results],
                     save_filename=os.path.join(
                         self.save_rollout_time_statistics_directory,
                         datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".html"
@@ -369,7 +368,7 @@ class AgentInterface(ABC):
                 traceback.print_exc()
                 
         try:
-            self.cleanup_all_sandboxes()
+            self.cleanup_all_sandboxes(all_states=[state for _, _, _, state in results])
         except Exception as e:
             self.num_errors += 1
             self.errors.append(f"Error in cleanup_all_sandboxes: {str(e)}")
@@ -377,7 +376,7 @@ class AgentInterface(ABC):
 
         return [(conversation, reward) for conversation, reward, stats in results]
     
-    async def _generate_single_rollout(self, data: dict, llm: AsyncLLMInterface) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics"]:
+    async def _generate_single_rollout(self, data: dict, llm: AsyncLLMInterface) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics()
 
         stats.on_init_env_start()
@@ -388,7 +387,7 @@ class AgentInterface(ABC):
             self.errors.append(f"Error in init_state: {str(e)}")
             logger.error(f"Error in init_state: {str(e)}")
             # Return default conversation, -1.0 reward, and blank statistics
-            return AgentConversation(), -1.0, RolloutTimeStatistics()
+            return AgentConversation(), -1.0, RolloutTimeStatistics(), None
             
         conversation = AgentConversation()
 
@@ -442,7 +441,7 @@ class AgentInterface(ABC):
 
         reward -= self.length_penalty * conversation.n_assistant_tokens
 
-        return conversation, reward, stats
+        return conversation, reward, stats, state
 
 
 @dataclass(frozen=True)
