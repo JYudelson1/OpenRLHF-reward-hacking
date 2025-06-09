@@ -295,10 +295,10 @@ class AgentInterface(ABC):
         self.num_errors = 0
         self.errors = []
         
-    def setup_all_sandboxes(self) -> None:
+    async def setup_all_sandboxes(self, all_data: list[dict]) -> None:
         pass
     
-    def cleanup_all_sandboxes(self, all_states: list[AgentState]) -> None:
+    async def cleanup_all_sandboxes(self, all_states: list[AgentState]) -> None:
         pass
 
     @abstractmethod
@@ -342,7 +342,7 @@ class AgentInterface(ABC):
     ) -> list[tuple[AgentConversation, Reward]]:
         
         try:
-            self.setup_all_sandboxes()
+            await self.setup_all_sandboxes(all_data=full_data)
         except Exception as e:
             self.num_errors += 1
             self.errors.append(f"Error in setup_all_sandboxes: {str(e)}")
