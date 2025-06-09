@@ -295,10 +295,10 @@ class AgentInterface(ABC):
         self.num_errors = 0
         self.errors = []
         
-    async def setup_all_sandboxes(self, all_data: list[dict]) -> None:
+    async def setup_all_states(self, all_data: list[dict]) -> None:
         pass
     
-    async def cleanup_all_sandboxes(self, all_states: list[AgentState]) -> None:
+    async def cleanup_all_states(self, all_states: list[AgentState]) -> None:
         pass
 
     @abstractmethod
@@ -342,11 +342,11 @@ class AgentInterface(ABC):
     ) -> list[tuple[AgentConversation, Reward]]:
         
         try:
-            await self.setup_all_sandboxes(all_data=full_data)
+            await self.setup_all_states(all_data=full_data)
         except Exception as e:
             self.num_errors += 1
-            self.errors.append(f"Error in setup_all_sandboxes: {str(e)}")
-            logger.error(f"Error in setup_all_sandboxes: {str(e)}")
+            self.errors.append(f"Error in setup_all_states: {str(e)}")
+            logger.error(f"Error in setup_all_states: {str(e)}")
         
         results = await asyncio.gather(
             *[self._generate_single_rollout(data=data, llm=llm) for data in full_data]
@@ -368,11 +368,11 @@ class AgentInterface(ABC):
                 traceback.print_exc()
                 
         try:
-            self.cleanup_all_sandboxes(all_states=[state for _, _, _, state in results])
+            self.cleanup_all_states(all_states=[state for _, _, _, state in results])
         except Exception as e:
             self.num_errors += 1
-            self.errors.append(f"Error in cleanup_all_sandboxes: {str(e)}")
-            logger.error(f"Error in cleanup_all_sandboxes: {str(e)}")
+            self.errors.append(f"Error in cleanup_all_states: {str(e)}")
+            logger.error(f"Error in cleanup_all_states: {str(e)}")
 
         return [(conversation, reward) for conversation, reward, stats in results]
     
