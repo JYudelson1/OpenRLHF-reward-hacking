@@ -91,7 +91,7 @@ class AsyncOpenAILLM(AsyncLLMInterface):
 
         # the together.ai api ignores stop strings
         # (note: i don't know if it always does or sometimes does)
-        together_ai_api = self.client.base_url is not None and "api.together.xyz" in self.client.base_url
+        together_ai_api = self.client.base_url is not None and "api.together.xyz" in str(self.client.base_url)
         if together_ai_api and stop_strings is not None:
             for stop_string in stop_strings:
                 if stop_string in completion_text:
