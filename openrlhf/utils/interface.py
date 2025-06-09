@@ -55,7 +55,7 @@ class AgentConversation:
 class AsyncLLMInterface(ABC):
     @abstractmethod
     async def generate_assistant_message(
-        self, conversation: AgentConversation, stop_strings: list[str] | None = None
+        self, conversation: AgentConversation, stop_strings: list[str] | None
     ) -> None:
         pass
 
@@ -75,9 +75,11 @@ class AsyncOpenAILLM(AsyncLLMInterface):
     async def generate_assistant_message(
         self,
         conversation: AgentConversation,
-        stop_strings: list[str] | None = None,
+        stop_strings: list[str] | None,
     ) -> None:
         messages = self._merge_tool_and_user_messages(conversation.messages)
+
+        print(f"{stop_strings=}")
 
         completion = await self.client.chat.completions.create(
             messages=messages,
