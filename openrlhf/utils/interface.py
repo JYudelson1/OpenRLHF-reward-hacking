@@ -79,8 +79,6 @@ class AsyncOpenAILLM(AsyncLLMInterface):
     ) -> None:
         messages = self._merge_tool_and_user_messages(conversation.messages)
 
-        print(f"{stop_strings=}")
-
         completion = await self.client.chat.completions.create(
             messages=messages,
             model=self.model,
@@ -88,6 +86,16 @@ class AsyncOpenAILLM(AsyncLLMInterface):
             max_completion_tokens=self.max_completion_tokens,
             stop=stop_strings,
         )
+
+        completion_text: str = completion.choices[0].message.content
+
+        # the together.ai api ignores stop strings
+        # (note: i don't know if it always does or sometimes does)
+        together_ai_api = self.client.base_url is not None and "api.together.xyz" in self.client.base_url
+        if together_ai_api and stop_strings is not None:
+            for stop_string in stop_strings:
+                if stop_string in completion_text:
+                    completion_text = completion_text[: completion_text.index(stop_string)]
 
         conversation.messages.append({"role": "assistant", "content": completion.choices[0].message.content})
 
