@@ -97,7 +97,7 @@ class AsyncOpenAILLM(AsyncLLMInterface):
                 if stop_string in completion_text:
                     completion_text = completion_text[: completion_text.index(stop_string)]
 
-        conversation.messages.append({"role": "assistant", "content": completion.choices[0].message.content})
+        conversation.messages.append({"role": "assistant", "content": completion_text})
 
     def _merge_tool_and_user_messages(self, messages: list[Message]) -> list[Message]:
         merged_messages = []
