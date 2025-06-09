@@ -12,11 +12,13 @@ import vllm
 from vllm import CompletionOutput, SamplingParams
 from vllm.outputs import RequestOutput
 from vllm.lora.request import LoRARequest
-from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
-                                         ChatTemplateContentFormatOption,
-                                         apply_hf_chat_template,
-                                         parse_chat_messages,
-                                         resolve_chat_template_content_format)
+from vllm.entrypoints.chat_utils import (
+    ChatCompletionMessageParam,
+    ChatTemplateContentFormatOption,
+    apply_hf_chat_template,
+    parse_chat_messages,
+    resolve_chat_template_content_format,
+)
 from vllm.inputs import TokensPrompt
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -38,22 +40,22 @@ Message = Dict[str, str]
 Reward = float
 AgentState = Any  # State needed to track conversation progress
 
+
 @dataclass
 class AgentConversation:
     messages: list[Message] = field(default_factory=lambda: [])
-    tokens_by_turn: list[dict[str, Any]] = field(default_factory=lambda: []) # to do: better type hint than Any
+    tokens_by_turn: list[dict[str, Any]] = field(default_factory=lambda: [])  # to do: better type hint than Any
     first_prompt_tokens: list[int] = field(default_factory=lambda: [])
     all_tokens: list[int] = field(default_factory=lambda: [])
     n_tokens: int = 0
     n_assistant_tokens: int = 0
     was_truncated: bool = False
 
+
 class AsyncLLMInterface(ABC):
     @abstractmethod
     async def generate_assistant_message(
-        self,
-        conversation: AgentConversation,
-        stop_strings: list[str] | None = None
+        self, conversation: AgentConversation, stop_strings: list[str] | None = None
     ) -> None:
         pass
 
@@ -71,10 +73,10 @@ class AsyncOpenAILLM(AsyncLLMInterface):
     #     before_sleep=lambda retry_state: print(f"Calling OpenAI API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}", file=stderr)
     # )
     async def generate_assistant_message(
-            self,
-            conversation: AgentConversation,
-            stop_strings: list[str] | None = None,
-        ) -> None:
+        self,
+        conversation: AgentConversation,
+        stop_strings: list[str] | None = None,
+    ) -> None:
         messages = self._merge_tool_and_user_messages(conversation.messages)
 
         completion = await self.client.chat.completions.create(
@@ -85,10 +87,7 @@ class AsyncOpenAILLM(AsyncLLMInterface):
             stop=stop_strings,
         )
 
-        conversation.messages.append(
-            {"role": "assistant", "content": completion.choices[0].message.content}
-        )
-
+        conversation.messages.append({"role": "assistant", "content": completion.choices[0].message.content})
 
     def _merge_tool_and_user_messages(self, messages: list[Message]) -> list[Message]:
         merged_messages = []
@@ -114,11 +113,10 @@ class AsyncVLLM(AsyncLLMInterface):
     sampling_params: SamplingParams
 
     async def generate_assistant_message(
-            self,
-            conversation: AgentConversation,
-            stop_strings: list[str] | None,
-        ) -> None:
-
+        self,
+        conversation: AgentConversation,
+        stop_strings: list[str] | None,
+    ) -> None:
         sampling_params = self.sampling_params
         if stop_strings is not None:
             sampling_params = deepcopy(self.sampling_params)
@@ -126,15 +124,13 @@ class AsyncVLLM(AsyncLLMInterface):
             sampling_params.include_stop_str_in_output = True
 
         output, was_truncated = await _vllm_chat_with_truncation(
-            llm_engine=self.llm_engine,
-            messages=conversation.messages,
-            sampling_params=sampling_params
+            llm_engine=self.llm_engine, messages=conversation.messages, sampling_params=sampling_params
         )
 
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
-        
-        input_tokens = output.prompt_token_ids[conversation.n_tokens:]
+
+        input_tokens = output.prompt_token_ids[conversation.n_tokens :]
         output_tokens = output.outputs[0].token_ids
 
         output_message = {"role": "assistant", "content": output.outputs[0].text}
@@ -144,9 +140,10 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.n_assistant_tokens += len(output_tokens)
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-        
+
         if was_truncated:
             conversation.was_truncated = True
+
 
 async def _vllm_chat_with_truncation(
     llm_engine: vllm.AsyncLLMEngine,
@@ -239,9 +236,8 @@ async def _vllm_chat_with_truncation(
     )
     # Special tokens are already included in chat templates so
     # should not be added by the tokenizer in this case.
-    prompt_token_ids = tokenizer.encode(prompt_str,
-                                        add_special_tokens=False)
-    
+    prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+
     # Truncate the prompt if necessary
     was_truncated = (
         sampling_params.truncate_prompt_tokens is not None
@@ -249,9 +245,9 @@ async def _vllm_chat_with_truncation(
     )
     if was_truncated:
         old_len = len(prompt_token_ids)
-        prompt_token_ids = prompt_token_ids[:sampling_params.truncate_prompt_tokens]
+        prompt_token_ids = prompt_token_ids[: sampling_params.truncate_prompt_tokens]
         logger.warning(f"Truncated prompt from {old_len} tokens to {sampling_params.truncate_prompt_tokens} tokens.")
-    
+
     prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
 
     request_id = str(uuid4())
@@ -294,21 +290,19 @@ class AgentInterface(ABC):
         self.save_rollout_time_statistics_directory = save_rollout_time_statistics_directory
         self.num_errors = 0
         self.errors = []
-        
-    async def setup_all_sandboxes(self, all_data: list[dict]) -> None:
-        pass
-    
-    async def cleanup_all_sandboxes(self, all_states: list[AgentState]) -> None:
+
+    @abstractmethod
+    async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
+        """Initialize the states for a new RL environments, given a list of dict elements of the dataset"""
         pass
 
     @abstractmethod
-    async def init_state(self, data: dict) -> AgentState:
-        """Initialize the state for a new RL env, given a dict of the info in one element of the dataset"""
+    async def cleanup_all_states(self, all_states: list[AgentState], full_data: list[dict]) -> None:
         pass
 
     @abstractmethod
     async def get_next_prompt(
-        self, messages: List[Message], state: AgentState
+        self, messages: List[Message], state: AgentState, remaining_steps: int | None
     ) -> tuple[list[Message] | Message | None, AgentState]:
         """Input:
         - messages: the messages in the conversation
@@ -340,16 +334,19 @@ class AgentInterface(ABC):
     async def generate_rollouts(
         self, llm: AsyncLLMInterface, full_data: list[dict]
     ) -> list[tuple[AgentConversation, Reward]]:
-        
         try:
-            await self.setup_all_sandboxes(all_data=full_data)
+            states = await self.init_all_states(full_data)
         except Exception as e:
             self.num_errors += 1
-            self.errors.append(f"Error in setup_all_sandboxes: {str(e)}")
-            logger.error(f"Error in setup_all_sandboxes: {str(e)}")
-        
+            self.errors.append(f"Error in init_all_states: {str(e)}")
+            logger.error(f"Error in init_all_states: {str(e)}")
+            return [(AgentConversation(), -1.0) for _ in range(len(full_data))]
+
         results = await asyncio.gather(
-            *[self._generate_single_rollout(data=data, llm=llm) for data in full_data]
+            *[
+                self._generate_single_rollout(data=data, llm=llm, initial_state=state)
+                for state, data in zip(states, full_data, strict=True)
+            ]
         )
 
         if self.save_rollout_time_statistics_directory is not None:
@@ -359,54 +356,51 @@ class AgentInterface(ABC):
                     stats=[stats for _, _, stats, _ in results],
                     save_filename=os.path.join(
                         self.save_rollout_time_statistics_directory,
-                        datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".html"
+                        datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".html",
                     ),
                 )
             except Exception as e:
                 print("An exception occurred when trying to plot the rollout time statistics.")
                 print("The exception is:", e)
                 traceback.print_exc()
-                
+
         try:
-            self.cleanup_all_sandboxes(all_states=[state for _, _, _, state in results])
+            await self.cleanup_all_states(all_states=[state for _, _, _, state in results], full_data=full_data)
         except Exception as e:
             self.num_errors += 1
             self.errors.append(f"Error in cleanup_all_sandboxes: {str(e)}")
             logger.error(f"Error in cleanup_all_sandboxes: {str(e)}")
 
-        return [(conversation, reward) for conversation, reward, stats in results]
-    
-    async def _generate_single_rollout(self, data: dict, llm: AsyncLLMInterface) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics", AgentState | None]:
+        return [(conversation, reward) for conversation, reward, stats, _ in results]
+
+    async def _generate_single_rollout(
+        self, data: dict, llm: AsyncLLMInterface, initial_state: AgentState
+    ) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics()
 
-        stats.on_init_env_start()
-        try:
-            state = await self.init_state(data)
-        except Exception as e:
-            self.num_errors += 1
-            self.errors.append(f"Error in init_state: {str(e)}")
-            logger.error(f"Error in init_state: {str(e)}")
-            # Return default conversation, -1.0 reward, and blank statistics
-            return AgentConversation(), -1.0, RolloutTimeStatistics(), None
-            
         conversation = AgentConversation()
+        state = initial_state
 
         for step in count():
             stats.on_env_step_start()
             try:
-                new_messages, state = await self.get_next_prompt(messages=conversation.messages, state=state)
+                new_messages, state = await self.get_next_prompt(
+                    messages=conversation.messages,
+                    state=state,
+                    remaining_steps=self.max_steps - step if self.max_steps is not None else None,
+                )
             except Exception as e:
                 self.num_errors += 1
                 self.errors.append(f"Error in get_next_prompt: {str(e)}")
                 logger.error(f"Error in get_next_prompt: {str(e)}")
                 break
-                
+
             if new_messages is None:
                 break
             if not isinstance(new_messages, list):
                 new_messages = [new_messages]
 
-            if self.max_steps is not None and step >= self.max_steps: # TO DO: check if there is an off by 1 bug here
+            if self.max_steps is not None and step >= self.max_steps:  # TO DO: check if there is an off by 1 bug here
                 break
             stats.on_computing_is_done_start()
             try:
@@ -416,7 +410,7 @@ class AgentInterface(ABC):
                 self.errors.append(f"Error in is_done: {str(e)}")
                 logger.error(f"Error in is_done: {str(e)}")
                 break
-                
+
             if is_done:
                 break
             if self.stop_on_truncation and conversation.was_truncated:
@@ -436,7 +430,7 @@ class AgentInterface(ABC):
             logger.error(f"Error in get_reward: {str(e)}")
             # Treat error as -1.0
             reward = -1.0
-            
+
         stats.on_finish()
 
         reward -= self.length_penalty * conversation.n_assistant_tokens
@@ -483,7 +477,11 @@ class RolloutTimeStatistics:
         assert self.time_computing_reward_started is not None
         assert self.time_finished is not None
         assert len(self.times_env_steps_started) > 0
-        assert len(self.times_env_steps_started) >= len(self.times_computing_is_done_started) >= len(self.times_llm_completions_started)
+        assert (
+            len(self.times_env_steps_started)
+            >= len(self.times_computing_is_done_started)
+            >= len(self.times_llm_completions_started)
+        )
         assert len(self.times_env_steps_started) <= len(self.times_llm_completions_started) + 1
 
         times: list[float] = []
@@ -492,7 +490,7 @@ class RolloutTimeStatistics:
             self.times_env_steps_started,
             self.times_computing_is_done_started,
             self.times_llm_completions_started,
-            fillvalue=None
+            fillvalue=None,
         ):
             for time in step_times:
                 if time is None:
@@ -501,7 +499,13 @@ class RolloutTimeStatistics:
         times.append(self.time_computing_reward_started)
         times.append(self.time_finished)
 
-        assert len(times) == len(self.times_env_steps_started) + len(self.times_computing_is_done_started) + len(self.times_llm_completions_started) + 3
+        assert (
+            len(times)
+            == len(self.times_env_steps_started)
+            + len(self.times_computing_is_done_started)
+            + len(self.times_llm_completions_started)
+            + 3
+        )
 
         descriptions = (
             ["initializing environment"]
@@ -516,8 +520,6 @@ class RolloutTimeStatistics:
             TimeInterval(start=start_time, end=end_time, description=description)
             for (start_time, end_time), description in zip(pairwise(times), descriptions, strict=True)
         ]
-        
-
 
 
 def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_filename: str) -> None:
@@ -526,7 +528,7 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
         "environment step": "blue",
         "computing is done": "cyan",
         "generating llm completion": "red",
-        "computing reward": "darkblue"
+        "computing reward": "darkblue",
     }
 
     seen_descriptions = set()
@@ -535,7 +537,7 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
     fig.update_layout(
         title="Time periods spent on different computations during rollout generation.",
         xaxis_title="time (secondss)",
-        yaxis_title="rollout"
+        yaxis_title="rollout",
     )
 
     start_time = min(stat.time_init_env_started for stat in stats)
@@ -547,10 +549,10 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
                 name=interval.description,
                 mode="lines",
                 line=dict(color=description_to_color[interval.description]),
-                showlegend=interval.description not in seen_descriptions
+                showlegend=interval.description not in seen_descriptions,
             )
             seen_descriptions.add(interval.description)
-        
+
     fig.write_html(save_filename)
 
     print(f"Saved plot of time periods spent on different computation during rollout generation to '{save_filename}'.")
