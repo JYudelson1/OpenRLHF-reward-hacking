@@ -405,7 +405,7 @@ class AgentInterface(ABC):
             except Exception as e:
                 self.num_errors += 1
                 self.errors.append(f"Error in get_next_prompt: {str(e)}")
-                logger.error(f"Error in get_next_prompt: {str(e)}")
+                logger.error(f"Error in get_next_prompt: {str(e)} {traceback.format_exc()}")
                 break
 
             if new_messages is None:
