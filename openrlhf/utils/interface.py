@@ -344,6 +344,7 @@ class AgentInterface(ABC):
     async def generate_rollouts(
         self, llm: AsyncLLMInterface, full_data: list[dict]
     ) -> list[tuple[AgentConversation, Reward]]:
+        time_init_env_started = perf_counter()
         try:
             states = await self.init_all_states(full_data)
         except Exception as e:
@@ -354,8 +355,10 @@ class AgentInterface(ABC):
 
         results = await asyncio.gather(
             *[
-                self._generate_single_rollout(data=data, llm=llm, initial_state=state)
-                for state, data in zip(states, full_data, strict=True)
+                self._generate_single_rollout(
+                    llm=llm, initial_state=state, time_init_env_started=time_init_env_started
+                )
+                for state in states
             ]
         )
 
@@ -384,9 +387,9 @@ class AgentInterface(ABC):
         return [(conversation, reward) for conversation, reward, stats, _ in results]
 
     async def _generate_single_rollout(
-        self, data: dict, llm: AsyncLLMInterface, initial_state: AgentState
+        self, llm: AsyncLLMInterface, initial_state: AgentState, time_init_env_started: float
     ) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics", AgentState | None]:
-        stats = RolloutTimeStatistics()
+        stats = RolloutTimeStatistics(time_init_env_started=time_init_env_started)
 
         conversation = AgentConversation()
         state = initial_state
