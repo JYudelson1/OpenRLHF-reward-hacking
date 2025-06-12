@@ -660,6 +660,8 @@ class ActorPPOTrainer(BasePPOTrainer):
                     all_prompts.extend(prompts)
                     all_datasources.extend([p.get("datasource", "") for p in prompts])
                     
+                all_prompts = all_prompts[:8]
+                    
                 # Logging
                 logger.info(f"Evaluating {len(all_prompts)} prompts")
 
