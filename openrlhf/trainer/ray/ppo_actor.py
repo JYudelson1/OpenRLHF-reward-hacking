@@ -780,10 +780,10 @@ class ActorPPOTrainer(BasePPOTrainer):
             text_rollouts = str(json_rollouts)
             filename = name + ".txt"
 
-        artifact = self._wandb.Artifact(name=name, type="rollouts")
-        with artifact.new_file(filename) as f:
-            f.write(text_rollouts)
-        self._wandb.log_artifact(artifact)
+        # artifact = self._wandb.Artifact(name=name, type="rollouts")
+        # with artifact.new_file(filename) as f:
+        #     f.write(text_rollouts)
+        # self._wandb.log_artifact(artifact)
 
 
 @ray.remote(num_gpus=1)
