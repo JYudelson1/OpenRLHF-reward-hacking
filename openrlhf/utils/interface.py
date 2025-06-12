@@ -277,6 +277,7 @@ async def _vllm_chat_with_truncation(
             continue
         assert finished_output is None
         finished_output = output
+        print(f"{llm_engine=} {prompt=} {sampling_params=} {request_id=} {lora_request=} {output=}")
 
     assert finished_output is not None
 
