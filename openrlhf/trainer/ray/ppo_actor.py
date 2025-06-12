@@ -744,13 +744,24 @@ class ActorPPOTrainer(BasePPOTrainer):
         if self.strategy.args.vllm_enable_sleep:
             batch_vllm_engine_call(self.vllm_engines, "sleep")
 
+        use_prefix_cache = getattr(self.strategy.args, "enable_prefix_caching", False)
+        cache_reset_refs = []
+        if use_prefix_cache and torch.distributed.get_rank() == 0:
+            # clear prefix cache
+            for engine in self.vllm_engines:
+                cache_reset_refs.append(engine.reset_prefix_cache.remote())
+
+        if cache_reset_refs:
+            ray.get(cache_reset_refs)
         torch.cuda.empty_cache()
+        torch.distributed.barrier()
 
         end_time = time.time()
         duration = end_time - start_time
         if self.strategy.is_rank_0():
             time_str = str(datetime.timedelta(seconds=duration)).split(".")[0]
             logger.info(f"✨ Evaluation completed in {time_str}")
+            
 
     def reload_states(self):
         reload_deepspeed_states(self.actor.model)
