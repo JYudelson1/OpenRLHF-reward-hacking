@@ -88,7 +88,7 @@ class LLMRayActor:
 
         # self.llm = vllm.LLM(*args, **kwargs)
         self.async_event_loop = asyncio.new_event_loop()
-        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(vllm.AsyncEngineArgs(*args, **kwargs))
+        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(vllm.AsyncEngineArgs(*args, **kwargs, prefix_caching_hash_algo="sha256"))
 
         self.rollouts = None
 
