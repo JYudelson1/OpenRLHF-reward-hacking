@@ -225,7 +225,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                     if i == 0:
                         output = self.tokenizer.batch_decode(
                             experience.sequences[0].unsqueeze(0), skip_special_tokens=True
-                        )
+                        )[0]
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
 
@@ -1153,6 +1153,236 @@ def _broadcast_to_vllm_bare(
             ray.get(cache_reset_refs)
         torch.cuda.empty_cache()
         torch.distributed.barrier()
+
+    def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
+        if global_step % args.logging_steps == 0:
+            # wandb
+            if self._wandb is not None and self.strategy.is_rank_0():
+                logs = {
+                    "train/%s" % k: v
+                    for k, v in {
+                        **logs_dict,
+                        "global_step": global_step,
+                    }.items()
+                }
+                if self.experience_maker.perf_stats is not None:
+                    logs.update({f"perf/experience_maker/{k}": v for k, v in self.experience_maker.perf_stats.items()})
+                self._wandb.log(logs)
+            # TensorBoard
+            elif self._tensorboard is not None and self.strategy.is_rank_0():
+                for k, v in logs_dict.items():
+                    self._tensorboard.add_scalar(f"train/{k}", v, global_step)
+                if self.experience_maker.perf_stats is not None:
+                    for k, v in self.experience_maker.perf_stats.items():
+                        self._tensorboard.add_scalar(f"perf/experience_maker/{k}", v, global_step)
+
+        # TODO: Add evaluation mechanism for PPO
+        if global_step % args.eval_steps == 0:
+            self.evaluate(self.eval_dataloader, global_step, args.n_samples_per_prompt, args.eval_steps)
+        # save ckpt
+        # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
+        print(f"{args.save_steps=}")
+        if global_step % args.save_steps == 0:
+            tag = f"global_step{global_step}"
+            self._save_checkpoint(args, tag, client_states)
+
+    def _save_checkpoint(self, args, tag, client_states):
+        # call remote critic
+        if not self.disable_ds_ckpt:
+            if self.critic_train_remote:
+                ref = self.critic.save_checkpoint.remote(tag)
+            self.strategy.save_ckpt(
+                self.actor.model,
+                os.path.join(args.ckpt_path, "_actor"),
+                tag,
+                args.max_ckpt_num,
+                args.max_ckpt_mem,
+                client_states,
+            )
+        if self.save_hf_ckpt:
+            save_path = os.path.join(args.ckpt_path, f"{tag}_hf")
+            self.strategy.save_model(
+                self.ema_model if args.enable_ema else self.actor,
+                self.tokenizer,
+                save_path,
+            )
+        # wait
+        if not self.disable_ds_ckpt:
+            if self.critic_train_remote:
+                ray.get(ref)
+        torch.distributed.barrier()
+    
+    def evaluate(self, eval_dataloader, global_step, n_samples_per_prompt=1, eval_steps=1):
+        """Evaluate model performance on eval dataset.
+
+        Args:
+            eval_dataloader: DataLoader containing evaluation prompts, labels and data sources
+            global_step: Current training step for logging
+            n_samples_per_prompt: Number of samples to generate per prompt for pass@k calculation
+        """
+        start_time = time.time()
+        if self.strategy.is_rank_0():
+            logger.info(f"⏰ Evaluation start time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # vLLM wakeup when vllm_enable_sleep
+        if self.strategy.args.vllm_enable_sleep:
+            from openrlhf.trainer.ray.vllm_engine import batch_vllm_engine_call
+
+            batch_vllm_engine_call(self.vllm_engines, "wake_up")
+            torch.distributed.barrier()
+            torch.cuda.synchronize()
+
+        # Only run evaluation on ring attention rank0
+        if self.strategy.ring_attn_group is None or self.strategy.ring_attn_rank == 0:
+
+            with torch.no_grad():
+                # First collect all prompts and labels
+                all_prompts = []
+                all_datasources = []
+                
+                for prompts in iter(eval_dataloader):
+                    all_prompts.extend(prompts)
+                    all_datasources.extend([p.get("datasource", "") for p in prompts])
+                    
+                all_prompts = all_prompts[:8]
+                all_datasources = all_datasources[:8]
+                    
+                # Logging
+                logger.info(f"Evaluating {len(all_prompts)} prompts")
+
+                # Generate samples and calculate rewards
+                generate_kwargs = self.generate_kwargs.copy()
+                generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
+                
+                samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
+
+                self.log_rollouts_wandb([sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval")
+
+                # Calculate rewards
+                if samples[0].reward is None:
+                    assert False, "Reward model and remote reward are not currently supported with evaluations"
+                else:
+                    rewards = torch.tensor([sample.reward for sample in samples])
+
+                # Reshape rewards to (num_prompts, n_samples_per_prompt)
+                rewards = rewards.reshape(-1, n_samples_per_prompt)
+
+                # Collect local statistics for each data source
+                local_metrics = {}  # {datasource: {"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}}
+
+                for i, datasource in enumerate(all_datasources):
+                    if datasource not in local_metrics:
+                        local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
+
+                    # Calculate pass@k and pass@1
+                    prompt_rewards = rewards[i]
+                    local_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
+                    local_metrics[datasource]["pass1"] += prompt_rewards.mean().float().item()
+                    local_metrics[datasource]["count"] += 1
+
+                # All gather metrics from all ranks
+                gathered_metrics = [None] * (self.strategy.world_size // self.strategy.ring_attn_size)
+                if self.strategy.ring_attn_group is not None:
+                    # Only rank 0 in ring attention group gathers metrics
+                    torch.distributed.all_gather_object(
+                        gathered_metrics, local_metrics, group=self.experience_maker.ring_rank0_group
+                    )
+                else:
+                    torch.distributed.all_gather_object(gathered_metrics, local_metrics)
+
+                # Only rank0 processes the gathered metrics
+                if self.strategy.is_rank_0():
+                    logger.info(f"Evaluating {len(gathered_metrics)} datasources")
+                    # Combine metrics from all ranks
+                    global_metrics = {}
+                    for rank_metrics in gathered_metrics:
+                        for datasource, metrics in rank_metrics.items():
+                            if datasource not in global_metrics:
+                                global_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
+                            global_metrics[datasource][f"pass{n_samples_per_prompt}"] += metrics[
+                                f"pass{n_samples_per_prompt}"
+                            ]
+                            global_metrics[datasource]["pass1"] += metrics["pass1"]
+                            global_metrics[datasource]["count"] += metrics["count"]
+
+                    # Calculate global averages
+                    logs = {}
+                    for datasource, metrics in global_metrics.items():
+                        logs[f"eval_{datasource}_pass{n_samples_per_prompt}"] = (
+                            metrics[f"pass{n_samples_per_prompt}"] / metrics["count"]
+                        )
+                        logs[f"eval_{datasource}_pass1"] = metrics["pass1"] / metrics["count"]
+
+                    # Log to wandb/tensorboard
+                    if self._wandb is not None:
+                        logger.info(f"Logging to wandb")
+                        # Convert metrics to use eval/ prefix
+                        eval_logs = {"eval/%s" % k: v for k, v in logs.items()}
+                        # Add the epoch counter (different from global_step)
+                        eval_logs["eval/epoch"] = global_step // eval_steps
+                        self._wandb.log(eval_logs)
+                    elif self._tensorboard is not None:
+                        for k, v in logs.items():
+                            self._tensorboard.add_scalar(f"eval/{k}", v, global_step)
+
+        if self.strategy.args.vllm_enable_sleep:
+            batch_vllm_engine_call(self.vllm_engines, "sleep")
+
+        use_prefix_cache = getattr(self.strategy.args, "enable_prefix_caching", False)
+        cache_reset_refs = []
+        if use_prefix_cache and torch.distributed.get_rank() == 0:
+            # clear prefix cache
+            for engine in self.vllm_engines:
+                cache_reset_refs.append(engine.reset_prefix_cache.remote())
+
+        if cache_reset_refs:
+            ray.get(cache_reset_refs)
+        torch.cuda.empty_cache()
+        torch.distributed.barrier()
+
+        end_time = time.time()
+        duration = end_time - start_time
+        if self.strategy.is_rank_0():
+            time_str = str(datetime.timedelta(seconds=duration)).split(".")[0]
+            logger.info(f"✨ Evaluation completed in {time_str}")
+            
+
+    def reload_states(self):
+        reload_deepspeed_states(self.actor.model)
+
+    def offload_states(self):
+        offload_deepspeed_states(self.actor.model)
+
+    def log_rollouts_wandb(self, json_rollouts, episode=None, steps=None, i_experience=None, global_step=None, train_or_eval=None) -> None:
+        if self._wandb is None:
+            return
+        if not self.strategy.is_rank_0():
+            return
+
+        name = "rollouts"
+        if train_or_eval is not None:
+            name += f"-{train_or_eval}"
+        if episode is not None:
+            name += f"-episode-{episode}"
+        if steps is not None:
+            name += f"-steps-{steps}"
+        if i_experience is not None:
+            name += f"-experience-{i_experience}"
+        if global_step is not None:
+            name += f"-global-step-{global_step}"
+
+        try:
+            text_rollouts = json.dumps(json_rollouts)
+            filename = name + ".json"
+        except json.decoder.JSONDecodeError:
+            text_rollouts = str(json_rollouts)
+            filename = name + ".txt"
+
+        # artifact = self._wandb.Artifact(name=name, type="rollouts")
+        # with artifact.new_file(filename) as f:
+        #     f.write(text_rollouts)
+        # self._wandb.log_artifact(artifact)
+
 
 @ray.remote(num_gpus=1)
 class ActorModelRayActor(BasePPORole):
