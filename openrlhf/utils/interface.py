@@ -67,11 +67,6 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
     temperature: float
     max_completion_tokens: int
 
-    # @retry(
-    #     stop=stop_after_attempt(8),
-    #     wait=wait_exponential(multiplier=15, min=1),
-    #     before_sleep=lambda retry_state: print(f"Calling OpenAI API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}", file=stderr)
-    # )
     async def generate_assistant_message(
         self,
         conversation: AgentConversation,
@@ -79,8 +74,26 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
     ) -> None:
         messages = self._merge_tool_and_user_messages(conversation.messages)
 
-        completion_text: str
+        completion_text: str = await self._generate_completion(messages, stop_strings=stop_strings)
 
+        # the together.ai api ignores stop strings
+        # (note: i don't know if it always does or sometimes does)
+        together_ai_api = self.client.base_url is not None and "api.together.xyz" in str(self.client.base_url)
+        if together_ai_api and stop_strings is not None:
+            for stop_string in stop_strings:
+                if stop_string in completion_text:
+                    completion_text = completion_text[: completion_text.index(stop_string)]
+
+        conversation.messages.append({"role": "assistant", "content": completion_text})
+
+    @retry(
+        stop=stop_after_attempt(8),
+        wait=wait_exponential(multiplier=15, min=1),
+        before_sleep=lambda retry_state: print(f"Calling OpenAI or Anthropic API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}", file=stderr)
+    )
+    async def _generate_completion(
+        self, messages: list[Message], stop_strings: list[str] | None
+    ) -> str:
         if isinstance(self.client, AsyncOpenAI):
             completion = await self.client.chat.completions.create(
                 messages=messages,
@@ -90,8 +103,9 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
                 stop=stop_strings,
             )
 
-            completion_text: str = completion.choices[0].message.content
-        elif isinstance(self.client, AsyncAnthropic):
+            return completion.choices[0].message.content
+
+        if isinstance(self.client, AsyncAnthropic):
             completion = await self.client.messages.create(
                 messages=messages[1:] if messages[0]["role"] == "system" else messages,
                 system=[{"type": "text", "text": messages[0]["content"], "cache_control": {"type": "ephemeral"}}]
@@ -103,21 +117,11 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
                 stop_sequences=stop_strings,
             )
 
-            completion_text = completion.content[0].text
-        else:
-            raise TypeError(
-                f"AsyncOpenAIOrAnthropicLLM.client should be of type OpenAI or Anthropic, but found type {type(self.client)}."
-            )
+            return completion.content[0].text
 
-        # the together.ai api ignores stop strings
-        # (note: i don't know if it always does or sometimes does)
-        together_ai_api = self.client.base_url is not None and "api.together.xyz" in str(self.client.base_url)
-        if together_ai_api and stop_strings is not None:
-            for stop_string in stop_strings:
-                if stop_string in completion_text:
-                    completion_text = completion_text[: completion_text.index(stop_string)]
-
-        conversation.messages.append({"role": "assistant", "content": completion_text})
+        raise TypeError(
+            f"AsyncOpenAIOrAnthropicLLM.client should be of type OpenAI or Anthropic, but found type {type(self.client)}."
+        )
 
     def _merge_tool_and_user_messages(self, messages: list[Message]) -> list[Message]:
         merged_messages = []
