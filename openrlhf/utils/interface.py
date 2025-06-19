@@ -94,7 +94,9 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
         elif isinstance(self.client, AsyncAnthropic):
             completion = await self.client.messages.create(
                 messages=messages[1:] if messages[0]["role"] == "system" else messages,
-                system=messages[0]["content"] if messages[0]["role"] == "system" else None,
+                system=[{"type": "text", "text": messages[0]["content"], "cache_control": {"type": "ephemeral"}}]
+                if messages[0]["role"] == "system"
+                else None,
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_completion_tokens,
