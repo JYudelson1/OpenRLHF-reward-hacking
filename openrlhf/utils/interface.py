@@ -61,8 +61,8 @@ class AsyncLLMInterface(ABC):
 
 
 @dataclass(frozen=True)
-class AsyncOpenAILLM(AsyncLLMInterface):
-    client: AsyncOpenAI
+class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
+    client: AsyncOpenAI | AsyncAnthropic
     model: str
     temperature: float
     max_completion_tokens: int
@@ -79,15 +79,33 @@ class AsyncOpenAILLM(AsyncLLMInterface):
     ) -> None:
         messages = self._merge_tool_and_user_messages(conversation.messages)
 
-        completion = await self.client.chat.completions.create(
-            messages=messages,
-            model=self.model,
-            temperature=self.temperature,
-            max_completion_tokens=self.max_completion_tokens,
-            stop=stop_strings,
-        )
+        completion_text: str
 
-        completion_text: str = completion.choices[0].message.content
+        if isinstance(self.client, AsyncAnthropic):
+            completion = await self.client.chat.completions.create(
+                messages=messages,
+                model=self.model,
+                temperature=self.temperature,
+                max_completion_tokens=self.max_completion_tokens,
+                stop=stop_strings,
+            )
+
+            completion_text: str = completion.choices[0].message.content
+        elif isinstance(self.client, AsyncAnthropic):
+            completion = await self.client.messages.create(
+                messages=messages[1:] if messages[0]["role"] == "system" else messages,
+                system=messages[0]["content"] if messages[0]["role"] == "system" else None,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_completion_tokens,
+                stop_sequences=stop_strings,
+            )
+
+            completion_text = completion.content[0].text
+        else:
+            raise TypeError(
+                f"AsyncOpenAIOrAnthropicLLM.client should be of type OpenAI or Anthropic, but found type {type(self.client)}."
+            )
 
         # the together.ai api ignores stop strings
         # (note: i don't know if it always does or sometimes does)
