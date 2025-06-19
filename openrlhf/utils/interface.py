@@ -81,7 +81,7 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
 
         completion_text: str
 
-        if isinstance(self.client, AsyncAnthropic):
+        if isinstance(self.client, AsyncOpenAI):
             completion = await self.client.chat.completions.create(
                 messages=messages,
                 model=self.model,
