@@ -248,12 +248,12 @@ class NaiveReplayBuffer(ABC):
         # for DP
         # mean
         sum_and_count = torch.tensor([items_vector.sum(), num_actions], device=items_vector.device)
-        all_sum, all_count = all_reduce(sum_and_count, "sum", world_size=world_size)
+        all_sum, all_count = all_reduce(sum_and_count, op="sum", world_size=world_size)
         mean = all_sum / all_count
         # std
         if divide_by_std:
             std = ((items_vector - mean).pow(2) * action_masks_vector).sum()
-            all_std = all_reduce(std, "sum", world_size=world_size)
+            all_std = all_reduce(std, op="sum", world_size=world_size)
             rstd = (all_std / all_count).clamp(min=1e-8).rsqrt()
         else:
             rstd = 1
