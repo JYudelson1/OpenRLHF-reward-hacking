@@ -55,6 +55,8 @@ class ActorPPOTrainer(BasePPOTrainer):
         self.remote_rm_url = remote_rm_url
         self.vllm_engines = vllm_engines
         self.critic_train_remote = critic_train_remote
+        
+        self.colocate_all_models = getattr(self.strategy.args, "colocate_all_models", False)
 
         # wandb/tensorboard setting
         self._wandb = None
