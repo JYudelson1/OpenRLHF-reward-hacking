@@ -355,7 +355,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             freezing_actor_steps=self.strategy.args.freezing_actor_steps,
             experience_maker=self.experience_maker,
             actor=self.actor,
-            critic_train_remote=self.strategy.critic_train_remote,
+            critic_train_remote=self.critic_train_remote,
             colocate_all_models=self.strategy.args.colocate_all_models,
             deepspeed_enable_sleep=self.strategy.args.deepspeed_enable_sleep,
             vllm_engines=self.vllm_engines,
