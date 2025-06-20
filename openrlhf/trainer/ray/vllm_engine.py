@@ -15,7 +15,7 @@ from vllm.inputs import TokensPrompt
 from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.interface import AsyncVLLM
 
-from .utils import ray_noset_visible_devices
+from .utils import get_bundle_indices, ray_noset_visible_devices
 
 from openrlhf.rl_envs import SweBenchEnv, DummyEnv
 
