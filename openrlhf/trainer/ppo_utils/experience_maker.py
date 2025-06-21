@@ -1070,20 +1070,8 @@ def add_extra_metrics(
     keys = sorted(list(keys))
 
     for key in keys:
-        key_without_name_clashes = key
-        missing_key_without_name_clashes = key + "/fraction_missing"
-        while key_without_name_clashes in info.keys() or missing_key_without_name_clashes in info.keys():
-            prefix = "this_prefix_removed_a_name_clash/"
-            key_without_name_clashes = prefix + key_without_name_clashes
-            missing_key_without_name_clashes = prefix + missing_key_without_name_clashes
+        metric_list = [(metrics.get(key, 0.0) if metrics is not None else 0.0) for metrics in extra_metrics]
+        is_missing_list = [float(metrics is not None and key in metrics) for metrics in extra_metrics]
 
-        average_metric = mean(
-            metrics[key] for metrics in extra_metrics if metrics is not None and key in metrics.keys()
-        )
-        n_missing = len([metrics for metrics in extra_metrics if metrics is not None and key not in metrics.keys()])
-
-        info[key_without_name_clashes] = torch.tensor([average_metric], device=device)
-
-        if n_missing > 0:
-            fraction_missing = n_missing / len(extra_metrics)
-            info[missing_key_without_name_clashes] = torch.tensor([fraction_missing], device=device)
+        info[f"extra_metrics/{key}"] = torch.tensor(metric_list, device=device)
+        info[f"extra_metrics/{key}/is_missing"] = torch.tensor(is_missing_list, device=device)
