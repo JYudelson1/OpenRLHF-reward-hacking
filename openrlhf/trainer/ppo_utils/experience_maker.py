@@ -981,7 +981,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             solutions=solutions.copy() if solutions[0] is not None else None,
                             pad_len=pad_len,
                             json_rollouts=json_rollouts,
-                            extra_metrics=[output.extra_metrics for output in outputs],
+                            extra_metrics=[output.extra_metrics for output, reward in outputs],
                         )
                     )
                 else:
@@ -1003,7 +1003,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             solutions=solutions.copy() if solutions[0] is not None else None,
                             pad_len=None,
                             json_rollouts=json_rollouts,
-                            extra_metrics=[output.extra_metrics for output in outputs],
+                            extra_metrics=[output.extra_metrics for output, reward in outputs],
                         )
                     )
         return samples_list
