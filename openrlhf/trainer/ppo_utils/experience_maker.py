@@ -1071,7 +1071,7 @@ def add_extra_metrics(
 
     for key in keys:
         metric_list = [(metrics.get(key, 0.0) if metrics is not None else 0.0) for metrics in extra_metrics]
-        is_missing_list = [float(metrics is not None and key in metrics) for metrics in extra_metrics]
+        is_missing_list = [float(metrics is None or key not in metrics.keys()) for metrics in extra_metrics]
 
         info[f"extra_metrics/{key}"] = torch.tensor(metric_list, device=device)
         info[f"extra_metrics/{key}/is_missing"] = torch.tensor(is_missing_list, device=device)
