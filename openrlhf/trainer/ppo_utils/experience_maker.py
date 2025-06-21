@@ -469,7 +469,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 "num_actions": samples.num_actions,
             }
 
-            add_extra_metrics(info, extra_metrics=samples.extra_metrics)
+            add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
 
             if self.strategy.args.perf:
                 self.perf_stats["actor_value_rm_time"] += actor_value_rm_time
@@ -1058,7 +1058,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             self._ref = None
 
 
-def add_extra_metrics(info: dict[str, Any], extra_metrics: list[dict[str, float] | None]) -> None:
+def add_extra_metrics(
+    info: dict[str, Any], extra_metrics: list[dict[str, float] | None], device: torch.device | str
+) -> None:
     keys = set()
     for metrics in extra_metrics:
         if metrics is None:
@@ -1080,7 +1082,8 @@ def add_extra_metrics(info: dict[str, Any], extra_metrics: list[dict[str, float]
         )
         n_missing = len([metrics for metrics in extra_metrics if metrics is not None and key not in metrics.keys()])
 
-        info[key_without_name_clashes] = average_metric
+        info[key_without_name_clashes] = torch.tensor([average_metric], device=device)
+
         if n_missing > 0:
             fraction_missing = n_missing / len(extra_metrics)
-            info[missing_key_without_name_clashes] = fraction_missing
+            info[missing_key_without_name_clashes] = torch.tensor([fraction_missing], device=device)
