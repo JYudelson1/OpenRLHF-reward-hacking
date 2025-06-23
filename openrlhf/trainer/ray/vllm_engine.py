@@ -157,6 +157,9 @@ class LLMRayActor:
             if env_name not in data_by_env:
                 data_by_env[env_name] = []
             data_by_env[env_name].append(item)
+            
+        print(f"Data by env: {data_by_env}")
+        print(f"Env makers: {env_makers}")
         
         async_llm = AsyncVLLM(llm_engine=self.llm_engine, sampling_params=sampling_params)
         
@@ -171,7 +174,7 @@ class LLMRayActor:
             
             # Run all environments simultaneously
             print(f"Tasks: {tasks}")
-            return False
+            assert False
             results = await asyncio.gather(*[task for _, task in tasks])
             
             # Combine results in the same order as the original data
