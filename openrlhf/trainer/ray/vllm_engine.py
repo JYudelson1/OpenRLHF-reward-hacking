@@ -155,7 +155,7 @@ class LLMRayActor:
         # Separate data by filename
         data_by_env = {}
         for item in full_data:
-            env_name = item.get("filename")
+            env_name = item.get("datasource")
             if env_name not in data_by_env:
                 data_by_env[env_name] = []
             data_by_env[env_name].append(item)
@@ -177,7 +177,7 @@ class LLMRayActor:
             # Combine results in the same order as the original data
             all_rollouts = []
             for item in full_data:
-                env_name = item.get("filename")
+                env_name = item.get("datasource")
                 if env_name in env_makers:
                     # Find the corresponding result for this environment
                     for i, (result_env_name, _) in enumerate(tasks):
