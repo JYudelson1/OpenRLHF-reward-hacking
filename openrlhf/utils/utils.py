@@ -110,12 +110,12 @@ def blending_datasets(
                 eval_data = train_eval_split["test"]
                 
                 
-            for data_entry in eval_data:
-                data_entry["datasource"] = dataset_basename
+            for i in range(len(eval_data)):
+                eval_data[i]["datasource"] = dataset_basename
             eval_data_list.append(eval_data)
             
-        for data_entry in train_data:
-            data_entry["datasource"] = dataset_basename
+        for i in range(len(train_data)):
+            train_data[i]["datasource"] = dataset_basename
         train_data_list.append(train_data)
 
     # merge datasets
