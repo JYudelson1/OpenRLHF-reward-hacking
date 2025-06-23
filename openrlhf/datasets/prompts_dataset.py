@@ -61,7 +61,6 @@ class PromptDataset(Dataset):
             prompt, full_data, solution = preprocess_data(data, input_template, input_key, apply_chat_template, multiturn)
             data_entry = {
                 "prompts": prompt,
-                "datasource": self.strategy.args.prompt_data
             }
             if full_data is not None:
                 data_entry["full_data"] = full_data
