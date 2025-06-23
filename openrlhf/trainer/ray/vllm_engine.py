@@ -132,7 +132,7 @@ class LLMRayActor:
 
         self.env_data_for_rollout[rank] = data_for_rank
 
-    def generate_env_rollout(self, rank: int, sampling_params, env_maker) -> list:
+    def generate_env_rollout(self, rank: int, sampling_params, env_makers) -> list:
         print(f"LLMRayActor.generate_env_rollout called with {self=} {rank=}")
 
         if self.rollouts is not None:
@@ -150,12 +150,47 @@ class LLMRayActor:
         if self.truncate_prompt_tokens is not None:
             sampling_params.truncate_prompt_tokens = self.truncate_prompt_tokens
 
-        env = env_maker()
         full_data = sum(self.env_data_for_rollout.values(), [])
+        
+        # Separate data by filename
+        data_by_env = {}
+        for item in full_data:
+            env_name = item.get("filename")
+            if env_name not in data_by_env:
+                data_by_env[env_name] = []
+            data_by_env[env_name].append(item)
+        
         async_llm = AsyncVLLM(llm_engine=self.llm_engine, sampling_params=sampling_params)
-        rollouts = self.async_event_loop.run_until_complete(
-            env.generate_rollouts(llm=async_llm, full_data=full_data)
-        )
+        
+        # Create environments and run them simultaneously
+        async def run_all_environments():
+            tasks = []
+            for env_name, data_for_env in data_by_env.items():
+                if env_name in env_makers:
+                    env = env_makers[env_name]()
+                    task = env.generate_rollouts(llm=async_llm, full_data=data_for_env)
+                    tasks.append((env_name, task))
+            
+            # Run all environments simultaneously
+            results = await asyncio.gather(*[task for _, task in tasks])
+            
+            # Combine results in the same order as the original data
+            all_rollouts = []
+            for item in full_data:
+                env_name = item.get("filename")
+                if env_name in env_makers:
+                    # Find the corresponding result for this environment
+                    for i, (result_env_name, _) in enumerate(tasks):
+                        if result_env_name == env_name:
+                            # Find the corresponding item in the result
+                            env_data = data_by_env[env_name]
+                            item_index = env_data.index(item)
+                            all_rollouts.append(results[i][item_index])
+                            break
+            
+            return all_rollouts
+        
+        rollouts = self.async_event_loop.run_until_complete(run_all_environments())
 
         """
         env = env_maker(

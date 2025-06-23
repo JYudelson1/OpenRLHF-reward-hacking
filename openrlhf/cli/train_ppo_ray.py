@@ -462,9 +462,8 @@ if __name__ == "__main__":
 
     # RL environment paramaters
     # Multiturn RL only
-    parser.add_argument("--env_file", type=str, default=None, help="Path to the environment file")
-    parser.add_argument("--env_class", type=str, default=None, help="Name of the environment class")
-    parser.add_argument("--env_args_file", type=str, default=None, help="Path to the environment arguments file")
+    parser.add_argument("--envs_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment classes")
+    parser.add_argument("--envs_args_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment arguments")
 
     # TensorBoard parameters
     parser.add_argument("--use_tensorboard", type=str, default=None, help="TensorBoard logging path")
@@ -517,17 +516,24 @@ if __name__ == "__main__":
         assert args.vllm_num_engines > 0, "Only support `--packing_samples` with vLLM."
         assert not args.pretrain_data, "`--pretrain_data` is not supported with `--packing_samples` yet."
 
-    if args.env_file and args.env_class:
+    if args.envs_file:
         sys.path.insert(0, os.getcwd())
-        env = importlib.import_module(args.env_file)
-        env = getattr(env, args.env_class)
         
-        env_args = {}
-        if args.env_args_file:
-            with open(args.env_args_file, "r") as f:
-                env_args = json.load(f)
+        env_makers = {}
+        args.env_makers = {}
         
-        args.env_maker = lambda *args, **kwargs: env(*args, **{**env_args, **kwargs})
+        with open(args.envs_file, "r") as f:
+            env_names_to_classes = json.load(f)
+            
+        if args.envs_args_file:
+            with open(args.envs_args_file, "r") as f:
+                env_args_by_filename = json.load(f)
+        
+        for filename in env_names_to_classes.keys():
+            env_makers[filename] = importlib.import_module(env_names_to_classes["env_folder"])
+            env_makers[filename] = getattr(env_makers[filename], env_names_to_classes[filename]["env_class"])
+        
+            args.env_makers[filename] = lambda *args, **kwargs: env_makers[filename](*args, **{**env_args_by_filename.get(filename, {}), **kwargs})
 
     if args.vllm_enable_sleep and not args.colocate_all_models:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
