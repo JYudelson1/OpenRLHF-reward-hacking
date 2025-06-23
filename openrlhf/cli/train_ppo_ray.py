@@ -478,7 +478,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_cpus", type=int, default=-1, help="Maximum number of CPUs to use for multiple environments running"
     )
-    parser.add_argument("--eval_ratio", type=float, default=0.03, help="Fraction of samples to use for evaluation")
     
     args = parser.parse_args()
 
