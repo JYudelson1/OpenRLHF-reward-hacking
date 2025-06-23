@@ -527,13 +527,15 @@ if __name__ == "__main__":
             
         if args.envs_args_file:
             with open(args.envs_args_file, "r") as f:
-                env_args_by_filename = json.load(f)
+                env_args_by_classname = json.load(f)
         
         for filename in env_names_to_classes.keys():
-            env_makers[filename] = importlib.import_module(env_names_to_classes["env_folder"])
-            env_makers[filename] = getattr(env_makers[filename], env_names_to_classes[filename]["env_class"])
+            folder_name = env_names_to_classes[filename]["env_folder"]
+            class_name = env_names_to_classes[filename]["env_class"]
+            env_module = importlib.import_module(folder_name)
+            env_maker = getattr(env_module, class_name)
         
-            args.env_makers[filename] = lambda *args, **kwargs: env_makers[filename](*args, **{**env_args_by_filename.get(filename, {}), **kwargs})
+            args.env_makers[filename] = lambda *args, **kwargs: env_maker(*args, **{**env_args_by_classname.get(class_name, {}), **kwargs})
 
     if args.vllm_enable_sleep and not args.colocate_all_models:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
