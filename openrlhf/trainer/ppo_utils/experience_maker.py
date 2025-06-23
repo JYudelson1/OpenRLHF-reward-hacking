@@ -999,9 +999,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         return samples_list
 
     def _generate_vllm_bare(self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params):
-        print(
-            f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
-        )
+        # print(
+        #     f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
+        # )
 
         has_environment = vars(self.strategy.args).get("env_file", False)
         batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)

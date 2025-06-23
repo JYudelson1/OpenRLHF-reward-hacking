@@ -210,7 +210,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                     if i == 0:
                         output = self.tokenizer.batch_decode(
                             experience.sequences[0].unsqueeze(0), skip_special_tokens=True
-                        )
+                        )[0]
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
 
@@ -660,38 +660,49 @@ class ActorPPOTrainer(BasePPOTrainer):
                     all_prompts.extend(prompts)
                     all_datasources.extend([p.get("datasource", "") for p in prompts])
                     
-                # Logging
-                logger.info(f"Evaluating {len(all_prompts)} prompts")
-
-                # Generate samples and calculate rewards
-                generate_kwargs = self.generate_kwargs.copy()
-                generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
+                batch_size = self.strategy.args.rollout_batch_size
+                num_eval_steps = len(all_prompts) // batch_size
                 
-                samples = self.experience_maker.generate_samples(all_prompts, **generate_kwargs)
-
-                self.log_rollouts_wandb([sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval")
-
-                # Calculate rewards
-                if samples[0].reward is None:
-                    assert False, "Reward model and remote reward are not currently supported with evaluations"
-                else:
-                    rewards = torch.tensor([sample.reward for sample in samples])
-
-                # Reshape rewards to (num_prompts, n_samples_per_prompt)
-                rewards = rewards.reshape(-1, n_samples_per_prompt)
+                assert len(all_prompts) % batch_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
 
                 # Collect local statistics for each data source
                 local_metrics = {}  # {datasource: {"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}}
 
-                for i, datasource in enumerate(all_datasources):
-                    if datasource not in local_metrics:
-                        local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
+                for batch_idx in range(num_eval_steps):
+                    start_idx = batch_idx * batch_size
+                    end_idx = start_idx + batch_size
+                    batch_prompts = all_prompts[start_idx:end_idx]
+                    batch_datasources = all_datasources[start_idx:end_idx]
+                    
+                    # Logging
+                    logger.info(f"Evaluating {len(batch_prompts)} prompts")
 
-                    # Calculate pass@k and pass@1
-                    prompt_rewards = rewards[i]
-                    local_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
-                    local_metrics[datasource]["pass1"] += prompt_rewards.mean().float().item()
-                    local_metrics[datasource]["count"] += 1
+                    # Generate samples and calculate rewards
+                    generate_kwargs = self.generate_kwargs.copy()
+                    generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
+                    
+                    samples = self.experience_maker.generate_samples(batch_prompts, **generate_kwargs)
+
+                    self.log_rollouts_wandb([sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval")
+
+                    # Calculate rewards
+                    if samples[0].reward is None:
+                        assert False, "Reward model and remote reward are not currently supported with evaluations"
+                    else:
+                        rewards = torch.tensor([sample.reward for sample in samples])
+
+                    # Reshape rewards to (num_prompts, n_samples_per_prompt)
+                    rewards = rewards.reshape(-1, n_samples_per_prompt)
+                    
+                    for i, datasource in enumerate(batch_datasources):
+                        if datasource not in local_metrics:
+                            local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
+
+                        # Calculate pass@k and pass@1
+                        prompt_rewards = rewards[i]
+                        local_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
+                        local_metrics[datasource]["pass1"] += prompt_rewards.mean().float().item()
+                        local_metrics[datasource]["count"] += 1
 
                 # All gather metrics from all ranks
                 gathered_metrics = [None] * (self.strategy.world_size // self.strategy.ring_attn_size)
@@ -741,13 +752,24 @@ class ActorPPOTrainer(BasePPOTrainer):
         if self.strategy.args.vllm_enable_sleep:
             batch_vllm_engine_call(self.vllm_engines, "sleep")
 
+        use_prefix_cache = getattr(self.strategy.args, "enable_prefix_caching", False)
+        cache_reset_refs = []
+        if use_prefix_cache and torch.distributed.get_rank() == 0:
+            # clear prefix cache
+            for engine in self.vllm_engines:
+                cache_reset_refs.append(engine.reset_prefix_cache.remote())
+
+        if cache_reset_refs:
+            ray.get(cache_reset_refs)
         torch.cuda.empty_cache()
+        torch.distributed.barrier()
 
         end_time = time.time()
         duration = end_time - start_time
         if self.strategy.is_rank_0():
             time_str = str(datetime.timedelta(seconds=duration)).split(".")[0]
             logger.info(f"✨ Evaluation completed in {time_str}")
+            
 
     def reload_states(self):
         reload_deepspeed_states(self.actor.model)
@@ -780,10 +802,10 @@ class ActorPPOTrainer(BasePPOTrainer):
             text_rollouts = str(json_rollouts)
             filename = name + ".txt"
 
-        artifact = self._wandb.Artifact(name=name, type="rollouts")
-        with artifact.new_file(filename) as f:
-            f.write(text_rollouts)
-        self._wandb.log_artifact(artifact)
+        # artifact = self._wandb.Artifact(name=name, type="rollouts")
+        # with artifact.new_file(filename) as f:
+        #     f.write(text_rollouts)
+        # self._wandb.log_artifact(artifact)
 
 
 @ray.remote(num_gpus=1)

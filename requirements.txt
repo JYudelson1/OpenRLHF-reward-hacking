@@ -3,7 +3,7 @@ bitsandbytes
 datasets
 deepspeed==0.16.5
 einops
-flash-attn==2.7.4.post1
+flash-attn
 isort
 jsonlines
 loralib
@@ -12,15 +12,16 @@ optree>=0.13.0
 packaging
 peft
 pynvml>=12.0.0
-ray[default]==2.44.0
+ray[default]==2.45.0
 tensorboard
 torch
 torchmetrics
 tqdm
-transformers==4.50.0
+transformers==4.51.1
 transformers_stream_generator
 wandb
 wheel
 anthropic
 openai
 tenacity
+plotly

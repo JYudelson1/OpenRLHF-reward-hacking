@@ -1,4 +1,5 @@
 from itertools import pairwise
+import asyncio
 import json
 import os
 from time import perf_counter
@@ -12,8 +13,9 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from vllm.inputs import TokensPrompt
 
 from openrlhf.utils.logging_utils import init_logger
+from openrlhf.utils.interface import AsyncVLLM
 
-from .utils import ray_noset_visible_devices
+from .utils import get_bundle_indices, ray_noset_visible_devices
 
 from openrlhf.rl_envs import SweBenchEnv, DummyEnv
 
@@ -84,30 +86,38 @@ class LLMRayActor:
             # https://github.com/vllm-project/vllm/blob/effc5d24fae10b29996256eb7a88668ff7941aed/examples/offline_inference/reproduciblity.py#L11
             os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
-        self.llm = vllm.LLM(*args, **kwargs)
+        # self.llm = vllm.LLM(*args, **kwargs)
+        self.async_event_loop = asyncio.new_event_loop()
+        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(vllm.AsyncEngineArgs(*args, **kwargs))
 
         self.rollouts = None
 
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray):
-        return self.llm.collective_rpc(
-            "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+        return self.async_event_loop.run_until_complete(
+            self.llm_engine.collective_rpc(
+                "init_process_group",
+                args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+            )
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        return self.async_event_loop.run_until_complete(
+            self.llm_engine.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
+        )
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        return self.async_event_loop.run_until_complete(
+            self.llm_engine.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        )
 
     def reset_prefix_cache(self):
-        self.llm.llm_engine.reset_prefix_cache()
+        self.async_event_loop.run_until_complete(self.llm_engine.reset_prefix_cache())
 
     def sleep(self, level=1):
-        self.llm.sleep(level=level)
+        self.async_event_loop.run_until_complete(self.llm_engine.sleep(level=level))
 
     def wake_up(self):
-        self.llm.wake_up()
+        self.async_event_loop.run_until_complete(self.llm_engine.wake_up())
 
     def reset_rollout_cache(self) -> None:
         self.env_data_for_rollout = {}
@@ -135,10 +145,24 @@ class LLMRayActor:
             "You must call LLMRayActor.remember_env_data_for_rollout for each rank before calling LLMRayActor.generate_env_rollout"
         )
 
+        # TO DO: truncate_prompt_tokens should only be in sampling_params
+        # assert self.truncate_prompt_tokens == sampling_params.truncate_prompt_tokens
+        if self.truncate_prompt_tokens is not None:
+            sampling_params.truncate_prompt_tokens = self.truncate_prompt_tokens
+
+        env = env_maker()
+        full_data = sum(self.env_data_for_rollout.values(), [])
+        async_llm = AsyncVLLM(llm_engine=self.llm_engine, sampling_params=sampling_params)
+        rollouts = self.async_event_loop.run_until_complete(
+            env.generate_rollouts(llm=async_llm, full_data=full_data)
+        )
+
+        """
         env = env_maker(
             full_data=sum(self.env_data_for_rollout.values(), []),
             sampling_params=sampling_params,
-            llm_engine=self.llm,
+            llm_engine=self.llm_engine,
+            async_event_loop=self.async_event_loop,
             mongo_uri=self.mongo_uri,
             mongo_db_name=self.mongo_db_name,
             mongo_collection_name=self.mongo_collection_name,
@@ -146,6 +170,7 @@ class LLMRayActor:
         )
 
         rollouts = env.generate_many()
+        """
 
         self.rollouts = {
             rank: rollouts[i:j]
@@ -221,12 +246,12 @@ def create_vllm_engines(
     for i in range(num_engines):
         bundle_indices = None
         if tensor_parallel_size > 1:
-            bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
+            bundle_indices = get_bundle_indices(shared_pg, i, tensor_parallel_size)
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=shared_pg,
             placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=i * tensor_parallel_size,
+            placement_group_bundle_index=bundle_indices[0] if bundle_indices else i,
         )
 
         if num_engines >= num_total_actors:
