@@ -157,9 +157,6 @@ class LLMRayActor:
             if env_name not in data_by_env:
                 data_by_env[env_name] = []
             data_by_env[env_name].append(item)
-            
-        print(f"Data by env: {data_by_env.keys()}")
-        print(f"Env makers: {env_makers}")
         
         async_llm = AsyncVLLM(llm_engine=self.llm_engine, sampling_params=sampling_params)
         
