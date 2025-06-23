@@ -1037,7 +1037,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             outputs = ray.get(
                 [
                     llm.generate_env_rollout.remote(
-                        rank=rank, sampling_params=sampling_params, env_maker=self.strategy.args.env_makers
+                        rank=rank, sampling_params=sampling_params, env_makers=self.strategy.args.env_makers
                     )
                     for llm in llms
                 ]
