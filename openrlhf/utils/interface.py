@@ -50,6 +50,18 @@ class AgentConversation:
     n_tokens: int = 0
     n_assistant_tokens: int = 0
     was_truncated: bool = False
+    extra_metrics: dict[str, float] | None = None
+    error: bool = False
+
+    def add_error_to_extra_metrics(self) -> None:
+        if self.extra_metrics is None:
+            self.extra_metrics = {}
+
+        key_with_no_name_clashes = "n_errors"
+        while key_with_no_name_clashes in self.extra_metrics.keys():
+            key_with_no_name_clashes = "this_prefix_removed_a_name_clash/" + key_with_no_name_clashes
+
+        self.extra_metrics[key_with_no_name_clashes] = float(self.error)
 
 
 class AsyncLLMInterface(ABC):
@@ -89,11 +101,12 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
     @retry(
         stop=stop_after_attempt(8),
         wait=wait_exponential(multiplier=15, min=1),
-        before_sleep=lambda retry_state: print(f"Calling OpenAI or Anthropic API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}", file=stderr)
+        before_sleep=lambda retry_state: print(
+            f"Calling OpenAI or Anthropic API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}",
+            file=stderr,
+        ),
     )
-    async def _generate_completion(
-        self, messages: list[Message], stop_strings: list[str] | None
-    ) -> str:
+    async def _generate_completion(self, messages: list[Message], stop_strings: list[str] | None) -> str:
         if isinstance(self.client, AsyncOpenAI):
             completion = await self.client.chat.completions.create(
                 messages=messages,
@@ -301,7 +314,6 @@ async def _vllm_chat_with_truncation(
             continue
         assert finished_output is None
         finished_output = output
-        print(f"{llm_engine=} {prompt=} {sampling_params=} {request_id=} {lora_request=} {output=}")
 
     assert finished_output is not None
 
@@ -366,6 +378,10 @@ class AgentInterface(ABC):
         NOTE: This should not include length penalty!"""
         pass
 
+    @abstractmethod
+    async def get_extra_metrics(self, messages: list[Message], state: AgentState) -> dict[str, float]:
+        pass
+
     async def generate_rollouts(
         self, llm: AsyncLLMInterface, full_data: list[dict]
     ) -> list[tuple[AgentConversation, Reward]]:
@@ -376,7 +392,9 @@ class AgentInterface(ABC):
             self.num_errors += 1
             self.errors.append(f"Error in init_all_states: {str(e)}")
             logger.error(f"Error in init_all_states: {str(e)}")
-            return [(AgentConversation(), -1.0) for _ in range(len(full_data))]
+            return [
+                (AgentConversation(extra_metrics={"n_errors": 1.0}, error=True), -1.0) for _ in range(len(full_data))
+            ]
 
         results = await asyncio.gather(
             *[
@@ -408,8 +426,13 @@ class AgentInterface(ABC):
             self.num_errors += 1
             self.errors.append(f"Error in cleanup_all_states: {str(e)}")
             logger.error(f"Error in cleanup_all_states: {str(e)}")
+            for conversation, reward, stats, state in results:
+                conversation.error = True
 
-        return [(conversation, reward) for conversation, reward, stats, _ in results]
+        for conversation, reward, stats, state in results:
+            conversation.add_error_to_extra_metrics()
+
+        return [(conversation, reward) for conversation, reward, stats, state in results]
 
     async def _generate_single_rollout(
         self, llm: AsyncLLMInterface, initial_state: AgentState, time_init_env_started: float
@@ -431,6 +454,7 @@ class AgentInterface(ABC):
                 self.num_errors += 1
                 self.errors.append(f"Error in get_next_prompt: {str(e)}")
                 logger.error(f"Error in get_next_prompt: {str(e)} {traceback.format_exc()}")
+                conversation.error = True
                 break
 
             if new_messages is None:
@@ -447,6 +471,7 @@ class AgentInterface(ABC):
                 self.num_errors += 1
                 self.errors.append(f"Error in is_done: {str(e)}")
                 logger.error(f"Error in is_done: {str(e)}")
+                conversation.error = True
                 break
 
             if is_done:
@@ -466,12 +491,25 @@ class AgentInterface(ABC):
             self.num_errors += 1
             self.errors.append(f"Error in get_reward: {str(e)}")
             logger.error(f"Error in get_reward: {str(e)}")
+            conversation.error = True
             # Treat error as -1.0
             reward = -1.0
 
         stats.on_finish()
 
         reward -= self.length_penalty * conversation.n_assistant_tokens
+
+        try:
+            extra_metrics = await self.get_extra_metrics(messages=conversation.messages, state=state)
+            assert isinstance(extra_metrics, dict)
+            assert all(isinstance(key, str) for key in extra_metrics.keys())
+            assert all(isinstance(value, float) for value in extra_metrics.values())
+            conversation.extra_metrics = extra_metrics
+        except Exception as e:
+            self.num_errors += 1
+            self.errors.append(f"Error in get_extra_metrics {str(e)}")
+            logger.error(f"Error in get_extra_metrics {str(e)}")
+            conversation.error = True
 
         return conversation, reward, stats, state
 

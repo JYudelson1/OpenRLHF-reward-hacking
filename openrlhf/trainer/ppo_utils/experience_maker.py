@@ -3,7 +3,8 @@ from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import List, Optional, Tuple, Union
+from statistics import mean
+from typing import List, Optional, Tuple, Union, Any
 
 import ray
 import torch
@@ -125,6 +126,7 @@ class Samples:
     solutions: Optional[List[str]]
     pad_len: Optional[int]
     json_rollouts: list | None = None
+    extra_metrics: list[dict[str, float] | None] = None
 
 
 class BaseExperienceMaker(ABC):
@@ -467,6 +469,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 "num_actions": samples.num_actions,
             }
 
+            add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
+
             if self.strategy.args.perf:
                 self.perf_stats["actor_value_rm_time"] += actor_value_rm_time
                 self.perf_stats["wait_time"] += wait_time
@@ -799,7 +803,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             sampling_params=sampling_params,
         )
 
-        json_rollouts = [{"rollout": conversation.messages, "reward": reward} for conversation, reward in all_outputs]
+        json_rollouts = [
+            {"rollout": conversation.messages, "reward": reward, "extra_metrics": conversation.extra_metrics}
+            for conversation, reward in all_outputs
+        ]
 
         # Waiting for all requests to be sent
         if self.strategy.ring_attn_group is not None:
@@ -874,6 +881,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         solutions=solutions.copy() if solutions[0] is not None else None,
                         pad_len=None,
                         json_rollouts=json_rollouts,
+                        extra_metrics=[output.extra_metrics for output in outputs],
                     )
                 )
             else:
@@ -973,6 +981,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             solutions=solutions.copy() if solutions[0] is not None else None,
                             pad_len=pad_len,
                             json_rollouts=json_rollouts,
+                            extra_metrics=[output.extra_metrics for output, reward in outputs],
                         )
                     )
                 else:
@@ -994,6 +1003,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             solutions=solutions.copy() if solutions[0] is not None else None,
                             pad_len=None,
                             json_rollouts=json_rollouts,
+                            extra_metrics=[output.extra_metrics for output, reward in outputs],
                         )
                     )
         return samples_list
@@ -1046,3 +1056,22 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if self.critic is not None:
             ray.get(self._ref)
             self._ref = None
+
+
+def add_extra_metrics(
+    info: dict[str, Any], extra_metrics: list[dict[str, float] | None], device: torch.device | str
+) -> None:
+    keys = set()
+    for metrics in extra_metrics:
+        if metrics is None:
+            continue
+        for key in metrics.keys():
+            keys.add(key)
+    keys = sorted(list(keys))
+
+    for key in keys:
+        metric_list = [(metrics.get(key, 0.0) if metrics is not None else 0.0) for metrics in extra_metrics]
+        is_missing_list = [float(metrics is None or key not in metrics.keys()) for metrics in extra_metrics]
+
+        info[f"extra_metrics/{key}"] = torch.tensor(metric_list, device=device)
+        info[f"extra_metrics/{key}/is_missing"] = torch.tensor(is_missing_list, device=device)
