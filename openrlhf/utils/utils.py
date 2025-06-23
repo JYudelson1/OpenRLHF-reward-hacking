@@ -101,7 +101,6 @@ def blending_datasets(
         for data_entry in train_data:
             data_entry["datasource"] = dataset_basename
 
-            
         train_data_list.append(train_data)
 
         if return_eval:
@@ -118,6 +117,10 @@ def blending_datasets(
     if strategy.is_rank_0():
         print(train_data_list)
         
+    for dataset in train_data_list:
+        first = dataset[0]
+        print(f"First entry: {first}")
+    assert False
 
     train_dataset = interleave_datasets(
         train_data_list,
