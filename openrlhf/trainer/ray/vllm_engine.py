@@ -17,8 +17,6 @@ from openrlhf.utils.interface import AsyncVLLM
 
 from .utils import get_bundle_indices, ray_noset_visible_devices
 
-from openrlhf.rl_envs import SweBenchEnv, DummyEnv
-
 logger = init_logger(__name__)
 
 
