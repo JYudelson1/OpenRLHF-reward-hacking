@@ -111,7 +111,10 @@ def blending_datasets(
                 
                 
             for i in range(len(eval_data)):
+                print(f"Eval data entry: {eval_data[i]}")
                 eval_data[i]["datasource"] = dataset_basename
+                print(f"Eval data entry: {eval_data[i]}")
+                assert False
             eval_data_list.append(eval_data)
             
         for i in range(len(train_data)):
