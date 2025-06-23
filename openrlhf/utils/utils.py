@@ -99,10 +99,8 @@ def blending_datasets(
             train_data = data.select(range(min(max_count, len(data))))
         
         for data_entry in train_data:
-            print(f"Data entry: {data_entry}")
             data_entry["datasource"] = dataset_basename
-            print(f"Data entry: {data_entry}")
-            assert False
+
             
         train_data_list.append(train_data)
 
