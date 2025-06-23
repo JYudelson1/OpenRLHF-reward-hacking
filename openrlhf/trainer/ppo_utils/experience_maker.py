@@ -1013,7 +1013,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         #     f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
         # )
 
-        has_environment = vars(self.strategy.args).get("env_file", False)
+        has_environment = vars(self.strategy.args).get("envs_file", False)
         batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
 
         if has_environment:

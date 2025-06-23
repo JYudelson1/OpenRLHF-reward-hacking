@@ -168,7 +168,7 @@ def train(args):
         critic_model = None
 
     # multiple reward models
-    if not args.remote_rm_url and not args.env_file:
+    if not args.remote_rm_url and not args.envs_file:
         reward_pretrains = args.reward_pretrain.split(",")
         assert len(reward_pretrains) == 1, "Only one reward model is supported"
         reward_models = []
@@ -190,7 +190,7 @@ def train(args):
     if ref_model is not None:
         refs.extend(ref_model.async_init_model_from_pretrained(strategy, args.pretrain))
     refs.extend(actor_model.async_init_model_from_pretrained(strategy, args.pretrain))
-    if not args.remote_rm_url and not args.env_file:
+    if not args.remote_rm_url and not args.envs_file:
         for reward_model, reward_pretrain in zip(reward_models, reward_pretrains):
             refs.extend(reward_model.async_init_model_from_pretrained(strategy, reward_pretrain))
 
@@ -211,7 +211,7 @@ def train(args):
         args.remote_rm_url,
         reward_fn=reward_fn,
         vllm_engines=vllm_engines,
-        using_env=args.env_file is not None,
+        using_env=args.envs_file is not None,
     )
     ray.get(refs)
 
@@ -484,7 +484,7 @@ if __name__ == "__main__":
     if args.advantage_estimator not in ["gae"]:
         args.critic_pretrain = None
     elif args.critic_pretrain is None:
-        if not args.remote_rm_url and not args.env_file:
+        if not args.remote_rm_url and not args.envs_file:
             args.critic_pretrain = args.reward_pretrain.split(",")[0]
         else:
             args.critic_pretrain = args.pretrain
