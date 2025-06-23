@@ -172,6 +172,8 @@ class LLMRayActor:
                     tasks.append((env_name, task))
             
             # Run all environments simultaneously
+            print(f"Tasks: {tasks}")
+            return False
             results = await asyncio.gather(*[task for _, task in tasks])
             
             # Combine results in the same order as the original data
