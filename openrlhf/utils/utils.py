@@ -97,10 +97,14 @@ def blending_datasets(
             train_data = data[train_split].select(range(min(max_count, len(data[train_split]))))
         else:
             train_data = data.select(range(min(max_count, len(data))))
-        train_data_list.append(train_data)
         
         for data_entry in train_data:
+            print(f"Data entry: {data_entry}")
             data_entry["datasource"] = dataset_basename
+            print(f"Data entry: {data_entry}")
+            assert False
+            
+        train_data_list.append(train_data)
 
         if return_eval:
             if eval_split and eval_split in data:
