@@ -98,10 +98,7 @@ def blending_datasets(
         else:
             train_data = data.select(range(min(max_count, len(data))))
         
-        for data_entry in train_data:
-            data_entry["datasource"] = dataset_basename
-
-        train_data_list.append(train_data)
+        
 
         if return_eval:
             if eval_split and eval_split in data:
@@ -109,9 +106,17 @@ def blending_datasets(
             else:
                 # Create eval split from train data and remove those samples from train
                 train_eval_split = train_data.train_test_split(test_size=eval_ratio, seed=seed)
-                train_data_list[-1] = train_eval_split["train"]  # Replace train data with reduced set
+                train_data = train_eval_split["train"]  # Replace train data with reduced set
                 eval_data = train_eval_split["test"]
+                
+                
+            for data_entry in eval_data:
+                data_entry["datasource"] = dataset_basename
             eval_data_list.append(eval_data)
+            
+        for data_entry in train_data:
+            data_entry["datasource"] = dataset_basename
+        train_data_list.append(train_data)
 
     # merge datasets
     if strategy.is_rank_0():
