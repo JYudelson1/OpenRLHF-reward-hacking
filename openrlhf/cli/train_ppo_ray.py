@@ -527,8 +527,11 @@ if __name__ == "__main__":
         if args.envs_args_file:
             with open(args.envs_args_file, "r") as f:
                 env_args_by_classname = json.load(f)
+                
+        dataset_names = args.prompt_data.split(",")
+        dataset_basenames = [filename.split("/")[-1] for filename in dataset_names]
         
-        for filename in env_names_to_classes.keys():
+        for filename in dataset_basenames:
             folder_name = env_names_to_classes[filename]["env_folder"]
             class_name = env_names_to_classes[filename]["env_class"]
             env_module = importlib.import_module(folder_name)
