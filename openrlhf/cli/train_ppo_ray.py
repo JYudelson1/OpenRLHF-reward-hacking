@@ -1,5 +1,6 @@
 import argparse
 from datetime import datetime
+from functools import partial
 from typing import List
 import importlib
 import ray
@@ -537,7 +538,10 @@ if __name__ == "__main__":
             env_module = importlib.import_module(folder_name)
             env_maker = getattr(env_module, class_name)
         
-            args.env_makers[filename] = lambda *args, **kwargs: env_maker(*args, **{**env_args_by_classname.get(class_name, {}), **kwargs})
+            args.env_makers[filename] = partial(
+                env_maker, 
+                **env_args_by_classname.get(class_name, {})
+            )
             
         print(f"Env makers: {args.env_makers}")
         print(f"Env names to classes: {env_names_to_classes}")
