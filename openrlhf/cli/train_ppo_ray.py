@@ -535,6 +535,9 @@ if __name__ == "__main__":
             env_maker = getattr(env_module, class_name)
         
             args.env_makers[filename] = lambda *args, **kwargs: env_maker(*args, **{**env_args_by_classname.get(class_name, {}), **kwargs})
+            
+        print(f"Env makers: {args.env_makers}")
+        print(f"Env names to classes: {env_names_to_classes}")
 
     if args.vllm_enable_sleep and not args.colocate_all_models:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
