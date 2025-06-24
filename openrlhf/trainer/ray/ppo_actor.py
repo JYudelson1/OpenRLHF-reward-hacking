@@ -652,36 +652,22 @@ class ActorPPOTrainer(BasePPOTrainer):
         if self.strategy.ring_attn_group is None or self.strategy.ring_attn_rank == 0:
 
             with torch.no_grad():
-                # First collect all prompts and labels
-                all_prompts = []
-                all_datasources = []
-                
-                for prompts in iter(eval_dataloader):
-                    all_prompts.extend(prompts)
-                    all_datasources.extend([p.get("datasource", "") for p in prompts])
-                    
-                batch_size = self.strategy.args.rollout_batch_size
-                num_eval_steps = len(all_prompts) // batch_size
-                
-                assert len(all_prompts) % batch_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
 
                 # Collect local statistics for each data source
                 local_metrics = {}  # {datasource: {"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}}
-
-                for batch_idx in range(num_eval_steps):
-                    start_idx = batch_idx * batch_size
-                    end_idx = start_idx + batch_size
-                    batch_prompts = all_prompts[start_idx:end_idx]
-                    batch_datasources = all_datasources[start_idx:end_idx]
+                
+                for prompts in iter(eval_dataloader):
+                    datasources = [p.get("datasource", "") for p in prompts]
+                    assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
                     
                     # Logging
-                    logger.info(f"Evaluating {len(batch_prompts)} prompts")
+                    logger.info(f"Evaluating {len(prompts)} prompts")
 
                     # Generate samples and calculate rewards
                     generate_kwargs = self.generate_kwargs.copy()
                     generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
                     
-                    samples = self.experience_maker.generate_samples(batch_prompts, **generate_kwargs)
+                    samples = self.experience_maker.generate_samples(prompts, **generate_kwargs)
 
                     self.log_rollouts_wandb([sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval")
 
@@ -694,7 +680,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                     # Reshape rewards to (num_prompts, n_samples_per_prompt)
                     rewards = rewards.reshape(-1, n_samples_per_prompt)
                     
-                    for i, datasource in enumerate(batch_datasources):
+                    for i, datasource in enumerate(datasources):
                         if datasource not in local_metrics:
                             local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
 

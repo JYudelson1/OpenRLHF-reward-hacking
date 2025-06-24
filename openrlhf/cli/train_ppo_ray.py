@@ -168,7 +168,7 @@ def train(args):
         critic_model = None
 
     # multiple reward models
-    if not args.remote_rm_url and not args.env_file:
+    if not args.remote_rm_url and not args.envs_file:
         reward_pretrains = args.reward_pretrain.split(",")
         assert len(reward_pretrains) == 1, "Only one reward model is supported"
         reward_models = []
@@ -190,7 +190,7 @@ def train(args):
     if ref_model is not None:
         refs.extend(ref_model.async_init_model_from_pretrained(strategy, args.pretrain))
     refs.extend(actor_model.async_init_model_from_pretrained(strategy, args.pretrain))
-    if not args.remote_rm_url and not args.env_file:
+    if not args.remote_rm_url and not args.envs_file:
         for reward_model, reward_pretrain in zip(reward_models, reward_pretrains):
             refs.extend(reward_model.async_init_model_from_pretrained(strategy, reward_pretrain))
 
@@ -211,7 +211,7 @@ def train(args):
         args.remote_rm_url,
         reward_fn=reward_fn,
         vllm_engines=vllm_engines,
-        using_env=args.env_file is not None,
+        using_env=args.envs_file is not None,
     )
     ray.get(refs)
 
@@ -462,9 +462,8 @@ if __name__ == "__main__":
 
     # RL environment paramaters
     # Multiturn RL only
-    parser.add_argument("--env_file", type=str, default=None, help="Path to the environment file")
-    parser.add_argument("--env_class", type=str, default=None, help="Name of the environment class")
-    parser.add_argument("--env_args_file", type=str, default=None, help="Path to the environment arguments file")
+    parser.add_argument("--envs_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment classes")
+    parser.add_argument("--envs_args_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment arguments")
 
     # TensorBoard parameters
     parser.add_argument("--use_tensorboard", type=str, default=None, help="TensorBoard logging path")
@@ -485,7 +484,7 @@ if __name__ == "__main__":
     if args.advantage_estimator not in ["gae"]:
         args.critic_pretrain = None
     elif args.critic_pretrain is None:
-        if not args.remote_rm_url and not args.env_file:
+        if not args.remote_rm_url and not args.envs_file:
             args.critic_pretrain = args.reward_pretrain.split(",")[0]
         else:
             args.critic_pretrain = args.pretrain
@@ -516,17 +515,26 @@ if __name__ == "__main__":
         assert args.vllm_num_engines > 0, "Only support `--packing_samples` with vLLM."
         assert not args.pretrain_data, "`--pretrain_data` is not supported with `--packing_samples` yet."
 
-    if args.env_file and args.env_class:
+    if args.envs_file:
         sys.path.insert(0, os.getcwd())
-        env = importlib.import_module(args.env_file)
-        env = getattr(env, args.env_class)
         
-        env_args = {}
-        if args.env_args_file:
-            with open(args.env_args_file, "r") as f:
-                env_args = json.load(f)
+        env_makers = {}
+        args.env_makers = {}
         
-        args.env_maker = lambda *args, **kwargs: env(*args, **{**env_args, **kwargs})
+        with open(args.envs_file, "r") as f:
+            env_names_to_classes = json.load(f)
+            
+        if args.envs_args_file:
+            with open(args.envs_args_file, "r") as f:
+                env_args_by_classname = json.load(f)
+        
+        for filename in env_names_to_classes.keys():
+            folder_name = env_names_to_classes[filename]["env_folder"]
+            class_name = env_names_to_classes[filename]["env_class"]
+            env_module = importlib.import_module(folder_name)
+            env_maker = getattr(env_module, class_name)
+        
+            args.env_makers[filename] = lambda *args, **kwargs: env_maker(*args, **{**env_args_by_classname.get(class_name, {}), **kwargs})
 
     if args.vllm_enable_sleep and not args.colocate_all_models:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")

@@ -1013,7 +1013,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         #     f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
         # )
 
-        has_environment = vars(self.strategy.args).get("env_file", False)
+        has_environment = vars(self.strategy.args).get("envs_file", False)
         batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
 
         if has_environment:
@@ -1037,7 +1037,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             outputs = ray.get(
                 [
                     llm.generate_env_rollout.remote(
-                        rank=rank, sampling_params=sampling_params, env_maker=self.strategy.args.env_maker
+                        rank=rank, sampling_params=sampling_params, env_makers=self.strategy.args.env_makers
                     )
                     for llm in llms
                 ]
