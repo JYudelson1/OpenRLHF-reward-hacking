@@ -165,7 +165,6 @@ class LLMRayActor:
             tasks = []
             for env_name, data_for_env in data_by_env.items():
                 print(f"Creating {env_name} environment with {len(data_for_env)} samples")
-                print(f"First data entry: {data_for_env[0]}")
                 if env_name in env_makers:
                     env = env_makers[env_name]()
                     task = env.generate_rollouts(llm=async_llm, full_data=data_for_env)
