@@ -655,7 +655,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
                 # Collect local statistics for each data source
                 local_metrics = {}  # {datasource: {"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}}
-                
+                all_rewards = []
                 for prompts in iter(eval_dataloader):
                     datasources = [p.get("datasource", "") for p in prompts]
                     assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
@@ -675,20 +675,20 @@ class ActorPPOTrainer(BasePPOTrainer):
                     if samples[0].reward is None:
                         assert False, "Reward model and remote reward are not currently supported with evaluations"
                     else:
-                        rewards = torch.tensor([sample.reward for sample in samples])
+                        all_rewards.extend([sample.reward for sample in samples])
 
-                    # Reshape rewards to (num_prompts, n_samples_per_prompt)
-                    rewards = rewards.reshape(-1, n_samples_per_prompt)
-                    
-                    for i, datasource in enumerate(datasources):
-                        if datasource not in local_metrics:
-                            local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
+                # Reshape rewards to (num_prompts, n_samples_per_prompt)
+                rewards = torch.tensor(all_rewards).reshape(-1, n_samples_per_prompt)
+                
+                for i, datasource in enumerate(datasources):
+                    if datasource not in local_metrics:
+                        local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
 
-                        # Calculate pass@k and pass@1
-                        prompt_rewards = rewards[i]
-                        local_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
-                        local_metrics[datasource]["pass1"] += prompt_rewards.mean().float().item()
-                        local_metrics[datasource]["count"] += 1
+                    # Calculate pass@k and pass@1
+                    prompt_rewards = rewards[i]
+                    local_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
+                    local_metrics[datasource]["pass1"] += prompt_rewards.mean().float().item()
+                    local_metrics[datasource]["count"] += 1
 
                 # All gather metrics from all ranks
                 gathered_metrics = [None] * (self.strategy.world_size // self.strategy.ring_attn_size)
