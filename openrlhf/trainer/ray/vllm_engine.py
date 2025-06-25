@@ -186,7 +186,8 @@ class LLMRayActor:
                             item_index = env_data.index(item)
                             all_rollouts.append(results[i][item_index])
                             break
-            
+                        
+            assert len(all_rollouts) == len(full_data), f"Expected {len(full_data)} rollouts, got {len(all_rollouts)}"
             return all_rollouts
         
         rollouts = self.async_event_loop.run_until_complete(run_all_environments())
