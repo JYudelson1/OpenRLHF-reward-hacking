@@ -515,6 +515,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # get rewards from experiences
         rewards = [experience.info["reward"] for experience in experiences]
+        print('"""BEGIN REWARD DEBUGGING"""')
+        print(f"Rewards: {rewards}")
 
         # reward shaping
         if args.advantage_estimator == "rloo":
@@ -587,6 +589,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             experience.kl = None
             del experience.info["num_actions"]
             experience.to_device("cpu")
+            
+        for i, experience in enumerate(experiences):
+            print(f"Experience {i}:")
+            print(f"\tExperience returns: {experience.returns}")
+            print(f"\tFinal returns: {experience.info['return']}")
+            print(f"\tExperience advantages: {experience.advantages}")
+        print('"""END REWARD DEBUGGING"""')
 
         return experiences
 
