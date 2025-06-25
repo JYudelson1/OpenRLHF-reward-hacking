@@ -656,8 +656,9 @@ class ActorPPOTrainer(BasePPOTrainer):
                 # Collect local statistics for each data source
                 local_metrics = {}  # {datasource: {"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}}
                 all_rewards = []
+                all_datasources = []
                 for prompts in iter(eval_dataloader):
-                    datasources = [p.get("datasource", "") for p in prompts]
+                    all_datasources.extend([p.get("datasource", "") for p in prompts])
                     assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
                     
                     # Logging
@@ -680,7 +681,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 # Reshape rewards to (num_prompts, n_samples_per_prompt)
                 rewards = torch.tensor(all_rewards).reshape(-1, n_samples_per_prompt)
                 
-                for i, datasource in enumerate(datasources):
+                for i, datasource in enumerate(all_datasources):
                     if datasource not in local_metrics:
                         local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
 
