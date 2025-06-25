@@ -174,18 +174,20 @@ class LLMRayActor:
             results = await asyncio.gather(*[task for _, task in tasks])
             
             # Combine results in the same order as the original data
+            count_by_env = {}
+            env_indices = {name: i for i, (name, _) in enumerate(tasks)}
             all_rollouts = []
             for item in full_data:
                 env_name = item.get("datasource")
-                if env_name in env_makers:
-                    # Find the corresponding result for this environment
-                    for i, (result_env_name, _) in enumerate(tasks):
-                        if result_env_name == env_name:
-                            # Find the corresponding item in the result
-                            env_data = data_by_env[env_name]
-                            item_index = env_data.index(item)
-                            all_rollouts.append(results[i][item_index])
-                            break
+                if env_name not in count_by_env:
+                    count_by_env[env_name] = 0
+                
+                env_index = env_indices[env_name]
+                env_results = results[env_index]
+                output = env_results[count_by_env[env_name]]
+                all_rollouts.append(output)
+                
+                count_by_env[env_name] += 1
                         
             assert len(all_rollouts) == len(full_data), f"Expected {len(full_data)} rollouts, got {len(all_rollouts)}"
             return all_rollouts
