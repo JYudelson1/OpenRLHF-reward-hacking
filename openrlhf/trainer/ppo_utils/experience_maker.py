@@ -457,6 +457,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
                 kl = unpacking_samples(kl, num_actions)
                 kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=device)
+                print(f"[DEBUG] KL mean: {kl_mean}")
 
             if not args.use_kl_loss:
                 base_action_log_probs = None
