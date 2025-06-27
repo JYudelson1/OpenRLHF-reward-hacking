@@ -542,11 +542,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             print(f"Lengths shaped: {lengths}")
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
             print(f"Lengths normalized: {lengths}")
+            lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
+            print(f"Lengths penalized: {lengths}")
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
             print(f"Lengths chunked: {lengths}")
             
-            length_penalty = getattr(args, "length_penalty", 1e-6)
-            rewards = rewards + (-1.0 * length_penalty * lengths)
+            rewards = rewards + lengths
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards):
