@@ -536,6 +536,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
             
             lengths = [len(experience.sequences) for experience in experiences]
+            print(f"Lengths: {lengths}")
             lengths = torch.cat(lengths).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
