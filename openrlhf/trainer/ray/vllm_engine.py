@@ -195,11 +195,12 @@ class LLMRayActor:
             return all_rollouts
         
         rollouts = self.async_event_loop.run_until_complete(run_all_environments())
-        mongo_client = MongoClient(self.mongo_uri)
-        db = mongo_client[self.mongo_db_name]
-        collection = db[self.mongo_collection_name]
-        messages = [conversation.messages for (conversation, _) in rollouts]
-        collection.insert_many(messages)
+        if self.mongo_uri is not None and self.mongo_db_name is not None and self.mongo_collection_name is not None:
+            mongo_client = MongoClient(self.mongo_uri)
+            db = mongo_client[self.mongo_db_name]
+            collection = db[self.mongo_collection_name]
+            messages = [conversation.messages for (conversation, _) in rollouts]
+            collection.insert_many(messages)
 
         """
         env = env_maker(
