@@ -535,11 +535,16 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
             
-            lengths = [len(experience.sequences) for experience in experiences]
+            print('"""BEGIN LENGTH PENALTY DEBUGGING"""')
+            print(experiences[0].sequences)
+            lengths = [len(element) for experience in experiences for element in experience.sequences]
             print(f"Lengths: {lengths}")
-            lengths = torch.cat(lengths).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            lengths = torch.tensor(lengths).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            print(f"Lengths: {lengths}")
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
+            print(f"Lengths: {lengths}")
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
+            print(f"Lengths: {lengths}")
             
             length_penalty = getattr(args, "length_penalty", 1e-6)
             rewards = rewards + (-1.0 * length_penalty * lengths)
