@@ -466,6 +466,7 @@ if __name__ == "__main__":
     # Multiturn RL only
     parser.add_argument("--envs_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment classes")
     parser.add_argument("--envs_args_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment arguments")
+    parser.add_argument("--length_penalty", type=float, default=0.0, help="Length penalty for rewards")
 
     # TensorBoard parameters
     parser.add_argument("--use_tensorboard", type=str, default=None, help="TensorBoard logging path")

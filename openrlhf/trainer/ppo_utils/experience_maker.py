@@ -534,6 +534,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
+            
+            lengths = [len(experience.sequences) for experience in experiences]
+            lengths = torch.cat(lengths).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
+            lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
+            
+            length_penalty = getattr(args, "length_penalty", 1e-6)
+            rewards = rewards + (-1.0 * length_penalty * lengths)
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards):
