@@ -491,10 +491,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         if self.pretrain_dataloader is not None:
             status["ptx_loss"] = ptx_loss.item()
 
-        print(
-            "info:",
-            {key: (value.shape if isinstance(value, torch.Tensor) else type(value)) for key, value in experience.info.items()},
-        )
+        print("info:", experience.info)
 
         for k, v in experience.info.items():
             if k == "kl":
