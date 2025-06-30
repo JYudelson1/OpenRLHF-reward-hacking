@@ -98,7 +98,10 @@ def blending_datasets(
         else:
             train_data = data.select(range(min(max_count, len(data))))
         
-        
+        # Add datasource column to data using map
+        def add_datasource(example):
+            example["datasource"] = dataset_basename
+            return example
 
         if return_eval:
             if eval_split and eval_split in data:
@@ -109,20 +112,13 @@ def blending_datasets(
                 train_data = train_eval_split["train"]  # Replace train data with reduced set
                 eval_data = train_eval_split["test"]
                 
-            # Add datasource column to eval_data using map
-            def add_datasource_to_eval(example):
-                example["datasource"] = dataset_basename
-                return example
+
             
-            eval_data = eval_data.map(add_datasource_to_eval)
+            eval_data = eval_data.map(add_datasource)
             eval_data_list.append(eval_data)
-            
-        # Add datasource column to train_data using map
-        def add_datasource_to_train(example):
-            example["datasource"] = dataset_basename
-            return example
+
         
-        train_data = train_data.map(add_datasource_to_train)
+        train_data = train_data.map(add_datasource)
         train_data_list.append(train_data)
 
     # merge datasets
