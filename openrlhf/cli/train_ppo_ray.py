@@ -547,6 +547,14 @@ if __name__ == "__main__":
             
         print(f"Env makers: {args.env_makers}")
         print(f"Env names to classes: {env_names_to_classes}")
+        
+    if args.mongo_uri is not None and args.mongo_db_name is not None and args.mongo_collection_name is None:
+        args.mongo_collection_name = args.wandb_run_name + "_" + datetime.now().strftime("%m%dT%H:%M")
+        # Create a new collection
+        from pymongo import MongoClient
+        mongo_client = MongoClient(args.mongo_uri)
+        db = mongo_client[args.mongo_db_name]
+        db.create_collection(args.mongo_collection_name)
 
     if args.vllm_enable_sleep and not args.colocate_all_models:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
