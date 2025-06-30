@@ -111,8 +111,6 @@ def blending_datasets(
                 train_eval_split = train_data.train_test_split(test_size=eval_ratio, seed=seed)
                 train_data = train_eval_split["train"]  # Replace train data with reduced set
                 eval_data = train_eval_split["test"]
-                
-
             
             eval_data = eval_data.map(add_datasource)
             eval_data_list.append(eval_data)
