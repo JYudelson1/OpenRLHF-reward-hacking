@@ -34,6 +34,7 @@ from .utils import get_physical_gpu_id
 
 logger = logging.getLogger(__name__)
 
+
 class ActorPPOTrainer(BasePPOTrainer):
     def __init__(
         self,
@@ -215,7 +216,9 @@ class ActorPPOTrainer(BasePPOTrainer):
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
 
-                    self.log_rollouts_wandb(experience.json_rollouts, episode=episode, steps=steps, i_experience=i, train_or_eval="train")
+                    self.log_rollouts_wandb(
+                        experience.json_rollouts, episode=episode, steps=steps, i_experience=i, train_or_eval="train"
+                    )
 
                 if self.args.advantage_estimator not in ["group_norm", "dr_grpo"]:
                     self.replay_buffer.normalize(
@@ -319,6 +322,13 @@ class ActorPPOTrainer(BasePPOTrainer):
             for experience in pbar:
                 experience.to_device(device)
                 status = self.training_step(experience)
+                print(
+                    "status:",
+                    {
+                        key: (value.shape if isinstance(value, torch.Tensor) else type(value))
+                        for key, value in status.items()
+                    },
+                )
 
                 # for DP
                 # weighted mean for kl
@@ -628,7 +638,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             if self.critic_train_remote:
                 ray.get(ref)
         torch.distributed.barrier()
-    
+
     def evaluate(self, eval_dataloader, global_step, n_samples_per_prompt=1, eval_steps=1):
         """Evaluate model performance on eval dataset.
 
@@ -651,27 +661,29 @@ class ActorPPOTrainer(BasePPOTrainer):
 
         # Only run evaluation on ring attention rank0
         if self.strategy.ring_attn_group is None or self.strategy.ring_attn_rank == 0:
-
             with torch.no_grad():
-
                 # Collect local statistics for each data source
                 local_metrics = {}  # {datasource: {"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}}
                 all_rewards = []
                 all_datasources = []
                 for prompts in iter(eval_dataloader):
                     all_datasources.extend([p.get("datasource", "") for p in prompts])
-                    assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
-                    
+                    assert len(prompts) % self.strategy.world_size == 0, (
+                        "The number of eval prompts must be divisible by the rollout batch size"
+                    )
+
                     # Logging
                     logger.info(f"Evaluating {len(prompts)} prompts")
 
                     # Generate samples and calculate rewards
                     generate_kwargs = self.generate_kwargs.copy()
                     generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
-                    
+
                     samples = self.experience_maker.generate_samples(prompts, **generate_kwargs)
 
-                    self.log_rollouts_wandb([sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval")
+                    self.log_rollouts_wandb(
+                        [sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval"
+                    )
 
                     # Calculate rewards
                     if samples[0].reward is None:
@@ -681,7 +693,7 @@ class ActorPPOTrainer(BasePPOTrainer):
 
                 # Reshape rewards to (num_prompts, n_samples_per_prompt)
                 rewards = torch.tensor(all_rewards).reshape(-1, n_samples_per_prompt)
-                
+
                 for i, datasource in enumerate(all_datasources):
                     if datasource not in local_metrics:
                         local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
@@ -757,7 +769,6 @@ class ActorPPOTrainer(BasePPOTrainer):
         if self.strategy.is_rank_0():
             time_str = str(datetime.timedelta(seconds=duration)).split(".")[0]
             logger.info(f"✨ Evaluation completed in {time_str}")
-            
 
     def reload_states(self):
         reload_deepspeed_states(self.actor.model)
@@ -765,7 +776,9 @@ class ActorPPOTrainer(BasePPOTrainer):
     def offload_states(self):
         offload_deepspeed_states(self.actor.model)
 
-    def log_rollouts_wandb(self, json_rollouts, episode=None, steps=None, i_experience=None, global_step=None, train_or_eval=None) -> None:
+    def log_rollouts_wandb(
+        self, json_rollouts, episode=None, steps=None, i_experience=None, global_step=None, train_or_eval=None
+    ) -> None:
         if self._wandb is None:
             return
         if not self.strategy.is_rank_0():
@@ -856,7 +869,7 @@ class ActorModelRayActor(BasePPORole):
         )
         max_steps = math.ceil(args.num_episodes * self.num_update_steps_per_episodes)
         self._max_steps = max_steps
-        
+
         if getattr(args, "lr_num_warmup_steps", False):
             num_warmup_steps = args.lr_num_warmup_steps
         else:
@@ -912,7 +925,7 @@ class ActorModelRayActor(BasePPORole):
             max_count=args.max_samples,
             return_eval=args.eval_steps > 0,  # Only get eval split if we're doing evaluation
             train_split=args.prompt_split,
-            eval_ratio=args.eval_ratio
+            eval_ratio=args.eval_ratio,
         )
 
         # Handle train/eval split if needed
@@ -923,27 +936,24 @@ class ActorModelRayActor(BasePPORole):
             train_data = data
 
         # Create train dataset and dataloader (existing code)
-        self.prompts_dataset = PromptDataset(
-            train_data, self.tokenizer, strategy, input_template=args.input_template
-        )
+        self.prompts_dataset = PromptDataset(train_data, self.tokenizer, strategy, input_template=args.input_template)
         self.prompts_dataloader = strategy.setup_dataloader(
             self.prompts_dataset,
             args.rollout_batch_size // (strategy.world_size // strategy.ring_attn_size),
             True,
-            shuffle=True, collate_fn=custom_collate_fn 
+            shuffle=True,
+            collate_fn=custom_collate_fn,
         )
 
         # Create eval dataloader if needed
         if args.eval_steps > 0:
-            self.eval_dataset = PromptDataset(
-                eval_data, self.tokenizer, strategy, input_template=args.input_template
-            )
+            self.eval_dataset = PromptDataset(eval_data, self.tokenizer, strategy, input_template=args.input_template)
             self.eval_dataloader = strategy.setup_dataloader(
                 self.eval_dataset,
                 args.rollout_batch_size // strategy.world_size,
                 True,
                 shuffle=False,  # No need to shuffle eval data
-                collate_fn=custom_collate_fn
+                collate_fn=custom_collate_fn,
             )
         else:
             self.eval_dataloader = None
@@ -961,7 +971,11 @@ class ActorModelRayActor(BasePPORole):
             pretrain_max_len = args.max_len if args.max_len else args.prompt_max_len + args.generate_max_len
             pretrain_dataset = SFTDataset(
                 pretrain_data.select(
-                    range(min(len(pretrain_data), args.max_epochs * len(self.prompts_dataset) * args.n_samples_per_prompt))
+                    range(
+                        min(
+                            len(pretrain_data), args.max_epochs * len(self.prompts_dataset) * args.n_samples_per_prompt
+                        )
+                    )
                 ),
                 self.tokenizer,
                 pretrain_max_len,

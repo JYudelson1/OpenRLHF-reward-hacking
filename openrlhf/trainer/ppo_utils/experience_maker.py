@@ -125,8 +125,9 @@ class Samples:
     reward: Optional[List[float]]
     solutions: Optional[List[str]]
     pad_len: Optional[int]
+    environment_type_indices: list[int]
     json_rollouts: list | None = None
-    extra_metrics: list[dict[str, float] | None] = None
+    extra_metrics: list[dict[str, float] | None] | None = None
 
 
 class BaseExperienceMaker(ABC):
@@ -467,6 +468,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 "response_length": samples.response_length,
                 "total_length": samples.total_length,
                 "num_actions": samples.num_actions,
+                "environment_type_indices": torch.tensor(samples.environment_type_indices, device=device)
             }
 
             add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
@@ -905,6 +907,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         pad_len=None,
                         json_rollouts=json_rollouts,
                         extra_metrics=[output.extra_metrics for output in outputs],
+                        environment_type_indices=[output.environment_type_index for output in outputs]
                     )
                 )
             else:
@@ -1005,6 +1008,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=pad_len,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
+                            environment_type_indices=[output.environment_type_index for output, reward in outputs]
                         )
                     )
                 else:
@@ -1027,6 +1031,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=None,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
+                            environment_type_indices=[output.environment_type_index for output, reward in outputs]
                         )
                     )
         return samples_list

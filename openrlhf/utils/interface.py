@@ -43,6 +43,7 @@ AgentState = Any  # State needed to track conversation progress
 
 @dataclass
 class AgentConversation:
+    environment_type_index: int
     messages: list[Message] = field(default_factory=lambda: [])
     tokens_by_turn: list[dict[str, Any]] = field(default_factory=lambda: [])  # to do: better type hint than Any
     first_prompt_tokens: list[int] = field(default_factory=lambda: [])
@@ -383,7 +384,7 @@ class AgentInterface(ABC):
         pass
 
     async def generate_rollouts(
-        self, llm: AsyncLLMInterface, full_data: list[dict]
+        self, llm: AsyncLLMInterface, full_data: list[dict], environment_type_index: int
     ) -> list[tuple[AgentConversation, Reward]]:
         time_init_env_started = perf_counter()
         try:
@@ -393,13 +394,22 @@ class AgentInterface(ABC):
             self.errors.append(f"Error in init_all_states: {str(e)}")
             logger.error(f"Error in init_all_states: {str(e)}")
             return [
-                (AgentConversation(extra_metrics={"n_errors": 1.0}, error=True), -1.0) for _ in range(len(full_data))
+                (
+                    AgentConversation(
+                        extra_metrics={"n_errors": 1.0}, error=True, environment_type_index=environment_type_index
+                    ),
+                    -1.0,
+                )
+                for _ in range(len(full_data))
             ]
 
         results = await asyncio.gather(
             *[
                 self._generate_single_rollout(
-                    llm=llm, initial_state=state, time_init_env_started=time_init_env_started
+                    llm=llm,
+                    initial_state=state,
+                    time_init_env_started=time_init_env_started,
+                    environment_type_index=environment_type_index,
                 )
                 for state in states
             ]
@@ -435,11 +445,15 @@ class AgentInterface(ABC):
         return [(conversation, reward) for conversation, reward, stats, state in results]
 
     async def _generate_single_rollout(
-        self, llm: AsyncLLMInterface, initial_state: AgentState, time_init_env_started: float
+        self,
+        llm: AsyncLLMInterface,
+        initial_state: AgentState,
+        time_init_env_started: float,
+        environment_type_index: int,
     ) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics(time_init_env_started=time_init_env_started)
 
-        conversation = AgentConversation()
+        conversation = AgentConversation(environment_type_index=environment_type_index)
         state = initial_state
 
         for step in count():
