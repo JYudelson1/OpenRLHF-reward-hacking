@@ -530,6 +530,7 @@ if __name__ == "__main__":
         if args.envs_args_file:
             with open(args.envs_args_file, "r") as f:
                 env_args_by_classname = json.load(f)
+                args.__dict__['env_args_by_classname'] = env_args_by_classname
                 
         dataset_names = args.prompt_data.split(",")
         dataset_basenames = [filename.split("/")[-1] for filename in dataset_names]
