@@ -322,13 +322,6 @@ class ActorPPOTrainer(BasePPOTrainer):
             for experience in pbar:
                 experience.to_device(device)
                 status = self.training_step(experience)
-                print(
-                    "status:",
-                    {
-                        key: (value.shape if isinstance(value, torch.Tensor) else type(value))
-                        for key, value in status.items()
-                    },
-                )
 
                 # for DP
                 # weighted mean for kl
@@ -497,6 +490,12 @@ class ActorPPOTrainer(BasePPOTrainer):
         status = {"policy_loss": actor_loss.item(), "actor_lr": self.actor_scheduler.get_last_lr()[0]}
         if self.pretrain_dataloader is not None:
             status["ptx_loss"] = ptx_loss.item()
+
+        print(
+            "status:",
+            {key: (value.shape if isinstance(value, torch.Tensor) else type(value)) for key, value in status.items()},
+        )
+
         for k, v in experience.info.items():
             if k == "kl":
                 status[k] = (
