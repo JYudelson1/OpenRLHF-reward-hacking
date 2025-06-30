@@ -462,13 +462,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             if not args.use_kl_loss:
                 base_action_log_probs = None
 
+            print("rewards_by_environment:", samples.rewards_by_environment)
+
             info = {
                 "kl": kl_mean,
                 "reward": r,
                 "response_length": samples.response_length,
                 "total_length": samples.total_length,
                 "num_actions": samples.num_actions,
-                # dupa
             }
 
             add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
