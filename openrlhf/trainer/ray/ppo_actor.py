@@ -492,8 +492,8 @@ class ActorPPOTrainer(BasePPOTrainer):
             status["ptx_loss"] = ptx_loss.item()
 
         print(
-            "status:",
-            {key: (value.shape if isinstance(value, torch.Tensor) else type(value)) for key, value in status.items()},
+            "info:",
+            {key: (value.shape if isinstance(value, torch.Tensor) else type(value)) for key, value in experience.info.items()},
         )
 
         for k, v in experience.info.items():
