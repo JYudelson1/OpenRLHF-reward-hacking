@@ -462,8 +462,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             if not args.use_kl_loss:
                 base_action_log_probs = None
 
-            print("rewards_by_environment:", samples.rewards_by_environment)
-
             info = {
                 "kl": kl_mean,
                 "reward": r,
@@ -471,6 +469,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 "total_length": samples.total_length,
                 "num_actions": samples.num_actions,
             }
+
+            for env_name, rewards in samples.rewards_by_environment.items():
+                info[f"reward/{env_name}"] = torch.tensor(rewards, device=device)
 
             add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
 
