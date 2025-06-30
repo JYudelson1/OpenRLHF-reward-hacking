@@ -125,7 +125,7 @@ class Samples:
     reward: Optional[List[float]]
     solutions: Optional[List[str]]
     pad_len: Optional[int]
-    environment_type_indices: list[int]
+    rewards_by_environment: dict[str, torch.Tensor]
     json_rollouts: list | None = None
     extra_metrics: list[dict[str, float] | None] | None = None
 
@@ -468,7 +468,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 "response_length": samples.response_length,
                 "total_length": samples.total_length,
                 "num_actions": samples.num_actions,
-                "environment_type_indices": torch.tensor(samples.environment_type_indices, device=device)
+                # dupa
             }
 
             add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
@@ -536,11 +536,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
-            
+
             print('"""BEGIN LENGTH PENALTY DEBUGGING"""')
             lengths = [len(element) for experience in experiences for element in experience.sequences]
             print(f"Lengths list: {lengths}")
-            lengths = torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            lengths = (
+                torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            )
             print(f"Lengths shaped: {lengths}")
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
             print(f"Lengths normalized: {lengths}")
@@ -548,7 +550,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             print(f"Lengths penalized: {lengths}")
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
             print(f"Lengths chunked: {lengths}")
-            
+
             rewards = rewards + lengths
 
         # calculate return and advantages
@@ -605,7 +607,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             experience.kl = None
             del experience.info["num_actions"]
             experience.to_device("cpu")
-            
+
         for i, experience in enumerate(experiences):
             print(f"Experience {i}:")
             print(f"\tExperience returns: {experience.returns}")
@@ -907,7 +909,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         pad_len=None,
                         json_rollouts=json_rollouts,
                         extra_metrics=[output.extra_metrics for output in outputs],
-                        environment_type_indices=[output.environment_type_index for output in outputs]
                     )
                 )
             else:
@@ -1008,7 +1009,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=pad_len,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
-                            environment_type_indices=[output.environment_type_index for output, reward in outputs]
                         )
                     )
                 else:
@@ -1031,7 +1031,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=None,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
-                            environment_type_indices=[output.environment_type_index for output, reward in outputs]
                         )
                     )
         return samples_list

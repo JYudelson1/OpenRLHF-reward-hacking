@@ -176,7 +176,7 @@ class LLMRayActor:
                     task = env.generate_rollouts(
                         llm=async_llm,
                         full_data=data_for_env,
-                        environment_type_index=sorted(data_by_env.keys()).index(env_name),
+                        env_name=env_name,
                     )
                     tasks.append((env_name, task))
 
