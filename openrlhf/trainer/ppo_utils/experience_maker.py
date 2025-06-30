@@ -909,6 +909,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         pad_len=None,
                         json_rollouts=json_rollouts,
                         extra_metrics=[output.extra_metrics for output in outputs],
+                        rewards_by_environment={
+                            env_name: [reward for output, reward in outputs if output.env_name == env_name]
+                            for env_name in self.strategy.args.env_makers
+                        },
                     )
                 )
             else:
@@ -1009,6 +1013,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=pad_len,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
+                            rewards_by_environment={
+                                env_name: [reward for output, reward in outputs if output.env_name == env_name]
+                                for env_name in self.strategy.args.env_makers
+                            },
                         )
                     )
                 else:
@@ -1031,6 +1039,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=None,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
+                            rewards_by_environment={
+                                env_name: [reward for output, reward in outputs if output.env_name == env_name]
+                                for env_name in self.strategy.args.env_makers
+                            },
                         )
                     )
         return samples_list
