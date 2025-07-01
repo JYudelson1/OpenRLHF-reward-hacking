@@ -125,7 +125,7 @@ class Samples:
     reward: Optional[List[float]]
     solutions: Optional[List[str]]
     pad_len: Optional[int]
-    rewards_by_environment: dict[str, torch.Tensor]
+    env_names: list[str]
     json_rollouts: list | None = None
     extra_metrics: list[dict[str, float] | None] | None = None
 
@@ -470,8 +470,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 "num_actions": samples.num_actions,
             }
 
-            for env_name, rewards in samples.rewards_by_environment.items():
+            for env_name in self.strategy.args.env_makers.keys():
                 info[f"reward/{env_name}"] = torch.tensor(rewards, device=device)
+                info[f"environment_is/{env_name}"] = torch.tensor(
+                    [env_name_ == env_name for env_name_ in samples.env_names], device=device
+                )
 
             add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
 
@@ -896,10 +899,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         pad_len=None,
                         json_rollouts=json_rollouts,
                         extra_metrics=[output.extra_metrics for output in outputs],
-                        rewards_by_environment={
-                            env_name: [reward for output, reward in outputs if output.env_name == env_name]
-                            for env_name in self.strategy.args.env_makers
-                        },
+                        env_names=[output.env_name for output in outputs],
                     )
                 )
             else:
@@ -1000,10 +1000,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=pad_len,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
-                            rewards_by_environment={
-                                env_name: [reward for output, reward in outputs if output.env_name == env_name]
-                                for env_name in self.strategy.args.env_makers
-                            },
+                            env_names=[output.env_name for output, reward in outputs],
                         )
                     )
                 else:
@@ -1026,10 +1023,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=None,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
-                            rewards_by_environment={
-                                env_name: [reward for output, reward in outputs if output.env_name == env_name]
-                                for env_name in self.strategy.args.env_makers
-                            },
+                            env_names=[output.env_name for output, reward in outputs],
                         )
                     )
         return samples_list
