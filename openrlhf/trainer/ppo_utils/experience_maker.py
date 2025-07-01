@@ -473,7 +473,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             for env_name in self.strategy.args.env_makers.keys():
                 info[f"reward/{env_name}"] = torch.tensor(rewards, device=device)
                 info[f"environment_is/{env_name}"] = torch.tensor(
-                    [env_name_ == env_name for env_name_ in samples.env_names], device=device
+                    [float(env_name_ == env_name) for env_name_ in samples.env_names], device=device
                 )
 
             add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
