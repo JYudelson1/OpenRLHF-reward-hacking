@@ -5,7 +5,7 @@ import os
 import socket
 import time, datetime
 import logging
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List
 
 import deepspeed
 import ray
@@ -581,6 +581,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         if global_step % args.logging_steps == 0:
             # wandb
             if self._wandb is not None and self.strategy.is_rank_0():
+                combine_reward_and_environment_is(logs)
                 logs = {
                     "train/%s" % k: v
                     for k, v in {
@@ -1093,3 +1094,13 @@ class ActorModelRayActor(BasePPORole):
 
 def custom_collate_fn(batch):
     return batch
+
+
+def combine_reward_and_environment_is(logs: dict[str, Any]) -> None:
+    print(f"{list(logs.keys())=}")
+    for key in list(logs.keys()):  # copy the list of keys because we modify the dictionary inside the loop
+        if not key.startswith("reward/"):
+            continue
+        environment_is_key = "environment_is/" + key.removeprefix("reward/")
+        logs[key] = logs[key] / logs[environment_is_key]
+        del logs[environment_is_key]
