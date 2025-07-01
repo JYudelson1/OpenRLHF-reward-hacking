@@ -581,7 +581,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         if global_step % args.logging_steps == 0:
             # wandb
             if self._wandb is not None and self.strategy.is_rank_0():
-                combine_reward_and_environment_is(logs)
+                combine_reward_and_environment_is(logs_dict)
                 logs = {
                     "train/%s" % k: v
                     for k, v in {
