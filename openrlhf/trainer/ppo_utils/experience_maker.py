@@ -602,13 +602,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             del experience.info["num_actions"]
             experience.to_device("cpu")
 
-        for i, experience in enumerate(experiences):
-            print(f"Experience {i}:")
-            print(f"\tExperience returns: {experience.returns}")
-            print(f"\tFinal returns: {experience.info['return']}")
-            print(f"\tExperience advantages: {experience.advantages}")
-        print('"""END REWARD DEBUGGING"""')
-
         return experiences
 
     @torch.no_grad()
