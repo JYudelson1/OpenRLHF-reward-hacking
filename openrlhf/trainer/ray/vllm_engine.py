@@ -53,7 +53,7 @@ class LLMRayActor:
             # when the distributed_executor_backend is not ray and
             # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
-            
+
         if kwargs.get("truncate_prompt_tokens") is not None:
             self.truncate_prompt_tokens = kwargs.get("truncate_prompt_tokens")
             del kwargs["truncate_prompt_tokens"]
@@ -88,7 +88,9 @@ class LLMRayActor:
 
         # self.llm = vllm.LLM(*args, **kwargs)
         self.async_event_loop = asyncio.new_event_loop()
-        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(vllm.AsyncEngineArgs(*args, **kwargs, disable_log_requests=True))
+        self.llm_engine = vllm.AsyncLLMEngine.from_engine_args(
+            vllm.AsyncEngineArgs(*args, **kwargs, disable_log_requests=True)
+        )
 
         self.rollouts = None
 
@@ -107,7 +109,9 @@ class LLMRayActor:
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         return self.async_event_loop.run_until_complete(
-            self.llm_engine.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+            self.llm_engine.collective_rpc(
+                "update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache)
+            )
         )
 
     def reset_prefix_cache(self):
@@ -151,7 +155,7 @@ class LLMRayActor:
             sampling_params.truncate_prompt_tokens = self.truncate_prompt_tokens
 
         full_data = sum(self.env_data_for_rollout.values(), [])
-        
+
         # Separate data by filename
         data_by_env = {}
         for item in full_data:
@@ -159,9 +163,9 @@ class LLMRayActor:
             if env_name not in data_by_env:
                 data_by_env[env_name] = []
             data_by_env[env_name].append(item)
-        
+
         async_llm = AsyncVLLM(llm_engine=self.llm_engine, sampling_params=sampling_params)
-        
+
         # Create environments and run them simultaneously
         async def run_all_environments():
             tasks = []
@@ -169,12 +173,16 @@ class LLMRayActor:
                 print(f"Creating {env_name} environment with {len(data_for_env)} samples")
                 if env_name in env_makers:
                     env = env_makers[env_name]()
-                    task = env.generate_rollouts(llm=async_llm, full_data=data_for_env)
+                    task = env.generate_rollouts(
+                        llm=async_llm,
+                        full_data=data_for_env,
+                        env_name=env_name,
+                    )
                     tasks.append((env_name, task))
-            
+
             # Run all environments simultaneously
             results = await asyncio.gather(*[task for _, task in tasks])
-            
+
             # Combine results in the same order as the original data
             count_by_env = {}
             env_indices = {name: i for i, (name, _) in enumerate(tasks)}
@@ -183,17 +191,17 @@ class LLMRayActor:
                 env_name = item.get("datasource")
                 if env_name not in count_by_env:
                     count_by_env[env_name] = 0
-                
+
                 env_index = env_indices[env_name]
                 env_results = results[env_index]
                 output = env_results[count_by_env[env_name]]
                 all_rollouts.append(output)
-                
+
                 count_by_env[env_name] += 1
-                        
+
             assert len(all_rollouts) == len(full_data), f"Expected {len(full_data)} rollouts, got {len(all_rollouts)}"
             return all_rollouts
-        
+
         rollouts = self.async_event_loop.run_until_complete(run_all_environments())
         if self.mongo_uri is not None and self.mongo_db_name is not None and self.mongo_collection_name is not None:
             mongo_client = MongoClient(self.mongo_uri)
@@ -201,21 +209,6 @@ class LLMRayActor:
             collection = db[self.mongo_collection_name]
             messages = [conversation.messages for (conversation, _) in rollouts]
             collection.insert_many(messages)
-
-        """
-        env = env_maker(
-            full_data=sum(self.env_data_for_rollout.values(), []),
-            sampling_params=sampling_params,
-            llm_engine=self.llm_engine,
-            async_event_loop=self.async_event_loop,
-            mongo_uri=self.mongo_uri,
-            mongo_db_name=self.mongo_db_name,
-            mongo_collection_name=self.mongo_collection_name,
-            truncate_prompt_tokens=self.truncate_prompt_tokens,
-        )
-
-        rollouts = env.generate_many()
-        """
 
         self.rollouts = {
             rank: rollouts[i:j]
@@ -225,7 +218,7 @@ class LLMRayActor:
                 strict=True,
             )
         }
-        
+
         self.env_data_for_rollout = {}
 
         return self.rollouts[rank]
@@ -275,7 +268,13 @@ def create_vllm_engines(
         num_gpus = 0.2
 
     if not use_hybrid_engine:
-        if rollout_batch_size is None or n_samples_per_prompt is None or actor_num_nodes is None or actor_num_gpus_per_node is None or max_cpus is None:
+        if (
+            rollout_batch_size is None
+            or n_samples_per_prompt is None
+            or actor_num_nodes is None
+            or actor_num_gpus_per_node is None
+            or max_cpus is None
+        ):
             cpu_per_actor = 1
         else:
             optimal_cpu_amt = rollout_batch_size * n_samples_per_prompt
@@ -331,7 +330,7 @@ def create_vllm_engines(
             mongo_collection_name=mongo_collection_name,
             truncate_prompt_tokens=truncate_prompt_tokens,
         )
-        
+
         vllm_engines.append(engine)
 
     if vllm_enable_sleep:

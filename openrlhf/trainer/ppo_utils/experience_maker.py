@@ -125,8 +125,9 @@ class Samples:
     reward: Optional[List[float]]
     solutions: Optional[List[str]]
     pad_len: Optional[int]
+    env_names: list[str]
     json_rollouts: list | None = None
-    extra_metrics: list[dict[str, float] | None] = None
+    extra_metrics: list[dict[str, float] | None] | None = None
 
 
 class BaseExperienceMaker(ABC):
@@ -469,6 +470,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 "num_actions": samples.num_actions,
             }
 
+            for env_name in self.strategy.args.env_makers.keys():
+                environment_is = torch.tensor(
+                    [env_name_ == env_name for env_name_ in samples.env_names], device=device
+                )
+                info[f"reward/{env_name}"] = torch.where(environment_is, r, torch.zeros_like(r))
+                info[f"environment_is/{env_name}"] = environment_is.float()
+
             add_extra_metrics(info, extra_metrics=samples.extra_metrics, device=device)
 
             if self.strategy.args.perf:
@@ -515,8 +523,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # get rewards from experiences
         rewards = [experience.info["reward"] for experience in experiences]
-        print('"""BEGIN REWARD DEBUGGING"""')
-        print(f"Rewards: {rewards}")
 
         # reward shaping
         if args.advantage_estimator == "rloo":
@@ -534,19 +540,15 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
-            
-            print('"""BEGIN LENGTH PENALTY DEBUGGING"""')
+
             lengths = [len(element) for experience in experiences for element in experience.sequences]
-            print(f"Lengths list: {lengths}")
-            lengths = torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
-            print(f"Lengths shaped: {lengths}")
+            lengths = (
+                torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            )
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
-            print(f"Lengths normalized: {lengths}")
             lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
-            print(f"Lengths penalized: {lengths}")
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
-            print(f"Lengths chunked: {lengths}")
-            
+
             rewards = rewards + lengths
 
         # calculate return and advantages
@@ -603,13 +605,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             experience.kl = None
             del experience.info["num_actions"]
             experience.to_device("cpu")
-            
-        for i, experience in enumerate(experiences):
-            print(f"Experience {i}:")
-            print(f"\tExperience returns: {experience.returns}")
-            print(f"\tFinal returns: {experience.info['return']}")
-            print(f"\tExperience advantages: {experience.advantages}")
-        print('"""END REWARD DEBUGGING"""')
 
         return experiences
 
@@ -905,6 +900,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         pad_len=None,
                         json_rollouts=json_rollouts,
                         extra_metrics=[output.extra_metrics for output in outputs],
+                        env_names=[output.env_name for output in outputs],
                     )
                 )
             else:
@@ -1005,6 +1001,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=pad_len,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
+                            env_names=[output.env_name for output, reward in outputs],
                         )
                     )
                 else:
@@ -1027,6 +1024,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                             pad_len=None,
                             json_rollouts=json_rollouts,
                             extra_metrics=[output.extra_metrics for output, reward in outputs],
+                            env_names=[output.env_name for output, reward in outputs],
                         )
                     )
         return samples_list
