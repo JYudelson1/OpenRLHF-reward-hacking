@@ -491,8 +491,6 @@ class ActorPPOTrainer(BasePPOTrainer):
         if self.pretrain_dataloader is not None:
             status["ptx_loss"] = ptx_loss.item()
 
-        print("info:", experience.info)
-
         for k, v in experience.info.items():
             if k == "kl":
                 status[k] = (
@@ -605,7 +603,6 @@ class ActorPPOTrainer(BasePPOTrainer):
             self.evaluate(self.eval_dataloader, global_step, args.n_samples_per_prompt, args.eval_steps)
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
-        print(f"{args.save_steps=}")
         if global_step % args.save_steps == 0:
             tag = f"global_step{global_step}"
             self._save_checkpoint(args, tag, client_states)
@@ -1097,7 +1094,6 @@ def custom_collate_fn(batch):
 
 
 def combine_reward_and_environment_is(logs: dict[str, Any]) -> None:
-    print(f"{list(logs.keys())=}")
     for key in list(logs.keys()):  # copy the list of keys because we modify the dictionary inside the loop
         if not key.startswith("reward/"):
             continue
