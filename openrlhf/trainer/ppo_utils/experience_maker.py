@@ -394,9 +394,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards_list = rewards_list.chunk(len(samples_list))
 
         # Avoid CUDA OOM when colocate models
+        print("pre-sync")
         if args.colocate_actor_ref or args.colocate_all_models:
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
+        print("post-sync")
 
         # Process results for each sample
         for i, (samples, action_log_probs, base_action_log_probs, value, rewards) in enumerate(
@@ -501,8 +503,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             experiences.append(experience)
 
+        print("504")
         self.actor.train()  # Reset model state
-
+        print("506")
+        
         end_time = time.time()
         duration = end_time - start_time
         if dist.get_rank() == 0:
