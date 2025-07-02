@@ -77,13 +77,13 @@ def train(args):
         cpu_per_actor = optimal_cpu_amt / (args.actor_num_nodes * args.actor_num_gpus_per_node)
 
         bundles = [
-            {"GPU": 1, "CPU": cpu_per_actor} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)
+            {"GPU": 1, "CPU": 1} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)
         ]
-        if args.actor_num_nodes == 1:
-            pack_strategy = "PACK"
-        else:
-           pack_strategy = "SPREAD"
-        pg = placement_group(bundles,strategy=pack_strategy)
+        # if args.actor_num_nodes == 1:
+        #     pack_strategy = "PACK"
+        # else:
+        #    pack_strategy = "SPREAD"
+        pg = placement_group(bundles,strategy="PACK")
         ray.get(pg.ready())
 
     # init vLLM engine for text generation
@@ -153,7 +153,7 @@ def train(args):
             and args.critic_num_gpus_per_node == args.reward_num_gpus_per_node
         ), f"num_nodes and num_gpus_per_node must be the same when colocate critic and reward model."
 
-        bundles = [{"GPU": 1, "CPU": 4} for _ in range(args.critic_num_nodes * args.critic_num_gpus_per_node)]
+        bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.critic_num_nodes * args.critic_num_gpus_per_node)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
