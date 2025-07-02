@@ -372,6 +372,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             ray.get([self.reward_model[0].empty_cache.remote()])
 
         # Batch call actor model
+        print("pre-actor-call")
         action_log_probs_list = []
         for seq, num_acts, attn_mask, packed_lens in zip(
             sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list
@@ -385,6 +386,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 packed_seq_lens=packed_lens,
             )
             action_log_probs_list.append(action_log_probs)
+        print("post-actor-call")
 
         actor_value_rm_time = time.time() - start_time
 
