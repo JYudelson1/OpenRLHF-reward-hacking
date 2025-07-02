@@ -374,9 +374,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Batch call actor model
         print("pre-actor-call")
         action_log_probs_list = []
-        big_iter = zip(
+        big_iter = list(zip(
             sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list
-        )
+        ))
         print(f"big_iter_len: {len(big_iter)}")
         print(f"sequences_cpu_list_len: {len(sequences_cpu_list)}")
         print(f"num_actions_list_len: {len(num_actions_list)}")
