@@ -246,9 +246,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if self.strategy.args.vllm_enable_sleep:
             batch_vllm_engine_call(self.vllm_engines, "sleep")
 
+        print("pre-empty-cache")
         torch.cuda.empty_cache()
         torch.distributed.barrier()
         torch.cuda.synchronize()
+        print("post-empty-cache")
 
         # Make experiences (models forward: logprobs, values, rewards, and kl divergence)
         experiences = self.make_experience(samples_list)
