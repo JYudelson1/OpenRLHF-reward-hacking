@@ -291,6 +291,7 @@ def create_vllm_engines(
         bundle_indices = None
         if tensor_parallel_size > 1:
             bundle_indices = get_bundle_indices(shared_pg, i, tensor_parallel_size)
+        print(f"bundle_indices={bundle_indices} for engine {i}")
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=shared_pg,
