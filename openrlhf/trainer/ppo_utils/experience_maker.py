@@ -384,7 +384,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # Wait for all remote calls to complete
         start = time.time()
+        print(f"Waiting for {len(r_refs)} refs to complete")
         ref_values = ray.get([base_action_log_probs_ref, value_ref] + r_refs)
+        print("Ref values were gotten!!")
         wait_time = time.time() - start
 
         base_action_log_probs_list, value_list, rewards_list = ref_values[0], ref_values[1], ref_values[2]
