@@ -253,10 +253,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         print("post-empty-cache")
 
         # Make experiences (models forward: logprobs, values, rewards, and kl divergence)
+        print("pre-make-experience")
         experiences = self.make_experience(samples_list)
+        print("post-make-experience")
 
         # Process experiences (reward shaping, etc.)
+        print("pre-compute-advantages-and-returns")
         experiences = self.compute_advantages_and_returns(experiences, **generate_kwargs)
+        print("post-compute-advantages-and-returns")
 
         # send experience to critic
         if self.critic is not None:
