@@ -385,7 +385,7 @@ class AgentInterface(ABC):
     
     async def get_reward_in_eval(self, messages: List[Message], state: AgentState) -> Reward:
         """Get the eval reward for the conversation. Used if the train reward may reflect a different thing than what we'd like to measure"""
-        return self.get_reward(messages, state)
+        return await self.get_reward(messages, state)
 
     async def generate_rollouts(
         self, llm: AsyncLLMInterface, full_data: list[dict], env_name: str, is_eval: bool = False
