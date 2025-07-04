@@ -136,7 +136,7 @@ class LLMRayActor:
 
         self.env_data_for_rollout[rank] = data_for_rank
 
-    def generate_env_rollout(self, rank: int, sampling_params, env_makers) -> list:
+    def generate_env_rollout(self, rank: int, sampling_params, env_makers, is_eval: bool = False) -> list:
         print(f"LLMRayActor.generate_env_rollout called with {self=} {rank=}")
 
         if self.rollouts is not None:
@@ -177,6 +177,7 @@ class LLMRayActor:
                         llm=async_llm,
                         full_data=data_for_env,
                         env_name=env_name,
+                        is_eval=is_eval,
                     )
                     tasks.append((env_name, task))
 

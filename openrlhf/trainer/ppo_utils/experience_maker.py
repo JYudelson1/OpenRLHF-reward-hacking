@@ -723,7 +723,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         return returns
 
     @torch.no_grad()
-    def generate_samples(self, all_prompts: List[str], **generate_kwargs) -> List[Samples]:
+    def generate_samples(self, all_prompts: List[str], is_eval: bool = False, **generate_kwargs) -> List[Samples]:
         """
         Generate samples and return in batches.
 
@@ -734,7 +734,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             return self._generate_with_hf(all_prompts, **generate_kwargs)
 
         # vLLM generation
-        return self._generate_vllm(all_prompts, **generate_kwargs)
+        return self._generate_vllm(all_prompts, is_eval=is_eval, **generate_kwargs)
 
     @torch.no_grad()
     def _generate_with_hf(self, all_examples: List[dict], **generate_kwargs) -> List[Samples]:
@@ -770,7 +770,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             samples_list.append(samples)
         return samples_list
 
-    def _generate_vllm(self, all_examples: List[dict], **kwargs) -> List[Samples]:
+    def _generate_vllm(self, all_examples: List[dict], is_eval: bool = False, **kwargs) -> List[Samples]:
         from vllm import SamplingParams
 
         all_prompts = [example["prompts"] for example in all_examples]
@@ -819,6 +819,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             all_full_data=all_full_data,
             llms=llms,
             sampling_params=sampling_params,
+            is_eval=is_eval,
         )
 
         json_rollouts = [
@@ -1029,7 +1030,15 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     )
         return samples_list
 
-    def _generate_vllm_bare(self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params):
+    def _generate_vllm_bare(self, 
+                            rank, 
+                            world_size, 
+                            all_prompt_token_ids, 
+                            all_full_data, 
+                            llms, 
+                            sampling_params, 
+                            is_eval: bool = False
+    ):
         # print(
         #     f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
         # )
@@ -1058,7 +1067,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             outputs = ray.get(
                 [
                     llm.generate_env_rollout.remote(
-                        rank=rank, sampling_params=sampling_params, env_makers=self.strategy.args.env_makers
+                        rank=rank, 
+                        sampling_params=sampling_params, 
+                        env_makers=self.strategy.args.env_makers, 
+                        is_eval=is_eval
                     )
                     for llm in llms
                 ]

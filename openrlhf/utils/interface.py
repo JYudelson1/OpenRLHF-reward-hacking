@@ -382,9 +382,13 @@ class AgentInterface(ABC):
     @abstractmethod
     async def get_extra_metrics(self, messages: list[Message], state: AgentState) -> dict[str, float]:
         pass
+    
+    async def get_reward_in_eval(self, messages: List[Message], state: AgentState) -> Reward:
+        """Get the eval reward for the conversation. Used if the train reward may reflect a different thing than what we'd like to measure"""
+        return self.get_reward(messages, state)
 
     async def generate_rollouts(
-        self, llm: AsyncLLMInterface, full_data: list[dict], env_name: str
+        self, llm: AsyncLLMInterface, full_data: list[dict], env_name: str, is_eval: bool = False
     ) -> list[tuple[AgentConversation, Reward]]:
         time_init_env_started = perf_counter()
         try:
@@ -404,7 +408,7 @@ class AgentInterface(ABC):
         results = await asyncio.gather(
             *[
                 self._generate_single_rollout(
-                    llm=llm, initial_state=state, time_init_env_started=time_init_env_started, env_name=env_name
+                    llm=llm, initial_state=state, time_init_env_started=time_init_env_started, env_name=env_name, is_eval=is_eval
                 )
                 for state in states
             ]
@@ -440,7 +444,7 @@ class AgentInterface(ABC):
         return [(conversation, reward) for conversation, reward, stats, state in results]
 
     async def _generate_single_rollout(
-        self, llm: AsyncLLMInterface, initial_state: AgentState, time_init_env_started: float, env_name: str
+        self, llm: AsyncLLMInterface, initial_state: AgentState, time_init_env_started: float, env_name: str, is_eval: bool = False
     ) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics(time_init_env_started=time_init_env_started)
 
@@ -491,7 +495,10 @@ class AgentInterface(ABC):
 
         stats.on_computing_reward_start()
         try:
-            reward = await self.get_reward(messages=conversation.messages, state=state)
+            if is_eval:
+                reward = await self.get_reward_in_eval(messages=conversation.messages, state=state)
+            else:
+                reward = await self.get_reward(messages=conversation.messages, state=state)
         except Exception as e:
             self.num_errors += 1
             self.errors.append(f"Error in get_reward: {str(e)}")

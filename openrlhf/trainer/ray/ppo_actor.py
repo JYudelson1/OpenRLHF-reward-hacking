@@ -671,7 +671,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                     generate_kwargs = self.generate_kwargs.copy()
                     generate_kwargs["n_samples_per_prompt"] = n_samples_per_prompt
 
-                    samples = self.experience_maker.generate_samples(prompts, **generate_kwargs)
+                    samples = self.experience_maker.generate_samples(prompts, is_eval=True, **generate_kwargs)
 
                     self.log_rollouts_wandb(
                         [sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval"
