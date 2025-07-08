@@ -579,9 +579,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = rewards + lengths
 
         rewards_missing = torch.cat(rewards_missing).reshape(-1, args.n_samples_per_prompt)
+        print(f"{rewards=} {rewards_missing=}")
         rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
 
-        print(f"{rewards=} {rewards_missing=}")
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards):
