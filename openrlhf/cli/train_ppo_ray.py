@@ -538,6 +538,8 @@ if __name__ == "__main__":
         for filename in dataset_basenames:
             folder_name = env_names_to_classes[filename]["env_folder"]
             class_name = env_names_to_classes[filename]["env_class"]
+            
+            sys.path.insert(0, folder_name) # To make this work if the env is in a subfolder
             env_module = importlib.import_module(folder_name)
             env_maker = getattr(env_module, class_name)
         
