@@ -283,7 +283,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         packed_seq_lens_list = [s.packed_seq_lens for s in samples_list]
         solutions_list = [s.solutions for s in samples_list]
         pre_calc_rewards_list = [s.reward for s in samples_list]
-        print(f"{pre_calc_rewards_list=}")
 
         # Move data to CPU for remote processing
         sequences_cpu_list = [seq.to("cpu") for seq in sequences_list]
@@ -488,12 +487,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             if not args.use_kl_loss:
                 base_action_log_probs = None
 
-            print(f"{r=} {rewards_missing=}")
-
             info = {
                 "kl": kl_mean,
                 "reward": r,
-                # "reward_missing": reward_missing,
+                "reward_missing": rewards_missing,
                 "response_length": samples.response_length,
                 "total_length": samples.total_length,
                 "num_actions": samples.num_actions,
@@ -552,6 +549,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # get rewards from experiences
         rewards = [experience.info["reward"] for experience in experiences]
+        rewards_missing = [experience.info["reward_missing"] for experience in experiences]
 
         # reward shaping
         if args.advantage_estimator == "rloo":
@@ -579,6 +577,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
 
             rewards = rewards + lengths
+
+        rewards_missing = torch.cat(rewards_missing).reshape(-1, args.n_samples_per_prompt)
+        rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
+
+        print(f"{rewards=} {rewards_missing=}")
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards):

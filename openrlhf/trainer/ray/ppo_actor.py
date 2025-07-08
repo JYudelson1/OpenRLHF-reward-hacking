@@ -662,8 +662,10 @@ class ActorPPOTrainer(BasePPOTrainer):
                 all_datasources = []
                 for prompts in iter(eval_dataloader):
                     all_datasources.extend([p.get("full_data", {}).get("datasource", "") for p in prompts])
-                    assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
-                    
+                    assert len(prompts) % self.strategy.world_size == 0, (
+                        "The number of eval prompts must be divisible by the rollout batch size"
+                    )
+
                     # Logging
                     logger.info(f"Evaluating {len(prompts)} prompts")
 
@@ -680,13 +682,22 @@ class ActorPPOTrainer(BasePPOTrainer):
                     all_rewards.extend([sample.reward for sample in samples])
 
                 # Reshape rewards to (num_prompts, n_samples_per_prompt)
-                rewards_or_zero = [(reward if reward is not None else 0.0) for reward in all_rewards]
+                rewards_or_zero = [
+                    [(reward if reward is not None else 0.0) for reward in rewards] for rewards in all_rewards
+                ]
                 rewards = torch.tensor([rewards_or_zero]).reshape(-1, n_samples_per_prompt)
-                rewards_missing = torch.tensor([reward is None for reward in rewards]).reshape(-1, n_samples_per_prompt)
+                rewards_missing = torch.tensor([reward is None for reward in rewards]).reshape(
+                    -1, n_samples_per_prompt
+                )
 
                 for i, datasource in enumerate(all_datasources):
                     if datasource not in local_metrics:
-                        local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0, "reward_missing": 0}
+                        local_metrics[datasource] = {
+                            f"pass{n_samples_per_prompt}": 0,
+                            "pass1": 0,
+                            "count": 0,
+                            "reward_missing": 0,
+                        }
 
                     # Calculate pass@k and pass@1
                     prompt_rewards = rewards[i]
@@ -714,7 +725,12 @@ class ActorPPOTrainer(BasePPOTrainer):
                     for rank_metrics in gathered_metrics:
                         for datasource, metrics in rank_metrics.items():
                             if datasource not in global_metrics:
-                                global_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0, "reward_missing": 0}
+                                global_metrics[datasource] = {
+                                    f"pass{n_samples_per_prompt}": 0,
+                                    "pass1": 0,
+                                    "count": 0,
+                                    "reward_missing": 0,
+                                }
                             global_metrics[datasource][f"pass{n_samples_per_prompt}"] += metrics[
                                 f"pass{n_samples_per_prompt}"
                             ]
