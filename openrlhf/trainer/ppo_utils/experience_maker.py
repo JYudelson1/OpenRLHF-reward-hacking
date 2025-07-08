@@ -554,31 +554,31 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # reward shaping
         if args.advantage_estimator == "rloo":
-            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt)
             baseline = (rewards.sum(-1, keepdim=True) - rewards) / (args.n_samples_per_prompt - 1)
             rewards = rewards - baseline
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
-            rewards = rewards.flatten().to(device="cpu").chunk(len(experiences))
+            rewards = rewards.flatten().chunk(len(experiences))
         elif args.advantage_estimator in ["reinforce_baseline", "dr_grpo"]:
             # REINFORCE++-baseline and Dr. GRPO removed the `/std` in GRPO as `/ std` is not needed in RL variance reduction theory.
             # And `k3 KL` has a larger variance than `k1 KL` under a categorical distribution.
-            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt)
             rewards = rewards - rewards.mean(-1, keepdim=True)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
-            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
+            rewards = rewards.reshape(-1).chunk(len(experiences))
         elif args.advantage_estimator == "grpo":
-            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt)
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
-            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
+            rewards = rewards.reshape(-1).chunk(len(experiences))
 
             lengths = [len(element) for experience in experiences for element in experience.sequences]
             lengths = (
-                torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+                torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt)
             )
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
             lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
-            lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
+            lengths = lengths.reshape(-1).chunk(len(experiences))
 
             rewards = rewards + lengths
 
