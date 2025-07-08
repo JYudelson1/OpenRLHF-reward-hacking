@@ -497,7 +497,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                     (v * experience.info["response_length"]).sum() / experience.info["response_length"].sum()
                 ).item()
             else:
-                status[k] = v.mean().item()
+                status[k] = v.float().mean().item()
         return status
 
     def _broadcast_to_vllm(self):
