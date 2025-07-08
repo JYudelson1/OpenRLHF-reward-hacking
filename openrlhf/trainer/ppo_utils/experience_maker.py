@@ -323,7 +323,19 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         r_refs = []
         if pre_calc_rewards_list[0] is not None:
             print("Using environment rewards...")
-            r_refs.append(ray.put([torch.tensor(pre_calc_reward) for pre_calc_reward in pre_calc_rewards_list]))
+            r_refs.append(
+                ray.put(
+                    [
+                        torch.tensor([(r if r is not None else 0.0) for r in pre_calc_reward])
+                        for pre_calc_reward in pre_calc_rewards_list
+                    ]
+                )
+            )
+            r_refs.append(
+                ray.put(
+                    [torch.tensor([(r is None) for r in pre_calc_reward]) for pre_calc_reward in pre_calc_rewards_list]
+                )
+            )
         elif not self.remote_rm_url:
             for rm in self.reward_model:
                 r_refs.append(
@@ -388,7 +400,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         ref_values = ray.get([base_action_log_probs_ref, value_ref] + r_refs)
         wait_time = time.time() - start
 
-        base_action_log_probs_list, value_list, rewards_list = ref_values[0], ref_values[1], ref_values[2]
+        base_action_log_probs_list, value_list, rewards_list, rewards_missing_list = (
+            ref_values[0],
+            ref_values[1],
+            ref_values[2],
+            ref_values[3],
+        )
         if self.remote_rm_url is not None and isinstance(rewards_list, torch.Tensor):
             rewards_list = rewards_list.chunk(len(samples_list))
 
@@ -398,8 +415,16 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             torch.cuda.empty_cache()
 
         # Process results for each sample
-        for i, (samples, action_log_probs, base_action_log_probs, value, rewards) in enumerate(
-            zip(samples_list, action_log_probs_list, base_action_log_probs_list, value_list, rewards_list)
+        for i, (samples, action_log_probs, base_action_log_probs, value, rewards, rewards_missing) in enumerate(
+            zip(
+                samples_list,
+                action_log_probs_list,
+                base_action_log_probs_list,
+                value_list,
+                rewards_list,
+                rewards_missing_list,
+                strict=True,
+            )
         ):
             if base_action_log_probs is not None:
                 base_action_log_probs = base_action_log_probs.to(device)
@@ -463,12 +488,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             if not args.use_kl_loss:
                 base_action_log_probs = None
 
-            print(f"{rewards_list=} {r=}")
+            print(f"{r=} {rewards_missing=}")
 
             info = {
                 "kl": kl_mean,
                 "reward": r,
-                "reward_missing": reward_missing,
+                # "reward_missing": reward_missing,
                 "response_length": samples.response_length,
                 "total_length": samples.total_length,
                 "num_actions": samples.num_actions,
