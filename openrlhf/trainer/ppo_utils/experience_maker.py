@@ -1070,9 +1070,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         rank=rank, 
                         sampling_params=sampling_params, 
                         env_makers=self.strategy.args.env_makers, 
-                        is_eval=is_eval
+                        is_eval=is_eval,
+                        vllm_engine_index=i,
                     )
-                    for llm in llms
+                    for i, llm in enumerate(llms)
                 ]
             )
 

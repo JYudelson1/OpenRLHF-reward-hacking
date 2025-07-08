@@ -136,8 +136,8 @@ class LLMRayActor:
 
         self.env_data_for_rollout[rank] = data_for_rank
 
-    def generate_env_rollout(self, rank: int, sampling_params, env_makers, is_eval: bool = False) -> list:
-        print(f"LLMRayActor.generate_env_rollout called with {self=} {rank=}")
+    def generate_env_rollout(self, rank: int, sampling_params, env_makers, is_eval: bool = False, vllm_engine_index: int = 0) -> list:
+        print(f"LLMRayActor.generate_env_rollout called with {self=} {rank=} {vllm_engine_index=}")
 
         if self.rollouts is not None:
             return self.rollouts[rank]
@@ -172,7 +172,7 @@ class LLMRayActor:
             for env_name, data_for_env in data_by_env.items():
                 print(f"Creating {env_name} environment with {len(data_for_env)} samples")
                 if env_name in env_makers:
-                    env = env_makers[env_name](vllm_engine_index=rank)
+                    env = env_makers[env_name](vllm_engine_index=vllm_engine_index)
                     task = env.generate_rollouts(
                         llm=async_llm,
                         full_data=data_for_env,
