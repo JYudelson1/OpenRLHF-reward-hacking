@@ -283,6 +283,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         packed_seq_lens_list = [s.packed_seq_lens for s in samples_list]
         solutions_list = [s.solutions for s in samples_list]
         pre_calc_rewards_list = [s.reward for s in samples_list]
+        print(f"{pre_calc_rewards_list=}")
 
         # Move data to CPU for remote processing
         sequences_cpu_list = [seq.to("cpu") for seq in sequences_list]
