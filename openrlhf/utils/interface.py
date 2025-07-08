@@ -329,6 +329,7 @@ class AgentInterface(ABC):
         max_steps: int | None = None,
         stop_on_truncation: bool = False,
         save_rollout_time_statistics_directory: str | None = "/root/rollout-time-statistics/",
+        vllm_engine_index: int = 0,
     ) -> None:
         assert length_penalty >= 0
         self.length_penalty = length_penalty
@@ -338,6 +339,7 @@ class AgentInterface(ABC):
         self.save_rollout_time_statistics_directory = save_rollout_time_statistics_directory
         self.num_errors = 0
         self.errors = []
+        self.vllm_engine_index = vllm_engine_index
 
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
