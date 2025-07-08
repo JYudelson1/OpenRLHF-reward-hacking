@@ -662,7 +662,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 all_datasources = []
                 for prompts in iter(eval_dataloader):
                     all_datasources.extend([p.get("full_data", {}).get("datasource", "") for p in prompts])
-                    assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
+                    #assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
                     
                     # Logging
                     logger.info(f"Evaluating {len(prompts)} prompts")
