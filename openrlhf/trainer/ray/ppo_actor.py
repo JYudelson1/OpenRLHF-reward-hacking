@@ -677,24 +677,24 @@ class ActorPPOTrainer(BasePPOTrainer):
                         [sample.json_rollouts for sample in samples], global_step=global_step, train_or_eval="eval"
                     )
 
-                    # Calculate rewards
-                    if samples[0].reward is None:
-                        assert False, "Reward model and remote reward are not currently supported with evaluations"
-                    else:
-                        all_rewards.extend([sample.reward for sample in samples])
+                    all_rewards.extend([sample.reward for sample in samples])
 
                 # Reshape rewards to (num_prompts, n_samples_per_prompt)
-                rewards = torch.tensor(all_rewards).reshape(-1, n_samples_per_prompt)
+                rewards_or_zero = [(reward if reward is not None else 0.0) for reward in all_rewards]
+                rewards = torch.tensor([rewards_or_zero]).reshape(-1, n_samples_per_prompt)
+                rewards_missing = torch.tensor([reward is None for reward in rewards]).reshape(-1, n_samples_per_prompt)
 
                 for i, datasource in enumerate(all_datasources):
                     if datasource not in local_metrics:
-                        local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
+                        local_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0, "reward_missing": 0}
 
                     # Calculate pass@k and pass@1
                     prompt_rewards = rewards[i]
+                    prompt_rewards_missing = rewards_missing[i]
                     local_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
                     local_metrics[datasource]["pass1"] += prompt_rewards.mean().float().item()
                     local_metrics[datasource]["count"] += 1
+                    local_metrics[datasource]["reward_missing"] += prompt_rewards_missing.mean().float().item()
 
                 # All gather metrics from all ranks
                 gathered_metrics = [None] * (self.strategy.world_size // self.strategy.ring_attn_size)
@@ -714,12 +714,13 @@ class ActorPPOTrainer(BasePPOTrainer):
                     for rank_metrics in gathered_metrics:
                         for datasource, metrics in rank_metrics.items():
                             if datasource not in global_metrics:
-                                global_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0}
+                                global_metrics[datasource] = {f"pass{n_samples_per_prompt}": 0, "pass1": 0, "count": 0, "reward_missing": 0}
                             global_metrics[datasource][f"pass{n_samples_per_prompt}"] += metrics[
                                 f"pass{n_samples_per_prompt}"
                             ]
                             global_metrics[datasource]["pass1"] += metrics["pass1"]
                             global_metrics[datasource]["count"] += metrics["count"]
+                            global_metrics[datasource]["reward_missing"] += metrics["reward_missing"]
 
                     # Calculate global averages
                     logs = {}
@@ -728,6 +729,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                             metrics[f"pass{n_samples_per_prompt}"] / metrics["count"]
                         )
                         logs[f"eval_{datasource}_pass1"] = metrics["pass1"] / metrics["count"]
+                        logs[f"eval_{datasource}_reward_missing"] = metrics["reward_missing"] / metrics["count"]
 
                     # Log to wandb/tensorboard
                     if self._wandb is not None:
@@ -1029,7 +1031,9 @@ class ActorModelRayActor(BasePPORole):
             tokenizer=self.tokenizer,
             prompt_max_len=args.prompt_max_len,
             value_clip=args.value_clip,
-            eps_clip=args.eps_clip,
+            eps_clip_low=args.eps_clip_low,
+            eps_clip_high=args.eps_clip_high,
+            divide_loss_by=args.divide_loss_by,
             gamma=args.gamma,
             lambd=args.lambd,
             init_kl_coef=args.init_kl_coef,

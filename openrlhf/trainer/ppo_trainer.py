@@ -69,7 +69,9 @@ class BasePPOTrainer(ABC):
         micro_train_batch_size: int = 8,
         buffer_limit: int = 0,
         buffer_cpu_offload: bool = True,
-        eps_clip: float = 0.2,
+        eps_clip_low: float = 0.2,
+        eps_clip_high: float = 0.2,
+        divide_loss_by: float | None = None,
         value_clip: float = 0.2,
         micro_rollout_batch_size: int = 8,
         gradient_checkpointing: bool = False,
@@ -84,9 +86,9 @@ class BasePPOTrainer(ABC):
         disable_ds_ckpt: bool = False,
         **generate_kwargs,
     ) -> None:
-        assert (
-            not isinstance(reward_model, List) or len(reward_model) == 1 or reward_fn is not None
-        ), "reward_fn must be specified if using multiple reward models"
+        assert not isinstance(reward_model, List) or len(reward_model) == 1 or reward_fn is not None, (
+            "reward_fn must be specified if using multiple reward models"
+        )
 
         super().__init__()
         self.strategy = strategy
@@ -118,7 +120,9 @@ class BasePPOTrainer(ABC):
         self.actor_scheduler = actor_scheduler
         self.critic_scheduler = critic_scheduler
 
-        self.actor_loss_fn = PolicyLoss(eps_clip)
+        self.actor_loss_fn = PolicyLoss(
+            clip_eps_low=eps_clip_low, clip_eps_high=eps_clip_high, divide_loss_by=divide_loss_by
+        )
         self.critic_loss_fn = ValueLoss(value_clip)
         self.ptx_loss_fn = GPTLMLoss()
 

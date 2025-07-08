@@ -122,7 +122,7 @@ class Samples:
     packed_seq_lens: Optional[torch.Tensor]
     response_length: torch.Tensor
     total_length: torch.Tensor
-    reward: Optional[List[float]]
+    reward: Optional[List[Optional[float]]]
     solutions: Optional[List[str]]
     pad_len: Optional[int]
     env_names: list[str]
@@ -462,9 +462,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             if not args.use_kl_loss:
                 base_action_log_probs = None
 
+            print(f"{rewards_list=} {r=}")
+
             info = {
                 "kl": kl_mean,
                 "reward": r,
+                "reward_missing": reward_missing,
                 "response_length": samples.response_length,
                 "total_length": samples.total_length,
                 "num_actions": samples.num_actions,
@@ -1030,14 +1033,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     )
         return samples_list
 
-    def _generate_vllm_bare(self, 
-                            rank, 
-                            world_size, 
-                            all_prompt_token_ids, 
-                            all_full_data, 
-                            llms, 
-                            sampling_params, 
-                            is_eval: bool = False
+    def _generate_vllm_bare(
+        self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params, is_eval: bool = False
     ):
         # print(
         #     f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
@@ -1067,10 +1064,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             outputs = ray.get(
                 [
                     llm.generate_env_rollout.remote(
-                        rank=rank, 
-                        sampling_params=sampling_params, 
-                        env_makers=self.strategy.args.env_makers, 
-                        is_eval=is_eval
+                        rank=rank,
+                        sampling_params=sampling_params,
+                        env_makers=self.strategy.args.env_makers,
+                        is_eval=is_eval,
                     )
                     for llm in llms
                 ]
