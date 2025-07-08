@@ -686,9 +686,9 @@ class ActorPPOTrainer(BasePPOTrainer):
                     [(reward if reward is not None else 0.0) for reward in rewards] for rewards in all_rewards
                 ]
                 rewards = torch.tensor([rewards_or_zero]).reshape(-1, n_samples_per_prompt)
-                rewards_missing = torch.tensor([reward is None for reward in rewards]).reshape(
-                    -1, n_samples_per_prompt
-                )
+
+                rewards_missing = [[(reward is None) for reward in rewards] for rewards in all_rewards]
+                rewards_missing = torch.tensor(rewards_missing, dtype=torch.bool).reshape(-1, n_samples_per_prompt)
 
                 for i, datasource in enumerate(all_datasources):
                     if datasource not in local_metrics:
