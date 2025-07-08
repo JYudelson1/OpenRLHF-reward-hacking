@@ -539,8 +539,10 @@ if __name__ == "__main__":
             folder_name = env_names_to_classes[filename]["env_folder"]
             class_name = env_names_to_classes[filename]["env_class"]
             
-            sys.path.insert(0, folder_name) # To make this work if the env is in a subfolder
-            env_module = importlib.import_module(folder_name.split("/")[-1])
+            folder_basename = folder_name.split("/")[-1]
+            path_to_folder = "/".join(folder_name.split("/")[:-1])
+            sys.path.insert(0, path_to_folder) # To make this work if the env is in a subfolder
+            env_module = importlib.import_module(folder_basename)
             env_maker = getattr(env_module, class_name)
         
             args.env_makers[filename] = partial(
