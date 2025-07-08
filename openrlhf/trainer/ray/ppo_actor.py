@@ -705,7 +705,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                     local_metrics[datasource][f"pass{n_samples_per_prompt}"] += prompt_rewards.max().float().item()
                     local_metrics[datasource]["pass1"] += prompt_rewards.mean().float().item()
                     local_metrics[datasource]["count"] += 1
-                    local_metrics[datasource]["reward_missing"] += prompt_rewards_missing.mean().float().item()
+                    local_metrics[datasource]["reward_missing"] += prompt_rewards_missing.float().mean().item()
 
                 # All gather metrics from all ranks
                 gathered_metrics = [None] * (self.strategy.world_size // self.strategy.ring_attn_size)
