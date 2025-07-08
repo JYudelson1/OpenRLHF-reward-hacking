@@ -569,6 +569,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         elif args.advantage_estimator == "grpo":
             rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt)
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
+            print(f"{rewards_missing.device=} {rewards.device=}")
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             rewards = rewards.reshape(-1).chunk(len(experiences))
 
