@@ -520,7 +520,7 @@ class AgentInterface(ABC):
 
         stats.on_finish()
 
-        print(f"{is_eval=} {reward=}")
+        # print(f"{is_eval=} {reward=}")
         if reward is not None:
             reward -= self.length_penalty * conversation.n_assistant_tokens
 
