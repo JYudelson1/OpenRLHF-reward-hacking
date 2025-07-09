@@ -551,6 +551,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         rewards = [experience.info["reward"] for experience in experiences]
         rewards_missing = [experience.info["reward_missing"] for experience in experiences]
         rewards_missing = torch.cat(rewards_missing).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+        
+        # Get lengths
+        lengths = [len(element) for experience in experiences for element in experience.sequences]
+        lengths = torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
 
         # reward shaping
         if args.advantage_estimator == "rloo":
@@ -566,18 +570,20 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = rewards - rewards.mean(-1, keepdim=True)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
+            
+            lengths = lengths - lengths.mean(-1, keepdim=True)
+            lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
+            lengths = torch.where(rewards_missing, torch.zeros_like(lengths), lengths)
+            lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
         elif args.advantage_estimator == "grpo":
             rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
 
-            lengths = [len(element) for experience in experiences for element in experience.sequences]
-            lengths = (
-                torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
-            )
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
             lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
+            lengths = torch.where(rewards_missing, torch.zeros_like(lengths), lengths)
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
 
             rewards = rewards + lengths
