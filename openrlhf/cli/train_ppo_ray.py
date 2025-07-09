@@ -557,6 +557,9 @@ if __name__ == "__main__":
         print(f"Env makers: {args.env_makers}")
         print(f"Env names to classes: {env_names_to_classes}")
         
+    if args.mongo_uri == "":
+        args.mongo_uri = None
+        
     if args.mongo_uri is not None and args.mongo_db_name is not None and args.mongo_collection_name is None:
         args.mongo_collection_name = args.wandb_run_name + "_" + datetime.now().strftime("%m%dT%H:%M")
         # Create a new collection
