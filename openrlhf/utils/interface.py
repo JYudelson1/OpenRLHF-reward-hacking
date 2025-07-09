@@ -376,7 +376,7 @@ class AgentInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_reward(self, messages: List[Message], state: AgentState) -> Reward:
+    async def get_reward(self, messages: List[Message], state: AgentState) -> Reward | None:
         """Get the reward for the conversation.
         NOTE: This should not include length penalty!"""
         pass
@@ -385,13 +385,13 @@ class AgentInterface(ABC):
     async def get_extra_metrics(self, messages: list[Message], state: AgentState) -> dict[str, float]:
         pass
     
-    async def get_reward_in_eval(self, messages: List[Message], state: AgentState) -> Reward:
+    async def get_reward_in_eval(self, messages: List[Message], state: AgentState) -> Reward | None:
         """Get the eval reward for the conversation. Used if the train reward may reflect a different thing than what we'd like to measure"""
         return await self.get_reward(messages, state)
 
     async def generate_rollouts(
         self, llm: AsyncLLMInterface, full_data: list[dict], env_name: str, is_eval: bool = False
-    ) -> list[tuple[AgentConversation, Reward]]:
+    ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
         try:
             states = await self.init_all_states(full_data)
@@ -402,7 +402,7 @@ class AgentInterface(ABC):
             return [
                 (
                     AgentConversation(env_name=env_name, extra_metrics={"n_errors": 1.0}, error=True),
-                    -1.0,
+                    None,
                 )
                 for _ in range(len(full_data))
             ]
@@ -447,7 +447,7 @@ class AgentInterface(ABC):
 
     async def _generate_single_rollout(
         self, llm: AsyncLLMInterface, initial_state: AgentState, time_init_env_started: float, env_name: str, is_eval: bool = False
-    ) -> tuple[AgentConversation, Reward, "RolloutTimeStatistics", AgentState | None]:
+    ) -> tuple[AgentConversation, Reward | None, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics(time_init_env_started=time_init_env_started)
 
         conversation = AgentConversation(env_name=env_name)
@@ -506,12 +506,13 @@ class AgentInterface(ABC):
             self.errors.append(f"Error in get_reward: {str(e)}")
             logger.error(f"Error in get_reward: {str(e)}")
             conversation.error = True
-            # Treat error as -1.0
-            reward = -1.0
+            reward = None
 
         stats.on_finish()
 
-        reward -= self.length_penalty * conversation.n_assistant_tokens
+        print(f"{is_eval=} {reward=}")
+        if reward is not None:
+            reward -= self.length_penalty * conversation.n_assistant_tokens
 
         try:
             extra_metrics = await self.get_extra_metrics(messages=conversation.messages, state=state)

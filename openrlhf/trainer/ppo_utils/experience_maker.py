@@ -122,7 +122,7 @@ class Samples:
     packed_seq_lens: Optional[torch.Tensor]
     response_length: torch.Tensor
     total_length: torch.Tensor
-    reward: Optional[List[float]]
+    reward: Optional[List[Optional[float]]]
     solutions: Optional[List[str]]
     pad_len: Optional[int]
     env_names: list[str]
@@ -322,7 +322,19 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         r_refs = []
         if pre_calc_rewards_list[0] is not None:
             print("Using environment rewards...")
-            r_refs.append(ray.put([torch.tensor(pre_calc_reward) for pre_calc_reward in pre_calc_rewards_list]))
+            r_refs.append(
+                ray.put(
+                    [
+                        torch.tensor([(r if r is not None else 0.0) for r in pre_calc_reward])
+                        for pre_calc_reward in pre_calc_rewards_list
+                    ]
+                )
+            )
+            r_refs.append(
+                ray.put(
+                    [torch.tensor([(r is None) for r in pre_calc_reward]) for pre_calc_reward in pre_calc_rewards_list]
+                )
+            )
         elif not self.remote_rm_url:
             for rm in self.reward_model:
                 r_refs.append(
@@ -387,7 +399,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         ref_values = ray.get([base_action_log_probs_ref, value_ref] + r_refs)
         wait_time = time.time() - start
 
-        base_action_log_probs_list, value_list, rewards_list = ref_values[0], ref_values[1], ref_values[2]
+        base_action_log_probs_list, value_list, rewards_list, rewards_missing_list = (
+            ref_values[0],
+            ref_values[1],
+            ref_values[2],
+            ref_values[3],
+        )
         if self.remote_rm_url is not None and isinstance(rewards_list, torch.Tensor):
             rewards_list = rewards_list.chunk(len(samples_list))
 
@@ -397,8 +414,16 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             torch.cuda.empty_cache()
 
         # Process results for each sample
-        for i, (samples, action_log_probs, base_action_log_probs, value, rewards) in enumerate(
-            zip(samples_list, action_log_probs_list, base_action_log_probs_list, value_list, rewards_list)
+        for i, (samples, action_log_probs, base_action_log_probs, value, rewards, rewards_missing) in enumerate(
+            zip(
+                samples_list,
+                action_log_probs_list,
+                base_action_log_probs_list,
+                value_list,
+                rewards_list,
+                rewards_missing_list,
+                strict=True,
+            )
         ):
             if base_action_log_probs is not None:
                 base_action_log_probs = base_action_log_probs.to(device)
@@ -465,6 +490,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             info = {
                 "kl": kl_mean,
                 "reward": r,
+                "reward_missing": rewards_missing,
                 "response_length": samples.response_length,
                 "total_length": samples.total_length,
                 "num_actions": samples.num_actions,
@@ -523,22 +549,27 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # get rewards from experiences
         rewards = [experience.info["reward"] for experience in experiences]
+        rewards_missing = [experience.info["reward_missing"] for experience in experiences]
+        rewards_missing = torch.cat(rewards_missing).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
 
         # reward shaping
         if args.advantage_estimator == "rloo":
             rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             baseline = (rewards.sum(-1, keepdim=True) - rewards) / (args.n_samples_per_prompt - 1)
             rewards = rewards - baseline
+            rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             rewards = rewards.flatten().to(device="cpu").chunk(len(experiences))
         elif args.advantage_estimator in ["reinforce_baseline", "dr_grpo"]:
             # REINFORCE++-baseline and Dr. GRPO removed the `/std` in GRPO as `/ std` is not needed in RL variance reduction theory.
             # And `k3 KL` has a larger variance than `k1 KL` under a categorical distribution.
             rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             rewards = rewards - rewards.mean(-1, keepdim=True)
+            rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
         elif args.advantage_estimator == "grpo":
             rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
+            rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
 
             lengths = [len(element) for experience in experiences for element in experience.sequences]
@@ -1030,14 +1061,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     )
         return samples_list
 
-    def _generate_vllm_bare(self, 
-                            rank, 
-                            world_size, 
-                            all_prompt_token_ids, 
-                            all_full_data, 
-                            llms, 
-                            sampling_params, 
-                            is_eval: bool = False
+    def _generate_vllm_bare(
+        self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params, is_eval: bool = False
     ):
         # print(
         #     f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
