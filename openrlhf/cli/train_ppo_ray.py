@@ -76,11 +76,7 @@ def train(args):
         bundles = [
             {"GPU": 1, "CPU": cpu_per_actor} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)
         ]
-        if args.actor_num_nodes == 1:
-            pack_strategy = "PACK"
-        else:
-           pack_strategy = "SPREAD"
-        pg = placement_group(bundles,strategy=pack_strategy)
+        pg = placement_group(bundles,strategy="PACK")
         ray.get(pg.ready())
 
     # init vLLM engine for text generation
@@ -568,7 +564,7 @@ if __name__ == "__main__":
         db = mongo_client[args.mongo_db_name]
         db.create_collection(args.mongo_collection_name)
 
-    if args.vllm_enable_sleep and not args.colocate_all_models:
+    if args.vllm_enable_sleep and not args.colocate_all_mocreatedels:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
         args.vllm_enable_sleep = False
 
