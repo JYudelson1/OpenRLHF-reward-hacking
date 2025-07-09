@@ -330,6 +330,7 @@ class AgentInterface(ABC):
         stop_on_truncation: bool = False,
         save_rollout_time_statistics_directory: str | None = "/root/rollout-time-statistics/",
         vllm_engine_index: int = 0,
+        compact_filtering: bool = False,
     ) -> None:
         assert length_penalty >= 0
         self.length_penalty = length_penalty
@@ -340,6 +341,7 @@ class AgentInterface(ABC):
         self.num_errors = 0
         self.errors = []
         self.vllm_engine_index = vllm_engine_index
+        self.compact_filtering = compact_filtering
 
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
@@ -452,6 +454,8 @@ class AgentInterface(ABC):
 
         conversation = AgentConversation(env_name=env_name)
         state = initial_state
+        
+        was_truncated = False
 
         for step in count():
             stats.on_env_step_start()
@@ -488,6 +492,7 @@ class AgentInterface(ABC):
             if is_done:
                 break
             if self.stop_on_truncation and conversation.was_truncated:
+                was_truncated = True
                 break
 
             conversation.messages += new_messages
@@ -496,17 +501,22 @@ class AgentInterface(ABC):
             await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings)
 
         stats.on_computing_reward_start()
-        try:
-            if is_eval:
-                reward = await self.get_reward_in_eval(messages=conversation.messages, state=state)
-            else:
-                reward = await self.get_reward(messages=conversation.messages, state=state)
-        except Exception as e:
-            self.num_errors += 1
-            self.errors.append(f"Error in get_reward: {str(e)}")
-            logger.error(f"Error in get_reward: {str(e)}")
-            conversation.error = True
+        
+        if was_truncated and self.compact_filtering:
             reward = None
+        else:
+            # Normal reward calculation
+            try:
+                if is_eval:
+                    reward = await self.get_reward_in_eval(messages=conversation.messages, state=state)
+                else:
+                    reward = await self.get_reward(messages=conversation.messages, state=state)
+            except Exception as e:
+                self.num_errors += 1
+                self.errors.append(f"Error in get_reward: {str(e)}")
+                logger.error(f"Error in get_reward: {str(e)}")
+                conversation.error = True
+                reward = None
 
         stats.on_finish()
 

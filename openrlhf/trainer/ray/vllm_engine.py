@@ -61,6 +61,8 @@ class LLMRayActor:
             self.truncate_prompt_tokens = None
             del kwargs["truncate_prompt_tokens"]
 
+        self.compact_filtering = kwargs.pop("compact_filtering", False)
+
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
@@ -172,7 +174,10 @@ class LLMRayActor:
             for env_name, data_for_env in data_by_env.items():
                 print(f"Creating {env_name} environment with {len(data_for_env)} samples")
                 if env_name in env_makers:
-                    env = env_makers[env_name](vllm_engine_index=vllm_engine_index)
+                    env = env_makers[env_name](
+                        vllm_engine_index=vllm_engine_index,
+                        compact_filtering=self.compact_filtering,
+                    )
                     task = env.generate_rollouts(
                         llm=async_llm,
                         full_data=data_for_env,
@@ -253,6 +258,7 @@ def create_vllm_engines(
     actor_num_gpus_per_node=None,
     max_cpus=None,
     truncate_prompt_tokens=None,
+    compact_filtering=False,
 ):
     import vllm
 
@@ -330,6 +336,7 @@ def create_vllm_engines(
             mongo_db_name=mongo_db_name,
             mongo_collection_name=mongo_collection_name,
             truncate_prompt_tokens=truncate_prompt_tokens,
+            compact_filtering=compact_filtering,
         )
 
         vllm_engines.append(engine)

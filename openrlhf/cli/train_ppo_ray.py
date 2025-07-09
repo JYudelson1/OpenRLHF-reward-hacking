@@ -122,6 +122,7 @@ def train(args):
             actor_num_gpus_per_node=args.actor_num_gpus_per_node,
             max_cpus=args.max_cpus,
             truncate_prompt_tokens=args.prompt_max_len,
+            compact_filtering=args.compact_filtering,
         )
 
     actor_model = PPORayActorGroup(
@@ -483,6 +484,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_cpus", type=int, default=-1, help="Maximum number of CPUs to use for multiple environments running"
     )
+    
+    # Compact filtering: https://www.together.ai/blog/deepswe
+    # If true, will mask any trajectory that hits the length limit
+    parser.add_argument("--compact_filtering", action="store_true", default=False)
     
     args = parser.parse_args()
 
