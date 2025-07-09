@@ -348,7 +348,7 @@ if __name__ == "__main__":
     parser.add_argument("--ptx_coef", type=float, default=0.05, help="PPO-ptx loss coef")
     parser.add_argument("--eps_clip_low", type=float, default=0.2, help="Lower bound of the PPO clip range")
     parser.add_argument("--eps_clip_high", type=float, default=0.2, help="Upper bound of the PPO clip range")
-    parser.add_argument("--divide_loss_by", type=float, default=None, help="If provided, divide the loss by it instead of the sequence length. A good value for divide_loss_by is generate_max_len")
+    parser.add_argument("--divide_loss_by", type=float, help="If provided, divide the loss by it instead of the sequence length. A good value for divide_loss_by is generate_max_len")
     parser.add_argument("--value_clip", type=float, default=0.2, help="PPO value clip range")
     parser.add_argument("--lambd", type=float, default=1, help="PPO GAE lambd")
     parser.add_argument("--gamma", type=float, default=1, help="PPO GAE gamma")
