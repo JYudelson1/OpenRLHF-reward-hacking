@@ -44,9 +44,6 @@ def _validate_args(args):
             f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
         )
 
-    if args.mongo_uri:
-        args.mongo_uri = args.mongo_uri.replace("%26", "&")
-
     if args.use_kl_loss:
         if args.kl_estimator not in ["k2", "k3"]:
             print(f"Recommend setting {args.kl_estimator} to 'k2' or 'k3' when using KL as a loss")
@@ -559,6 +556,9 @@ if __name__ == "__main__":
         
     if args.mongo_uri == "":
         args.mongo_uri = None
+        
+    if args.mongo_uri:
+        args.mongo_uri = args.mongo_uri.replace("%26", "&")
         
     if args.mongo_uri is not None and args.mongo_db_name is not None and args.mongo_collection_name is None:
         args.mongo_collection_name = args.wandb_run_name + "_" + datetime.now().strftime("%m%dT%H:%M")
