@@ -217,7 +217,8 @@ class LLMRayActor:
             mongo_client = MongoClient(self.mongo_uri)
             db = mongo_client[self.mongo_db_name]
             collection = db[self.mongo_collection_name]
-            messages = [{"conversation": conversation.messages, "reward": reward} for (conversation, reward) in rollouts]
+            now = datetime.now()
+            messages = [{"conversation": conversation.messages, "reward": reward, "timestamp": now} for (conversation, reward) in rollouts]
             print(f"Logging {len(messages)} rollouts to MongoDB")
             collection.insert_many(messages)
             
