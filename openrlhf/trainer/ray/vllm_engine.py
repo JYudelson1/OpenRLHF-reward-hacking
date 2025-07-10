@@ -7,6 +7,7 @@ import queue
 from collections import defaultdict
 from typing import Any, List
 from pymongo import MongoClient
+from datetime import datetime
 
 
 import ray
@@ -80,6 +81,9 @@ class LLMRayActor:
         self.mongo_uri = kwargs.pop("mongo_uri", None)
         self.mongo_db_name = kwargs.pop("mongo_db_name", None)
         self.mongo_collection_name = kwargs.pop("mongo_collection_name", None)
+        
+        # Extract transcripts folder
+        self.transcripts_folder = kwargs.pop("transcripts_folder", None)
 
         import vllm
 
@@ -215,6 +219,11 @@ class LLMRayActor:
             collection = db[self.mongo_collection_name]
             messages = [conversation.messages for (conversation, _) in rollouts]
             collection.insert_many(messages)
+            
+        if self.transcripts_folder is not None:
+            messages = [{"conversation": conversation.messages, "reward": reward} for (conversation, reward) in rollouts]
+            with open(os.path.join(self.transcripts_folder, f"rollouts_rank{rank}_{datetime.now().strftime('%m%dT%H:%M')}.json"), "w") as f:
+                json.dump(rollouts, f)
 
         self.rollouts = {
             rank: rollouts[i:j]
@@ -252,6 +261,7 @@ def create_vllm_engines(
     mongo_uri=None,
     mongo_db_name=None,
     mongo_collection_name=None,
+    transcripts_folder=None,
     rollout_batch_size=None,
     n_samples_per_prompt=None,
     actor_num_nodes=None,
@@ -335,6 +345,7 @@ def create_vllm_engines(
             mongo_uri=mongo_uri,
             mongo_db_name=mongo_db_name,
             mongo_collection_name=mongo_collection_name,
+            transcripts_folder=transcripts_folder,
             truncate_prompt_tokens=truncate_prompt_tokens,
             compact_filtering=compact_filtering,
         )

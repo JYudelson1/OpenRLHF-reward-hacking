@@ -30,7 +30,6 @@ import ray
 import logging
 from dataclasses import dataclass, field
 from sys import stderr
-from pymongo import MongoClient
 from datetime import datetime
 from vllm.transformers_utils.tokenizer import get_tokenizer
 

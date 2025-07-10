@@ -106,9 +106,10 @@ def train(args):
             pg if args.colocate_all_models else None,
             args.vllm_gpu_memory_utilization,
             args.vllm_enable_sleep,
-            args.mongo_uri,
-            args.mongo_db_name,
-            args.mongo_collection_name,
+            mongo_uri=args.mongo_uri,
+            mongo_db_name=args.mongo_db_name,
+            mongo_collection_name=args.mongo_collection_name,
+            transcripts_folder=args.transcripts_folder,
             rollout_batch_size=args.rollout_batch_size,
             n_samples_per_prompt=args.n_samples_per_prompt,
             actor_num_nodes=args.actor_num_nodes,
@@ -458,6 +459,9 @@ if __name__ == "__main__":
     parser.add_argument("--mongo_db_name", type=str, default=None, help="MongoDB database name")
     parser.add_argument("--mongo_collection_name", type=str, default=None, help="MongoDB collection name")
 
+    # Logging transcript
+    parser.add_argument("--transcripts_folder", type=str, default=None, help="Path to the folder for logging transcripts")
+    
     # RL environment paramaters
     # Multiturn RL only
     parser.add_argument("--envs_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment classes")
@@ -552,6 +556,9 @@ if __name__ == "__main__":
         
     if args.mongo_uri == "":
         args.mongo_uri = None
+        
+    if args.mongo_uri and args.transcripts_folder:
+        print("[Warning] You are logging both locally and to MongoDB")
         
     if args.mongo_uri:
         args.mongo_uri = args.mongo_uri.replace("%26", "&")
