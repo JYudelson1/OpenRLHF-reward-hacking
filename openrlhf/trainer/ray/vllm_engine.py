@@ -217,7 +217,9 @@ class LLMRayActor:
             mongo_client = MongoClient(self.mongo_uri)
             db = mongo_client[self.mongo_db_name]
             collection = db[self.mongo_collection_name]
-            messages = [conversation.messages for (conversation, _) in rollouts]
+            messages = [{"conversation": conversation.messages, "reward": reward} for (conversation, reward) in rollouts]
+            print(f"Logging {len(messages)} rollouts to MongoDB")
+            print(messages[0])
             collection.insert_many(messages)
             
         if self.transcripts_folder is not None:
