@@ -63,6 +63,7 @@ class DeepspeedStrategy(ABC):
         self.grad_accum_dtype = getattr(args, "grad_accum_dtype", None)
         # overlap_comm
         self.overlap_comm = getattr(args, "overlap_comm", False)
+        self.deepcompile = getattr(args, "deepcompile", False)
         self.torch_compile = getattr(args, "torch_compile", False)
         self.use_ds_universal_ckpt = getattr(args, "use_ds_universal_ckpt", False)
 
@@ -238,6 +239,7 @@ class DeepspeedStrategy(ABC):
             max_norm=self.max_norm,
             zpg=self.zpg,
             grad_accum_dtype=self.grad_accum_dtype,
+            deepcompile=self.deepcompile,
             overlap_comm=self.overlap_comm,
             use_ds_universal_ckpt=self.use_ds_universal_ckpt,
         )
@@ -263,7 +265,7 @@ class DeepspeedStrategy(ABC):
             config=ds_config,
             dist_init_required=True,
         )
-        if self.torch_compile:
+        if self.deepcompile:
             engine.compile()
         if is_actor:
             model.model = engine
