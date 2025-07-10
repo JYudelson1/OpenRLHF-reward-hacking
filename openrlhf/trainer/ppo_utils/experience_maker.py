@@ -382,6 +382,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         for seq, num_acts, attn_mask, packed_lens in zip(
             sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list
         ):
+            print(f"Calling actor from rank {dist.get_rank()}")
             action_log_probs = self.actor(
                 seq.to(device),
                 num_acts,
