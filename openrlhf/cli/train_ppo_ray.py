@@ -560,6 +560,9 @@ if __name__ == "__main__":
     if args.mongo_uri and args.transcripts_folder:
         print("[Warning] You are logging both locally and to MongoDB")
         
+    if args.transcripts_folder:
+        os.makedirs(args.transcripts_folder, exist_ok=True)
+        
     if args.mongo_uri:
         args.mongo_uri = args.mongo_uri.replace("%26", "&")
         
