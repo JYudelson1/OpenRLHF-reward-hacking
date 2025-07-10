@@ -206,7 +206,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             self.custom_reward_func = ray.remote(self.custom_reward_func)
 
     @torch.no_grad()
-    def make_experience_list(self, all_prompts: Union[str, List[str]], **generate_kwargs) -> List[Experience]:
+    def make_experience_list(self, all_prompts: Union[str, List[str]], step: int, **generate_kwargs) -> List[Experience]:
         """
         Make a list of experience with the micro_rollout_batch_size.
 
@@ -1103,6 +1103,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         env_makers=self.strategy.args.env_makers, 
                         is_eval=is_eval,
                         vllm_engine_index=i,
+                        step=self.step,
                     )
                     for i, llm in enumerate(llms)
                 ]

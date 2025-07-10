@@ -142,7 +142,7 @@ class LLMRayActor:
 
         self.env_data_for_rollout[rank] = data_for_rank
 
-    def generate_env_rollout(self, rank: int, sampling_params, env_makers, is_eval: bool = False, vllm_engine_index: int = 0) -> list:
+    def generate_env_rollout(self, rank: int, sampling_params, env_makers, is_eval: bool = False, vllm_engine_index: int = 0, step: int = 0) -> list:
         print(f"LLMRayActor.generate_env_rollout called with {self=} {rank=} {vllm_engine_index=}")
 
         if self.rollouts is not None:
@@ -218,7 +218,14 @@ class LLMRayActor:
             db = mongo_client[self.mongo_db_name]
             collection = db[self.mongo_collection_name]
             now = datetime.now()
-            messages = [{"conversation": conversation.messages, "reward": reward, "timestamp": now} for (conversation, reward) in rollouts]
+            messages = [
+                {
+                    "conversation": conversation.messages, 
+                    "reward": reward, 
+                    "timestamp": now,
+                    "step": step,
+                } for (conversation, reward) in rollouts
+            ]
             print(f"Logging {len(messages)} rollouts to MongoDB")
             collection.insert_many(messages)
             

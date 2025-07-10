@@ -205,6 +205,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             )
 
             for rand_prompts in self.prompts_dataloader:
+                self.experience_maker.step = steps
                 for i, experience in enumerate(
                     self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
                 ):
