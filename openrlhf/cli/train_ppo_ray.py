@@ -564,7 +564,7 @@ if __name__ == "__main__":
         db = mongo_client[args.mongo_db_name]
         db.create_collection(args.mongo_collection_name)
 
-    if args.vllm_enable_sleep and not args.colocate_all_mocreatedels:
+    if args.vllm_enable_sleep and not args.colocate_all_models:
         print("Set args.vllm_enable_sleep to False when args.colocate_all_models is disabled.")
         args.vllm_enable_sleep = False
 
