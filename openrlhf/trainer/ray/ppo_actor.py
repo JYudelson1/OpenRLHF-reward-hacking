@@ -208,7 +208,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 for i, experience in enumerate(
                     self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
                 ):
-                    if i <= 3:
+                    if i <= 1:
                         output = self.tokenizer.batch_decode(
                             experience.sequences[0].unsqueeze(0), skip_special_tokens=True
                         )[0]
