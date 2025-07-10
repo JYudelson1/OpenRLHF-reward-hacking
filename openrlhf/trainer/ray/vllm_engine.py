@@ -223,7 +223,7 @@ class LLMRayActor:
         if self.transcripts_folder is not None:
             messages = [{"conversation": conversation.messages, "reward": reward} for (conversation, reward) in rollouts]
             with open(os.path.join(self.transcripts_folder, f"rollouts_rank{rank}_{datetime.now().strftime('%m%dT%H:%M')}.json"), "w") as f:
-                json.dump(rollouts, f)
+                json.dump(messages, f)
 
         self.rollouts = {
             rank: rollouts[i:j]
