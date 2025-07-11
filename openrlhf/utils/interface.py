@@ -62,6 +62,11 @@ class AgentConversation:
             key_with_no_name_clashes = "this_prefix_removed_a_name_clash/" + key_with_no_name_clashes
 
         self.extra_metrics[key_with_no_name_clashes] = float(self.error)
+        
+    def increment_num_steps(self) -> None:
+        if self.extra_metrics is None:
+            self.extra_metrics = {}
+        self.extra_metrics["num_steps"] = self.extra_metrics.get("num_steps", 0.0) + 1.0
 
 
 class AsyncLLMInterface(ABC):
@@ -399,7 +404,7 @@ class AgentInterface(ABC):
             logger.error(f"Error in init_all_states: {str(e)}")
             return [
                 (
-                    AgentConversation(env_name=env_name, extra_metrics={"n_errors": 1.0}, error=True),
+                    AgentConversation(env_name=env_name, extra_metrics={"n_errors": 1.0, "num_steps": 0.0}, error=True),
                     None,
                 )
                 for _ in range(len(full_data))
@@ -448,7 +453,7 @@ class AgentInterface(ABC):
     ) -> tuple[AgentConversation, Reward | None, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics(time_init_env_started=time_init_env_started)
 
-        conversation = AgentConversation(env_name=env_name)
+        conversation = AgentConversation(env_name=env_name, extra_metrics={"num_steps": 0.0})
         state = initial_state
         
         was_truncated = False
@@ -492,6 +497,7 @@ class AgentInterface(ABC):
                 break
 
             conversation.messages += new_messages
+            conversation.increment_num_steps()
 
             stats.on_llm_completion_start()
             await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings)
