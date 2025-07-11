@@ -323,7 +323,6 @@ async def _vllm_chat_with_truncation(
 class AgentInterface(ABC):
     def __init__(
         self,
-        length_penalty: float = 0.0,
         stop_strings: list[str] | None = None,
         max_steps: int | None = None,
         stop_on_truncation: bool = False,
@@ -331,8 +330,6 @@ class AgentInterface(ABC):
         vllm_engine_index: int = 0,
         compact_filtering: bool = False,
     ) -> None:
-        assert length_penalty >= 0
-        self.length_penalty = length_penalty
         self.stop_strings = stop_strings
         self.max_steps = max_steps
         self.stop_on_truncation = stop_on_truncation
@@ -518,10 +515,6 @@ class AgentInterface(ABC):
                 reward = None
 
         stats.on_finish()
-
-        # print(f"{is_eval=} {reward=}")
-        if reward is not None:
-            reward -= self.length_penalty * conversation.n_assistant_tokens
 
         try:
             extra_metrics = await self.get_extra_metrics(messages=conversation.messages, state=state)
