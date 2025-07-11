@@ -214,20 +214,27 @@ class LLMRayActor:
 
         rollouts = self.async_event_loop.run_until_complete(run_all_environments())
         if self.mongo_uri is not None and self.mongo_db_name is not None and self.mongo_collection_name is not None:
-            mongo_client = MongoClient(self.mongo_uri)
-            db = mongo_client[self.mongo_db_name]
-            collection = db[self.mongo_collection_name]
-            now = datetime.now()
-            messages = [
-                {
-                    "conversation": conversation.messages, 
-                    "reward": reward, 
-                    "timestamp": now,
-                    "step": step,
-                } for (conversation, reward) in rollouts
-            ]
-            print(f"Logging {len(messages)} rollouts to MongoDB")
-            collection.insert_many(messages)
+            try:
+                mongo_client = MongoClient(self.mongo_uri)
+                db = mongo_client[self.mongo_db_name]
+                collection = db[self.mongo_collection_name]
+            except Exception as e:
+                print(f"Error connecting to MongoDB: {e}")
+                
+            try:
+                now = datetime.now()
+                messages = [
+                    {
+                        "conversation": conversation.messages, 
+                        "reward": reward, 
+                        "timestamp": now,
+                        "step": step,
+                    } for (conversation, reward) in rollouts
+                ]
+                print(f"Logging {len(messages)} rollouts to MongoDB")
+                collection.insert_many(messages)
+            except Exception as e:
+                print(f"Error logging rollouts to MongoDB: {e}")
             
         if self.transcripts_folder is not None:
             messages = [{"conversation": conversation.messages, "reward": reward} for (conversation, reward) in rollouts]
