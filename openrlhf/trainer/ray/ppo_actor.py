@@ -419,12 +419,14 @@ class ActorPPOTrainer(BasePPOTrainer):
             )
 
         # loss function
-        actor_loss = self.actor_loss_fn(
+        actor_loss, actor_loss_logs = self.actor_loss_fn(
             action_log_probs,
             old_action_log_probs,
             advantages,
             action_mask=experience.action_mask,
         )
+
+        experience.info |= actor_loss_logs
 
         if self.args.use_kl_loss:
             if self.initial_model is not None:
@@ -663,8 +665,8 @@ class ActorPPOTrainer(BasePPOTrainer):
                 all_datasources = []
                 for prompts in iter(eval_dataloader):
                     all_datasources.extend([p.get("full_data", {}).get("datasource", "") for p in prompts])
-                    #assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
-                    
+                    # assert len(prompts) % self.strategy.world_size == 0, "The number of eval prompts must be divisible by the rollout batch size"
+
                     # Logging
                     logger.info(f"Evaluating {len(prompts)} prompts")
 
