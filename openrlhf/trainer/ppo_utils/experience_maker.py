@@ -379,13 +379,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # Batch call actor model
         action_log_probs_list = []
-        for seq, num_acts, attn_mask, packed_lens in zip(
-            sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list
+        for seq, num_acts, attn_mask, packed_lens, action_mask in zip(
+            sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list, action_mask_cpu_list
         ):
             action_log_probs = self.actor(
                 seq.to(device),
                 num_acts,
                 attn_mask.to(device),
+                action_mask=action_mask,
                 ring_attn_group=self.strategy.ring_attn_group,
                 logps_allgather=True,
                 packed_seq_lens=packed_lens,
