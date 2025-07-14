@@ -82,7 +82,7 @@ class PolicyLoss(nn.Module):
         if self.divide_loss_by is not None:
             loss = loss.sum(-1) / self.divide_loss_by
         elif action_mask is not None:
-            loss = loss.sum(-1) / action_mask.sum(-1)
+            loss = loss.sum(-1) / (action_mask.sum(-1) + 1e-9)
         else:
             loss = loss.mean(-1)
 
