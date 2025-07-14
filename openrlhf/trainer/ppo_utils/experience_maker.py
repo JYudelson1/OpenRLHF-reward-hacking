@@ -994,7 +994,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         sequences.extend(conversation.all_tokens)
                         attention_mask.extend([i + 1] * total_len)
                         action_masks.extend(conversation.action_mask)
-                        num_actions.extend(conversation.num_actions_list)
+                        num_actions.append(conversation.num_actions_list)
                         response_lengths.append(sum(conversation.action_mask))
                         rewards.append(reward)
                 else:
@@ -1026,7 +1026,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
 
                     response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
-                    num_actions = torch.tensor(num_actions, device="cuda", dtype=torch.float)
                     
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
                     samples_list.append(
