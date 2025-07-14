@@ -52,6 +52,7 @@ class AgentConversation:
     was_truncated: bool = False
     extra_metrics: dict[str, float] | None = None
     error: bool = False
+    action_mask: list[int] = field(default_factory=lambda: [])
 
     def add_error_to_extra_metrics(self) -> None:
         if self.extra_metrics is None:
@@ -190,6 +191,8 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.tokens_by_turn.append({"input_tokens": input_tokens, "output_tokens": output_tokens})
         conversation.n_tokens += len(input_tokens) + len(output_tokens)
         conversation.n_assistant_tokens += len(output_tokens)
+        
+        conversation.action_mask.extend([0] * len(input_tokens) + [1] * len(output_tokens))
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
 
