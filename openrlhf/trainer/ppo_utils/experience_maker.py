@@ -1051,7 +1051,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
                     
                     response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
-                    num_actions = torch.tensor(num_actions, device="cuda", dtype=torch.float)
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
                     samples_list.append(
                         Samples(
