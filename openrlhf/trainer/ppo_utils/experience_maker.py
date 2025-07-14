@@ -279,6 +279,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Convert samples into lists of tensors and metadata for batch processing
         sequences_list = [s.sequences for s in samples_list]
         attention_mask_list = [s.attention_mask for s in samples_list]
+        action_mask_list = [s.action_mask for s in samples_list]
         num_actions_list = [s.num_actions for s in samples_list]
         packed_seq_lens_list = [s.packed_seq_lens for s in samples_list]
         solutions_list = [s.solutions for s in samples_list]
@@ -287,6 +288,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Move data to CPU for remote processing
         sequences_cpu_list = [seq.to("cpu") for seq in sequences_list]
         attention_mask_cpu_list = [mask.to("cpu") for mask in attention_mask_list]
+        action_mask_cpu_list = [mask.to("cpu") for mask in action_mask_list]
 
         # Batch call initial model
         if self.initial_model is not None:
