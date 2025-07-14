@@ -994,7 +994,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         attention_mask.extend([i + 1] * total_len)
                         action_masks.extend(conversation.action_mask)
                         
-                        num_actions.append(max(1, total_len - input_len))
+                        num_actions.append(conversation.num_actions_list)
                         rewards.append(reward)
                 else:
                     # Sequence packing with single turn
