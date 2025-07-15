@@ -295,6 +295,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 sequences=sequences_cpu_list,
                 num_actions=num_actions_list,
                 attention_mask=attention_mask_cpu_list,
+                action_mask=action_mask_list,
                 logps_allgather=[True] * len(samples_list),
                 packed_seq_lens=packed_seq_lens_list,
             )
@@ -477,7 +478,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 # Convert tensor into list of tensors for easier manipulation within dataset
                 sequences = unpacking_samples(sequences, packed_seq_lens)
                 attention_mask = None
-                action_log_probs = unpacking_samples(action_log_probs, num_actions)
+                action_log_probs = unpacking_samples(action_log_probs, packed_seq_lens)
                 if value is not None:
                     value = unpacking_samples(value, num_actions)
                 if base_action_log_probs is not None:
