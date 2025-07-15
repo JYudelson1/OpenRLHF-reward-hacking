@@ -265,7 +265,7 @@ class Actor(nn.Module):
                 offset = 0
                 for seq_len in packed_seq_lens:
                     start, end = max(0, offset), offset + seq_len
-                    action_log_probs.append(log_probs[:, start:end].where(action_mask[:, start+1:end+1], 0))
+                    action_log_probs.append(log_probs[:, start:end].where(action_mask[:, start+1:end+1].to(dtype=torch.bool), 0))
                     offset += seq_len   
             else:
                 offset = 0
