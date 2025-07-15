@@ -201,6 +201,7 @@ class Actor(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         action_mask: Optional[torch.Tensor] = None,
         return_output=False,
+        return_action_log_probs=False,
         ring_attn_group: Optional[dist.ProcessGroup] = None,
         logps_allgather=False,
         packed_seq_lens: Optional[list[int]] = None,
@@ -256,7 +257,7 @@ class Actor(nn.Module):
                 log_probs = per_token_logps[:, :-1]
             else:
                 log_probs = log_probs_from_logits(
-                    output["logits"][:, :, :], sequences[:, :], temperature=self.temperature
+                    output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
                 )
             
             action_log_probs = []
