@@ -76,11 +76,9 @@ class PolicyLoss(nn.Module):
         surr2 = ratio.clamp(1 - self.clip_eps_low, 1 + self.clip_eps_high) * advantages
         loss = -torch.min(surr1, surr2)
         
-        print(f"{loss.shape=}")
         if action_mask is not None:
             if isinstance(action_mask, list):
                 action_mask = torch.cat(action_mask, dim=0).unsqueeze(0)[:, 1:]
-            print(f"{action_mask.shape=}")
 
         if action_mask is not None:
             loss = loss * action_mask
@@ -92,7 +90,6 @@ class PolicyLoss(nn.Module):
         else:
             loss = loss.mean(-1)
             
-        print(f"{loss.shape=}")
 
         return loss
 
