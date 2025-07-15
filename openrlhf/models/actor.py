@@ -262,12 +262,12 @@ class Actor(nn.Module):
             assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
             action_log_probs = []
             if action_mask is not None:
-                assert len(action_mask) == len(log_probs), f"{len(action_mask)=} {len(log_probs)=}"
-                print(f"{action_mask.shape=} {log_probs.shape=}")
+                sliced_action_mask = action_mask[:, 1:]
+                assert log_probs.shape == sliced_action_mask.shape, f"{log_probs.shape=} {sliced_action_mask.shape=}"
                 offset = 0
                 for seq_len in packed_seq_lens:
                     start, end = max(0, offset - 1), offset + seq_len - 1
-                    action_log_probs.append(log_probs[:, start:end] * action_mask[:, start:end].float())
+                    action_log_probs.append(log_probs[:, start:end] * sliced_action_mask[:, start:end].float())
                     offset += seq_len   
             else:
                 offset = 0

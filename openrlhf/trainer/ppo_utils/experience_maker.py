@@ -288,7 +288,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Move data to CPU for remote processing
         sequences_cpu_list = [seq.to("cpu") for seq in sequences_list]
         attention_mask_cpu_list = [mask.to("cpu") for mask in attention_mask_list]
-        action_mask_cpu_list = [mask.to("cpu") for mask in action_mask_list]
 
         # Batch call initial model
         if self.initial_model is not None:
@@ -382,7 +381,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Batch call actor model
         action_log_probs_list = []
         for seq, num_acts, attn_mask, packed_lens, action_mask in zip(
-            sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list, action_mask_cpu_list
+            sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list, action_mask_list
         ):
             action_log_probs = self.actor(
                 seq.to(device),
