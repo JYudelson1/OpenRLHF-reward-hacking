@@ -78,6 +78,8 @@ class PolicyLoss(nn.Module):
         
         print(f"{loss.shape=}")
         if action_mask is not None:
+            if isinstance(action_mask, list):
+                action_mask = torch.cat(action_mask, dim=0)
             print(f"{action_mask.shape=}")
 
         if action_mask is not None:

@@ -423,7 +423,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=torch.tensor(experience.action_mask, device=action_log_probs.device),
+            action_mask=experience.action_mask,
         )
 
         if self.args.use_kl_loss:
