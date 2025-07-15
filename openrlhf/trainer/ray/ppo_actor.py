@@ -399,6 +399,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         action_log_probs, output = self.actor(
             sequences,
             num_actions,
+            action_mask=experience.action_mask,
             attention_mask=attention_mask,
             return_output=True,
             ring_attn_group=self.strategy.ring_attn_group,
