@@ -52,7 +52,7 @@ class AgentConversation:
     was_truncated: bool = False
     extra_metrics: dict[str, float] | None = None
     error: bool = False
-    action_mask: list[int] = field(default_factory=lambda: [])
+    action_mask: list[int] = field(default_factory=lambda: [0])
     num_actions_list: list[int] = field(default_factory=lambda: [])
 
     def add_error_to_extra_metrics(self) -> None:
@@ -539,6 +539,7 @@ class AgentInterface(ABC):
             logger.error(f"Error in get_extra_metrics {str(e)}")
             conversation.error = True
 
+        conversation.action_mask = conversation.action_mask[:-1]
         return conversation, reward, stats, state
 
 
