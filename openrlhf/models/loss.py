@@ -98,7 +98,6 @@ class PolicyLoss(nn.Module):
         }
         if action_mask is not None:
             logs["action_mask_sum"] = action_mask.sum(-1)
-            logs["action_mask_mean"] = action_mask.mean(-1)
 
         return loss, logs
 
