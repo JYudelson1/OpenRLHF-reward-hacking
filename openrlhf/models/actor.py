@@ -259,7 +259,7 @@ class Actor(nn.Module):
                     output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
                 )
 
-            assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
+            
             action_log_probs = []
             if action_mask is not None:
                 sliced_action_mask = action_mask[:, 1:]
@@ -271,6 +271,7 @@ class Actor(nn.Module):
                     offset += seq_len   
             else:
                 offset = 0
+                assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
                 for num_action, seq_len in zip(num_actions, packed_seq_lens):
                     start, end = max(0, offset + seq_len - num_action - 1), offset + seq_len - 1
                     action_log_probs.append(log_probs[:, start:end])
