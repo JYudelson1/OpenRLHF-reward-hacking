@@ -258,7 +258,6 @@ class Actor(nn.Module):
                 log_probs = log_probs_from_logits(
                     output["logits"][:, :, :], sequences[:, :], temperature=self.temperature
                 )
-            print(f"{log_probs.shape=} {action_mask.shape=}")
             
             action_log_probs = []
             if action_mask is not None:
@@ -275,7 +274,6 @@ class Actor(nn.Module):
                     action_log_probs.append(log_probs[:, start:end])
                     offset += seq_len
             action_log_probs = torch.cat(action_log_probs, dim=1)
-            print(f"{action_log_probs.shape=}")
 
         if return_output:
             return (action_log_probs, output)
