@@ -71,9 +71,9 @@ class PolicyLoss(nn.Module):
         advantages: torch.Tensor,
         action_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        ratio = (log_probs - old_log_probs[:, 1:]).exp()
-        surr1 = ratio * advantages[:, 1:]
-        surr2 = ratio.clamp(1 - self.clip_eps_low, 1 + self.clip_eps_high) * advantages[:, 1:]
+        ratio = (log_probs - old_log_probs).exp()
+        surr1 = ratio * advantages
+        surr2 = ratio.clamp(1 - self.clip_eps_low, 1 + self.clip_eps_high) * advantages
         loss = -torch.min(surr1, surr2)
         
         if action_mask is not None:
@@ -81,7 +81,7 @@ class PolicyLoss(nn.Module):
                 action_mask = torch.cat(action_mask, dim=0).unsqueeze(0)
 
         if action_mask is not None:
-            loss = loss * action_mask[:, 1:]
+            loss = loss * action_mask
 
         if self.divide_loss_by is not None:
             loss = loss.sum(-1) / self.divide_loss_by
