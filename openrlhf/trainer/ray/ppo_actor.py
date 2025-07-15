@@ -423,7 +423,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=experience.action_mask,
+            action_mask=torch.tensor(experience.action_mask, device=action_log_probs.device),
         )
 
         if self.args.use_kl_loss:
@@ -443,7 +443,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 # convert tensor into list of tensors so that it's easier to manipulate
                 # within dataset.
 
-                kl = unpacking_samples(kl, num_actions)
+                kl = unpacking_samples(kl, experience.packed_seq_lens)
                 kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=action_log_probs.device)
 
             kl_loss = kl_mean.mean()
