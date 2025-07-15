@@ -256,7 +256,7 @@ class Actor(nn.Module):
                 log_probs = per_token_logps[:, :-1]
             else:
                 log_probs = log_probs_from_logits(
-                    output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
+                    output["logits"][:, :, :], sequences[:, :], temperature=self.temperature
                 )
 
             
