@@ -264,8 +264,8 @@ class Actor(nn.Module):
             if action_mask is not None:
                 offset = 0
                 for seq_len in packed_seq_lens:
-                    start, end = max(0, offset - 1), offset + seq_len - 1
-                    action_log_probs.append(log_probs[:, start:end] * action_mask[:, start+1:end+1].float())
+                    start, end = offset, offset + seq_len
+                    action_log_probs.append(log_probs[:, start:end] * action_mask[:, start:end].float())
                     offset += seq_len   
             else:
                 offset = 0
