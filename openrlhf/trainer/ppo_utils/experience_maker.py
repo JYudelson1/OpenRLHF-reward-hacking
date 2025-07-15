@@ -484,7 +484,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 if base_action_log_probs is not None:
                     base_action_log_probs = unpacking_samples(base_action_log_probs, packed_seq_lens)
 
-                kl = unpacking_samples(kl, num_actions)
+                kl = unpacking_samples(kl, packed_seq_lens)
                 kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=device)
 
             if not args.use_kl_loss:
