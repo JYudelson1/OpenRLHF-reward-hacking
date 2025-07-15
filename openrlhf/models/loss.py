@@ -70,7 +70,7 @@ class PolicyLoss(nn.Module):
         old_log_probs: torch.Tensor,
         advantages: torch.Tensor,
         action_mask: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         ratio = (log_probs - old_log_probs).exp()
         surr1 = ratio * advantages
         surr2 = ratio.clamp(1 - self.clip_eps_low, 1 + self.clip_eps_high) * advantages
@@ -91,7 +91,16 @@ class PolicyLoss(nn.Module):
             loss = loss.mean(-1)
             
 
-        return loss
+        logs = {
+            "max_probability_ratio": ratio.max(-1).values,
+            "mean_probability_ratio": ratio.mean(-1),
+            "max_advantage_absolute_value": advantages.abs().max(-1).values,
+        }
+        if action_mask is not None:
+            logs["action_mask_sum"] = action_mask.sum(-1)
+            logs["action_mask_mean"] = action_mask.mean(-1)
+
+        return loss, logs
 
 
 class ValueLoss(nn.Module):
