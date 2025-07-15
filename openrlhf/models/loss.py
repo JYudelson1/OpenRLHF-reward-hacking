@@ -78,10 +78,10 @@ class PolicyLoss(nn.Module):
         
         if action_mask is not None:
             if isinstance(action_mask, list):
-                action_mask = torch.cat(action_mask, dim=0).unsqueeze(0)[:, 1:]
+                action_mask = torch.cat(action_mask, dim=0).unsqueeze(0)
 
         if action_mask is not None:
-            loss = loss * action_mask
+            loss = loss * action_mask[:, 1:]
 
         if self.divide_loss_by is not None:
             loss = loss.sum(-1) / self.divide_loss_by
