@@ -232,7 +232,7 @@ class Actor(nn.Module):
 
         if not self.packing_samples:
             log_probs = log_probs_from_logits(
-                output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
+                output["logits"][:, :-1, :], sequences, temperature=self.temperature
             )
             action_log_probs = log_probs[:, -num_actions:]
         else:
@@ -256,13 +256,13 @@ class Actor(nn.Module):
                 log_probs = per_token_logps[:, :-1]
             else:
                 log_probs = log_probs_from_logits(
-                    output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
+                    output["logits"][:, :-1, :], sequences, temperature=self.temperature
                 )
 
             
             action_log_probs = []
             if action_mask is not None:
-                sliced_action_mask = action_mask[:, 1:]
+                sliced_action_mask = action_mask
                 assert log_probs.shape == sliced_action_mask.shape, f"{log_probs.shape=} {sliced_action_mask.shape=}"
                 offset = 0
                 for seq_len in packed_seq_lens:
