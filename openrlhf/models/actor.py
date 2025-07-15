@@ -265,7 +265,7 @@ class Actor(nn.Module):
                 offset = 0
                 for seq_len in packed_seq_lens:
                     start, end = max(0, offset), offset + seq_len
-                    action_log_probs.append(log_probs[:, start:end] * action_mask[:, start:end].float())
+                    action_log_probs.append(log_probs[:, start:end].where(action_mask[:, start+1:end+1], 0))
                     offset += seq_len   
             else:
                 offset = 0
@@ -276,10 +276,14 @@ class Actor(nn.Module):
                     offset += seq_len
             action_log_probs = torch.cat(action_log_probs, dim=1)
 
-        if return_output:
+        if return_output and return_action_log_probs:
             return (action_log_probs, output)
-        else:
+        elif return_output and not return_action_log_probs:
+            return (log_probs, output)
+        elif return_action_log_probs:
             return action_log_probs
+        else:
+            return log_probs
 
     def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs={"use_reentrant": False}):
         self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)

@@ -389,6 +389,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 num_acts,
                 attn_mask.to(device),
                 action_mask=action_mask,
+                return_action_log_probs=True,
                 ring_attn_group=self.strategy.ring_attn_group,
                 logps_allgather=True,
                 packed_seq_lens=packed_lens,
