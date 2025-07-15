@@ -8,6 +8,7 @@ import torch.nn.functional as F
 
 
 from .experience_maker import Experience
+from openrlhf.models.utils import unpacking_samples
 
 
 @dataclass
@@ -39,6 +40,10 @@ class BufferItem:
 
 
 def split_experience_batch(experience: Experience) -> List[BufferItem]:
+    # Prepocess Action Mask
+    if experience.action_mask is not None:
+        experience.action_mask = unpacking_samples(experience.action_mask, [len(seq) for seq in experience.sequences])
+    
     batch_size = len(experience.sequences)
     batch_kwargs = [{} for _ in range(batch_size)]
     keys = (
