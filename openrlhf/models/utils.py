@@ -7,7 +7,6 @@ import torch.nn.functional as F
 def compute_approx_kl(
     log_probs: torch.Tensor,
     log_probs_base: torch.Tensor,
-    action_mask: Optional[torch.Tensor] = None,
     kl_estimator: str = "k1",
 ) -> torch.Tensor:
     """
@@ -22,8 +21,6 @@ def compute_approx_kl(
 
     if kl_estimator == "k1":
         log_ratio = log_probs.float() - log_probs_base.float()
-        if action_mask is not None:
-            log_ratio = log_ratio * action_mask
 
     # The k2 estimator is the non negative kl approximation in
     # http://joschu.net/blog/kl-approx.html
@@ -32,16 +29,12 @@ def compute_approx_kl(
     # used in https://arxiv.org/pdf/2310.10505.
     if kl_estimator == "k2":
         log_ratio = log_probs.float() - log_probs_base.float()
-        if action_mask is not None:
-            log_ratio = log_ratio * action_mask
         log_ratio = log_ratio**2 / 2.0
 
     # The k3 estimator is the non negative kl approximation in
     # http://joschu.net/blog/kl-approx.html
     if kl_estimator == "k3":
         log_ratio = log_probs.float() - log_probs_base.float()
-        if action_mask is not None:
-            log_ratio = log_ratio * action_mask
         log_ratio = -log_ratio
         log_ratio = log_ratio.exp() - 1 - log_ratio
 
