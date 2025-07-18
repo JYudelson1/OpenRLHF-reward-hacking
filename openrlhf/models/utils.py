@@ -90,7 +90,7 @@ def compute_reward(
         #     reward.append(kl_reward)
         for kl_seg, mask_seg in zip(kl, action_mask):
             kl_reward = -kl_coef * kl_seg
-            eos_indices = mask_seg.size(1) - 1 - mask_seg.long().fliplr().argmax(dim=1, keepdim=True)
+            eos_indices = mask_seg.size(0) - 1 - mask_seg.long().fliplr().argmax(dim=0, keepdim=True)
             last_reward = torch.zeros_like(kl_seg).scatter_(dim=1, index=eos_indices, src=r.unsqueeze(1).to(kl_seg.dtype))
             reward.append(last_reward + kl_reward)
 
