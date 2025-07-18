@@ -262,7 +262,7 @@ class Actor(nn.Module):
             
             action_log_probs = []
             if action_mask is not None:
-                action_log_probs = torch.masked_select(log_probs, action_mask.to(dtype=torch.bool)).unsqueeze(0)
+                action_log_probs = torch.masked_select(log_probs, action_mask.to(dtype=torch.bool)[:, :-1]).unsqueeze(0)
             else:
                 offset = 0
                 assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
