@@ -405,6 +405,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             ring_attn_group=self.strategy.ring_attn_group,
             logps_allgather=True,
             packed_seq_lens=packed_seq_lens,
+            return_action_log_probs=True,
         )
         # unpad sequence ensures that pad tokens do not contribute to the loss calculation.
         if self.strategy.ring_attn_group is not None:
