@@ -91,7 +91,7 @@ def compute_reward(
         for i, (kl_seg, mask_seg) in enumerate(zip(kl, action_mask)):
             kl_reward = -kl_coef * kl_seg
             last_action_index = torch.where(mask_seg == 0)[0][-1]
-            num_actions = action_mask.size(0) - last_action_index - 1
+            num_actions = action_mask.size(0) - last_action_index
             kl_reward[-num_actions:] += r[i]
             reward.append(kl_reward)
 
