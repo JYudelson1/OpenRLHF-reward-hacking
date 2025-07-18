@@ -262,11 +262,7 @@ class Actor(nn.Module):
             
             action_log_probs = []
             if action_mask is not None:
-                offset = 0
-                for seq_len in packed_seq_lens:
-                    start, end = max(0, offset), offset + seq_len
-                    action_log_probs.append(log_probs[:, start:end].where(action_mask[:, start+1:end+1].to(dtype=torch.bool), 0))
-                    offset += seq_len   
+                action_log_probs = torch.masked_select(log_probs, action_mask.to(dtype=torch.bool)).unsqueeze(0)
             else:
                 offset = 0
                 assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
@@ -274,7 +270,7 @@ class Actor(nn.Module):
                     start, end = max(0, offset + seq_len - num_action - 1), offset + seq_len - 1
                     action_log_probs.append(log_probs[:, start:end])
                     offset += seq_len
-            action_log_probs = torch.cat(action_log_probs, dim=1)
+                action_log_probs = torch.cat(action_log_probs, dim=1)
 
         if return_output and return_action_log_probs:
             return (action_log_probs, output)
