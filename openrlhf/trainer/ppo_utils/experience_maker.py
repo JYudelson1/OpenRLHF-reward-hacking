@@ -562,7 +562,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         
         # Get lengths
         lengths = [len(element) for experience in experiences for element in experience.sequences]
-        print(f"{lengths[0].shape=}")
         lengths = torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
         print(f"{lengths.shape=}")
         
