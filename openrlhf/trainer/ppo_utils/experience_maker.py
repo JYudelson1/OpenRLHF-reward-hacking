@@ -620,7 +620,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             experience.base_action_log_probs = remove_zero_rows(experience.base_action_log_probs, nonzero_row_flat)
             experience.value = remove_zero_rows(experience.value, nonzero_row_flat)
             experience.info["num_actions"] = remove_zero_rows(experience.info["num_actions"], nonzero_row_flat)
-            assert experience.action_mask is None, "not implemented yet, sorry"    
+            assert experience.action_mask is None, "not implemented yet, sorry"  
+            
+            assert len(experience.sequences) == len(experience.kl) == len(experience.info["num_actions"]) == len(experience.action_log_probs) == len(experience.base_action_log_probs), f"len(sequences) = {len(experience.sequences)}, len(kl) = {len(experience.kl)}, len(num_actions) = {len(experience.info['num_actions'])}, len(action_log_probs) = {len(experience.action_log_probs)}, len(base_action_log_probs) = {len(experience.base_action_log_probs)}"
             
             num_actions = experience.info["num_actions"]
             reward = compute_reward(
