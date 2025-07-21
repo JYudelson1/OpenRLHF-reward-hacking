@@ -572,9 +572,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             # And `k3 KL` has a larger variance than `k1 KL` under a categorical distribution.
             rewards = rewards - rewards.mean(-1, keepdim=True)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
-            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
+            
             nonzero_rows = (rewards != 0).any(dim=1).sum()
             frac_nonzero_rows = nonzero_rows / rewards.shape[0]
+            
+            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
 
             lengths = lengths - lengths.mean(-1, keepdim=True)
             lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
@@ -583,9 +585,11 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         elif args.advantage_estimator == "grpo":
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
-            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
+            
             nonzero_rows = (rewards != 0).any(dim=1).sum()
             frac_nonzero_rows = nonzero_rows / rewards.shape[0]
+            
+            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
             
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
             lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
