@@ -562,8 +562,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if args.advantage_estimator == "rloo":            
             baseline = (rewards.sum(-1, keepdim=True) - rewards) / (args.n_samples_per_prompt - 1)
             rewards = rewards - baseline
-            nonzero_rows = (rewards != 0).any(dim=1).sum()
-            frac_nonzero_rows = nonzero_rows / rewards.shape[0]
+            nonzero_rows = (rewards != 0).any(dim=1)
+            frac_nonzero_rows = nonzero_rows.sum() / rewards.shape[0]
+            nonzero_rows_chunked = nonzero_rows.chunk(len(experiences))
             
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             rewards = rewards.flatten().to(device="cpu").chunk(len(experiences))
@@ -573,8 +574,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = rewards - rewards.mean(-1, keepdim=True)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             
-            nonzero_rows = (rewards != 0).any(dim=1).sum()
-            frac_nonzero_rows = nonzero_rows / rewards.shape[0]
+            nonzero_rows = (rewards != 0).any(dim=1)
+            frac_nonzero_rows = nonzero_rows.sum() / rewards.shape[0]
+            nonzero_rows_chunked = nonzero_rows.chunk(len(experiences))
             
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
 
@@ -586,8 +588,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             
-            nonzero_rows = (rewards != 0).any(dim=1).sum()
-            frac_nonzero_rows = nonzero_rows / rewards.shape[0]
+            nonzero_rows = (rewards != 0).any(dim=1)
+            frac_nonzero_rows = nonzero_rows.sum() / rewards.shape[0]
+            nonzero_rows_chunked = nonzero_rows.chunk(len(experiences))
             
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
             
@@ -602,9 +605,23 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 experience.info["extra_metrics/frac_mixed_reward_groups"] = torch.tensor([float(frac_nonzero_rows.item()) for _ in experience.sequences])
 
         # calculate return and advantages
-        for experience, reward in zip(experiences, rewards):
+        for experience, reward, nonzero_row in zip(experiences, rewards, nonzero_rows_chunked):
+            nonzero_row_flat = nonzero_row.repeat_interleave(args.n_samples_per_prompt)
             experience = experience.to_device("cuda")
             reward = reward.to(device="cuda")
+            
+            # Remove all groups with the exact same reward (since there would be no value in training on them)
+            reward = reward[nonzero_row_flat]
+            
+            experience.kl = remove_zero_rows(experience.kl, nonzero_row_flat)
+            experience.sequences = remove_zero_rows(experience.sequences, nonzero_row_flat)
+            experience.attention_mask = remove_zero_rows(experience.attention_mask, nonzero_row_flat)
+            experience.action_log_probs = remove_zero_rows(experience.action_log_probs, nonzero_row_flat)
+            experience.base_action_log_probs = remove_zero_rows(experience.base_action_log_probs, nonzero_row_flat)
+            experience.value = remove_zero_rows(experience.value, nonzero_row_flat)
+            experience.info["num_actions"] = remove_zero_rows(experience.info["num_actions"], nonzero_row_flat)
+            assert experience.action_mask is None, "not implemented yet, sorry"    
+            
             num_actions = experience.info["num_actions"]
             reward = compute_reward(
                 reward,
@@ -1154,3 +1171,8 @@ def add_extra_metrics(
 
         info[f"extra_metrics/{key}"] = torch.tensor(metric_list, device=device)
         info[f"extra_metrics/{key}/is_missing"] = torch.tensor(is_missing_list, device=device)
+
+def remove_zero_rows(feature: Optional[list], nonzero_row_flat: torch.Tensor) -> Optional[list]:
+    if feature is None:
+        return None
+    return [feature[i] for i in range(len(feature)) if nonzero_row_flat[i]]
