@@ -605,7 +605,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         rewards = (r + l for r, l in zip(rewards, lengths))
 
         # calculate return and advantages
-        for experience, reward, nonzero_row in zip(experiences, rewards, nonzero_rows_chunked):
+        for experience, reward, nonzero_row in zip(experiences, rewards, nonzero_rows_chunked, strict=True):
             nonzero_row_flat = nonzero_row.repeat_interleave(args.n_samples_per_prompt)
             experience = experience.to_device("cuda")
             reward = reward.to(device="cuda")
