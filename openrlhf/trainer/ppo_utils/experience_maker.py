@@ -551,19 +551,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # get rewards from experiences
         rewards = [experience.info["reward"] for experience in experiences]
-        print(f"{rewards[0].shape=}")
         rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
-        print(f"{rewards.shape=}")
         
         rewards_missing = [experience.info["reward_missing"] for experience in experiences]
-        print(f"{rewards_missing[0].shape=}")
         rewards_missing = torch.cat(rewards_missing).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
-        print(f"{rewards_missing.shape=}")
         
         # Get lengths
         lengths = [len(element) for experience in experiences for element in experience.sequences]
         lengths = torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
-        print(f"{lengths.shape=}")
         
         # reward shaping
         if args.advantage_estimator == "rloo":            
@@ -594,16 +589,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         elif args.advantage_estimator == "grpo":
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
-            print(f"598 {rewards.shape=}")
             
             nonzero_rows = (rewards != 0).any(dim=1)
-            print(f"601 {nonzero_rows.shape=}")
             frac_nonzero_rows = nonzero_rows.sum() / rewards.shape[0]
             nonzero_rows_chunked = nonzero_rows.repeat_interleave(args.n_samples_per_prompt).chunk(len(experiences))
-            print(f"603 {nonzero_rows_chunked[0].shape=}")
             
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
-            print(f"605 {rewards[0].shape=}")
             
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
             lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
@@ -614,7 +605,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 experience.info["extra_metrics/frac_mixed_reward_groups"] = torch.tensor([float(frac_nonzero_rows.item()) for _ in experience.sequences])
                 
         rewards = [r + l for r, l in zip(rewards, lengths, strict=True)]
-        print(f"616 {rewards[0].shape=}")
 
         # calculate return and advantages
         for experience, reward, nonzero_row in zip(experiences, rewards, nonzero_rows_chunked, strict=True):
