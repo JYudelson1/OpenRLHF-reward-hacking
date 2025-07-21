@@ -602,7 +602,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             for experience in experiences:
                 experience.info["extra_metrics/frac_mixed_reward_groups"] = torch.tensor([float(frac_nonzero_rows.item()) for _ in experience.sequences])
                 
-        rewards = (r + l for r, l in zip(rewards, lengths))
+        rewards = (r + l for r, l in zip(rewards, lengths, strict=True))
 
         # calculate return and advantages
         for experience, reward, nonzero_row in zip(experiences, rewards, nonzero_rows_chunked, strict=True):
