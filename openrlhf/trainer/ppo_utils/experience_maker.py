@@ -547,8 +547,6 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         """
         args = self.strategy.args
         
-        print(f"{len(experiences)=}")
-
         # get rewards from experiences
         rewards = [experience.info["reward"] for experience in experiences]
         rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
@@ -619,7 +617,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             experience.attention_mask = remove_zero_rows(experience.attention_mask, nonzero_row)
             experience.action_log_probs = remove_zero_rows(experience.action_log_probs, nonzero_row)
             experience.base_action_log_probs = remove_zero_rows(experience.base_action_log_probs, nonzero_row)
-            experience.value = remove_zero_rows(experience.value, nonzero_row)
+            experience.values = remove_zero_rows(experience.values, nonzero_row)
             experience.info["num_actions"] = remove_zero_rows(experience.info["num_actions"], nonzero_row)
             assert experience.action_mask is None, "not implemented yet, sorry"  
             
