@@ -599,7 +599,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             nonzero_rows = (rewards != 0).any(dim=1)
             print(f"601 {nonzero_rows.shape=}")
             frac_nonzero_rows = nonzero_rows.sum() / rewards.shape[0]
-            nonzero_rows_chunked = nonzero_rows.chunk(len(experiences))
+            nonzero_rows_chunked = nonzero_rows.repeat_interleave(args.n_samples_per_prompt).chunk(len(experiences))
             print(f"603 {nonzero_rows_chunked[0].shape=}")
             
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
@@ -618,20 +618,19 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # calculate return and advantages
         for experience, reward, nonzero_row in zip(experiences, rewards, nonzero_rows_chunked, strict=True):
-            nonzero_row_flat = nonzero_row.repeat_interleave(args.n_samples_per_prompt)
             experience = experience.to_device("cuda")
             reward = reward.to(device="cuda")
             
             # Remove all groups with the exact same reward (since there would be no value in training on them)
-            reward = reward[nonzero_row_flat]
+            reward = reward[nonzero_row]
             
-            experience.kl = remove_zero_rows(experience.kl, nonzero_row_flat)
-            experience.sequences = remove_zero_rows(experience.sequences, nonzero_row_flat)
-            experience.attention_mask = remove_zero_rows(experience.attention_mask, nonzero_row_flat)
-            experience.action_log_probs = remove_zero_rows(experience.action_log_probs, nonzero_row_flat)
-            experience.base_action_log_probs = remove_zero_rows(experience.base_action_log_probs, nonzero_row_flat)
-            experience.value = remove_zero_rows(experience.value, nonzero_row_flat)
-            experience.info["num_actions"] = remove_zero_rows(experience.info["num_actions"], nonzero_row_flat)
+            experience.kl = remove_zero_rows(experience.kl, nonzero_row)
+            experience.sequences = remove_zero_rows(experience.sequences, nonzero_row)
+            experience.attention_mask = remove_zero_rows(experience.attention_mask, nonzero_row)
+            experience.action_log_probs = remove_zero_rows(experience.action_log_probs, nonzero_row)
+            experience.base_action_log_probs = remove_zero_rows(experience.base_action_log_probs, nonzero_row)
+            experience.value = remove_zero_rows(experience.value, nonzero_row)
+            experience.info["num_actions"] = remove_zero_rows(experience.info["num_actions"], nonzero_row)
             assert experience.action_mask is None, "not implemented yet, sorry"  
             
             assert len(experience.sequences) == len(experience.kl) == len(experience.info["num_actions"]) == len(experience.action_log_probs) == len(experience.base_action_log_probs), f"len(sequences) = {len(experience.sequences)}, len(kl) = {len(experience.kl)}, len(num_actions) = {len(experience.info['num_actions'])}, len(action_log_probs) = {len(experience.action_log_probs)}, len(base_action_log_probs) = {len(experience.base_action_log_probs)}"
