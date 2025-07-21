@@ -599,7 +599,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = rewards + lengths
             
             for experience in experiences:
-                experience.info["extra_metrics/frac_mixed_reward_groups"] = frac_nonzero_rows
+                experience.info["extra_metrics/frac_mixed_reward_groups"] = float(frac_nonzero_rows.item())
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards):
