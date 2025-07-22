@@ -1229,12 +1229,12 @@ def rebalance_experiences(experiences: list[Experience], micro_rollout_batch_siz
         assert len(v) == total_len, f"key info/{k} has length {len(v)} but total_len is {total_len}"
         all_infos[k] = torch.tensor(v)
     
-    size_per_group = total_len // micro_rollout_batch_size
-    for i in range(micro_rollout_batch_size):
+    size_per_group = total_len // len(experiences)
+    for i in range(len(experiences)):
         start = i * size_per_group
         end = start + size_per_group
-        # if i == micro_rollout_batch_size - 1:
-        #     end = total_len
+        if i == len(experiences) - 1:
+            end = total_len
         info = {k: v[start:end] for k, v in all_infos.items() if v is not None}
         exp = Experience(**{k: v[start:end] if v is not None else None for k, v in all_items.items()}, info=info)
         output.append(exp)
