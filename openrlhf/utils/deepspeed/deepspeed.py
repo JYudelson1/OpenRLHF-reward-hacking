@@ -65,6 +65,11 @@ class DeepspeedStrategy(ABC):
         self.overlap_comm = getattr(args, "overlap_comm", False)
         self.torch_compile = getattr(args, "torch_compile", False)
         self.use_ds_universal_ckpt = getattr(args, "use_ds_universal_ckpt", False)
+        
+        self.ds_tensor_parallel_size = getattr(args, "ds_tensor_parallel_size", 1)
+        if self.ds_tensor_parallel_size > 1:
+            assert deepspeed.version >= "0.16.4", "DeepSpeed version must be >= 0.16.4 for tensor parallel training"
+            assert bf16, "BF16 is required for tensor parallel training"
 
         self.is_rlhf = False
         self.time_steps = defaultdict(int)
@@ -91,7 +96,7 @@ class DeepspeedStrategy(ABC):
         self.setup_ring_attn()
         self.world_size = dist.get_world_size()
         self.accumulated_gradient = (
-            self.train_batch_size * self.ring_attn_size // self.micro_train_batch_size // self.world_size
+            self.train_batch_size * self.ring_attn_size * self.ds_tensor_parallel_size // self.micro_train_batch_size // self.world_size
         )
 
     def setup_ring_attn(self):
@@ -210,6 +215,15 @@ class DeepspeedStrategy(ABC):
     def _ds_init_train_model(self, model, optim, scheduler):
         is_actor = isinstance(model, Actor)
         ds_config = self.get_ds_train_config(is_actor)
+        
+        if self.ds_tensor_parallel_size > 1:
+            tp_model = deepspeed.tp_model_init(
+                model=model.model if is_actor else model, tp_size=self.ds_tensor_parallel_size, dtype=torch.bfloat16
+            )
+            if is_actor:
+                model.model = tp_model
+            else:
+                model = tp_model
 
         engine, optim, _, scheduler = deepspeed.initialize(
             model=model.model if is_actor else model,
@@ -240,6 +254,7 @@ class DeepspeedStrategy(ABC):
             grad_accum_dtype=self.grad_accum_dtype,
             overlap_comm=self.overlap_comm,
             use_ds_universal_ckpt=self.use_ds_universal_ckpt,
+            ds_tensor_parallel_size=self.ds_tensor_parallel_size,
         )
 
         ds_config["train_micro_batch_size_per_gpu"] = self.micro_train_batch_size
@@ -256,6 +271,15 @@ class DeepspeedStrategy(ABC):
             return model
         is_actor = isinstance(model, Actor)
         ds_config = self.get_ds_eval_config(offload=getattr(model, "_offload", False))
+        
+        if self.ds_tensor_parallel_size > 1:
+            tp_model = deepspeed.tp_model_init(
+                model=model.model if is_actor else model, tp_size=self.ds_tensor_parallel_size, dtype=torch.bfloat16
+            )
+            if is_actor:
+                model.model = tp_model
+            else:
+                model = tp_model
 
         engine, *_ = deepspeed.initialize(
             model=model.model if is_actor else model,
@@ -273,9 +297,14 @@ class DeepspeedStrategy(ABC):
 
     def get_ds_eval_config(self, offload=False):
         # DS Config
-        ds_config = get_eval_ds_config(offload=offload, stage=self.stage if self.stage == 3 else 0, bf16=self.bf16)
+        ds_config = get_eval_ds_config(
+            offload=offload,
+            stage=self.stage if self.stage == 3 else 0,
+            bf16=self.bf16,
+            ds_tensor_parallel_size=self.ds_tensor_parallel_size,
+        )
         ds_config["train_micro_batch_size_per_gpu"] = self.micro_train_batch_size
-        ds_config["train_batch_size"] = self.train_batch_size * self.ring_attn_size
+        ds_config["train_batch_size"] = self.train_batch_size * self.ring_attn_size * self.ds_tensor_parallel_size
 
         return ds_config
 

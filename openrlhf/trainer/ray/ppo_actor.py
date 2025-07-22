@@ -305,7 +305,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         dataloader = DataLoader(
             self.replay_buffer,
             batch_size=self.replay_buffer.sample_batch_size,
-            shuffle=False if self.strategy.ring_attn_group is not None else True,
+            shuffle=False if self.strategy.ring_attn_group is not None or self.strategy.ds_tensor_parallel_size > 1 else True,
             drop_last=True,
             pin_memory=self.dataloader_pin_memory,
             collate_fn=self.replay_buffer.collate_fn,
@@ -529,23 +529,32 @@ class ActorPPOTrainer(BasePPOTrainer):
                         )
                         for engine in self.vllm_engines
                     ]
+                if self.strategy.args.ds_tensor_parallel_size > 1:
+                    with deepspeed.module_inject.layers.GatherReplacedLayerParams([param], model, enabled=True):
+                        if torch.distributed.get_rank() == 0:
+                            if use_ray:
+                                import ray.util.collective as collective
 
-                # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-                with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
-                    if torch.distributed.get_rank() == 0:
-                        if use_ray:
-                            import ray.util.collective as collective
+                                collective.broadcast(param.data, 0, group_name=self._model_update_group)
+                            else:
+                                torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
+                            ray.get(refs)
+                else:
+                    # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
+                    with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                        if torch.distributed.get_rank() == 0:
+                            if use_ray:
+                                import ray.util.collective as collective
 
-                            collective.broadcast(param.data, 0, group_name=self._model_update_group)
-                        else:
-                            torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
-                        ray.get(refs)
+                                collective.broadcast(param.data, 0, group_name=self._model_update_group)
+                            else:
+                                torch.distributed.broadcast(param.data, 0, group=self._model_update_group)
+                            ray.get(refs)
             # CUDA IPC
             else:
                 from torch.multiprocessing.reductions import reduce_tensor
-
-                # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-                with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                
+                def sync_param(param):
                     weight = param.data.clone()
                     ipc_handle = reduce_tensor(weight)
 
@@ -572,6 +581,14 @@ class ActorPPOTrainer(BasePPOTrainer):
                         ray.get(refs)
                     torch.distributed.barrier()
                     torch.cuda.synchronize()
+
+                if self.strategy.ds_tensor_parallel_size > 1:
+                    with deepspeed.module_inject.layers.GatherReplacedLayerParams([param], model, enabled=True):
+                        sync_param(param)
+                else:
+                    # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
+                    with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                        sync_param(param)
 
         if cache_reset_refs:
             ray.get(cache_reset_refs)

@@ -11,6 +11,7 @@ def get_train_ds_config(
     grad_accum_dtype=None,
     overlap_comm=False,
     use_ds_universal_ckpt=False,
+    ds_tensor_parallel_size=1,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -20,6 +21,7 @@ def get_train_ds_config(
             "device": "cpu" if adam_offload else "none",
             "pin_memory": True,
         },
+        "gather_16bit_weights_on_model_save": True,
         "sub_group_size": "auto",
         "stage3_max_live_parameters": "auto",
         "stage3_max_reuse_distance": "auto",
@@ -50,6 +52,9 @@ def get_train_ds_config(
         "checkpoint": {
             "load_universal": use_ds_universal_ckpt,
         },
+        "tensor_parallel": {
+            "autotp_size": ds_tensor_parallel_size,
+        },
     }
 
 
@@ -57,6 +62,7 @@ def get_eval_ds_config(
     offload,
     stage=0,
     bf16=True,
+    ds_tensor_parallel_size=1,
 ):
     zero_opt_dict = {
         "stage": stage,
@@ -78,6 +84,9 @@ def get_eval_ds_config(
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
+        "tensor_parallel": {
+            "autotp_size": ds_tensor_parallel_size,
+        },
     }
 
 
