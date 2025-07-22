@@ -259,7 +259,7 @@ class Actor(nn.Module):
                     output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
                 )
 
-            assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
+            assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens), f"num_actions: {num_actions}, packed_seq_lens: {packed_seq_lens}"
             action_log_probs = []
             offset = 0
             for num_action, seq_len in zip(num_actions, packed_seq_lens):
