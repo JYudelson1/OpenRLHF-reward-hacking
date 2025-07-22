@@ -1234,7 +1234,7 @@ def rebalance_experiences(experiences: list[Experience], micro_rollout_batch_siz
         start = i * micro_rollout_batch_size
         end = min(start + micro_rollout_batch_size, total_len)
         info = {k: v[start:end] for k, v in all_infos.items() if v is not None}
-        exp = Experience(**{k: v[start:end] for k, v in all_items.items() if v is not None}, info=info)
+        exp = Experience(**{k: v[start:end] for k, v in all_items.items() if v is not None else None}, info=info)
         output.append(exp)
     return output
             
