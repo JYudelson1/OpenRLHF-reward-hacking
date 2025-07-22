@@ -1198,15 +1198,15 @@ def rebalance_experiences(experiences: list[Experience], micro_rollout_batch_siz
     for experience in experiences:
         for key in all_items.keys():
             value = getattr(experience, key)
-        if value is None:
-            assert all_items[key] is None or all_items[key] == [], f"key {key} is not None in all_items"
-            all_items[key] = None
-            continue
-        if not packing_samples:
-            raise NotImplementedError("not implemented yet, sorry")
-        else:
-            assert isinstance(value, list), f"key {key} is not a list, but a {type(value)}"
-            all_items[key].extend(value)
+            if value is None:
+                assert all_items[key] is None or all_items[key] == [], f"key {key} is not None in all_items"
+                all_items[key] = None
+                continue
+            if not packing_samples:
+                raise NotImplementedError("not implemented yet, sorry")
+            else:
+                assert isinstance(value, list), f"key {key} is not a list, but a {type(value)}"
+                all_items[key].extend(value)
 
     all_infos = {}
     for experience in experiences:
