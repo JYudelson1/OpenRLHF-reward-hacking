@@ -206,15 +206,17 @@ class ActorPPOTrainer(BasePPOTrainer):
 
             for rand_prompts in self.prompts_dataloader:
                 self.experience_maker.step = steps
+                printed_one = False
                 for i, experience in enumerate(
                     self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
                 ):
-                    if i <= 1:
+                    if not printed_one and len(experience.sequences) >= 1:
                         output = self.tokenizer.batch_decode(
                             experience.sequences[0].unsqueeze(0), skip_special_tokens=True
                         )[0]
                         self.strategy.print(f"Experience {i} transcript:")
                         self.strategy.print(output)
+                        printed_one = True
                     self.replay_buffer.append(experience)
 
                     self.log_rollouts_wandb(
