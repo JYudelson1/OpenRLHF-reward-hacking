@@ -323,6 +323,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 disable=not self.strategy.is_rank_0(),
             )
             for experience in pbar:
+                print(f"experience has {len(experience.sequences)} sequences")
                 experience.to_device(device)
                 status = self.training_step(experience)
 
@@ -368,7 +369,9 @@ class ActorPPOTrainer(BasePPOTrainer):
         return status_mean
 
     def training_step(self, experience: Experience) -> Dict[str, float]:
+        print(f"pre-train")
         self.actor.train()
+        print(f"post-train")
 
         # TODO: this is a bad indicator to say that data is packed...
         if isinstance(experience.sequences, list):
@@ -402,6 +405,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 base_action_log_probs = experience.base_action_log_probs
 
         # actor loss
+        print(f"pre-actor")
         action_log_probs, output = self.actor(
             sequences,
             num_actions,
@@ -411,6 +415,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             logps_allgather=True,
             packed_seq_lens=packed_seq_lens,
         )
+        print(f"post-actor")
         # unpad sequence ensures that pad tokens do not contribute to the loss calculation.
         if self.strategy.ring_attn_group is not None:
             assert pad_len is not None
@@ -425,23 +430,27 @@ class ActorPPOTrainer(BasePPOTrainer):
             )
 
         # loss function
+        print(f"pre-loss")
         actor_loss, actor_loss_logs = self.actor_loss_fn(
             action_log_probs,
             old_action_log_probs,
             advantages,
             action_mask=experience.action_mask,
         )
+        print(f"post-loss")
 
         experience.info |= actor_loss_logs
 
         if self.args.use_kl_loss:
             if self.initial_model is not None:
+                print(f"pre-kl")
                 kl = compute_approx_kl(
                     action_log_probs,
                     base_action_log_probs,
                     experience.action_mask,
                     kl_estimator=self.args.kl_estimator,
                 )
+                print(f"post-kl")
             else:
                 kl = torch.zeros_like(action_log_probs, dtype=action_log_probs.dtype, device=action_log_probs.device)
 
@@ -465,8 +474,9 @@ class ActorPPOTrainer(BasePPOTrainer):
         else:
             aux_loss = 0
         loss = actor_loss + aux_loss * self.args.aux_loss_coef + kl_loss * self.kl_ctl.value
+        print(f"pre-backward")
         self.strategy.backward(loss, self.actor, self.actor_optim)
-
+        print(f"post-backward")
         # ptx loss
         if self.pretrain_dataloader is not None:
             data = next(self.pretrain_dataloader)
@@ -491,7 +501,9 @@ class ActorPPOTrainer(BasePPOTrainer):
             loss = ptx_loss + aux_loss * self.args.aux_loss_coef
             self.strategy.backward(self.ptx_coef * loss, self.actor, self.actor_optim)
 
+        print(f"pre-optimizer-step")
         self.strategy.optimizer_step(self.actor_optim, self.actor, self.actor_scheduler, name="actor")
+        print(f"post-optimizer-step")
         if self.ema_model:
             self.strategy.moving_average(self.actor, self.ema_model, self.ema_beta, "cuda")
 
