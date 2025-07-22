@@ -68,12 +68,17 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
         batch_kwargs[i]["info"] = {}
     for k, v in experience.info.items():
         vals = torch.unbind(v)
-        assert batch_size == len(vals), f"key {k} has length {len(vals)} but batch_size is {batch_size}"
-        for i, vv in enumerate(vals):
-            if isinstance(vv, torch.Tensor):
-                assert vv.numel() == 1, f"info[{k}] must be a scalar tensor, but got {vv.shape}"
-                vv = vv.item()
-            batch_kwargs[i]["info"][k] = vv
+        if batch_size == len(vals):
+            for i, vv in enumerate(vals):
+                if isinstance(vv, torch.Tensor):
+                    assert vv.numel() == 1, f"info[{k}] must be a scalar tensor, but got {vv.shape}"
+                    vv = vv.item()
+                batch_kwargs[i]["info"][k] = vv
+        else:
+            assert k.startswith("extra_metrics"), f"info[{k}] has length {len(vals)} but batch_size is {batch_size}"
+            avg_val = torch.stack(vals).mean()
+            for i in range(batch_size):
+                batch_kwargs[i]["info"][k] = avg_val
 
     items = [BufferItem(**kwargs) for kwargs in batch_kwargs]
     return items
