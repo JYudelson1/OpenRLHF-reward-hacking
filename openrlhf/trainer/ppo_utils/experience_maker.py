@@ -712,6 +712,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         self,
         rewards: torch.Tensor,
         gamma: float,
+        action_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Function that computes advantages and returns from rewards using REINFORCE.
@@ -728,17 +729,16 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if isinstance(rewards, list):
             # packing samples
             # TODO: this is slow...
-            # if action_mask is not None:
-            #     returns = []
-            #     for r, am in zip(rewards, action_mask):
-            #         ret = self.get_cumulative_returns(r.unsqueeze(0), am.unsqueeze(0), gamma)
-            #         returns.append(ret.squeeze(0))
-            #     return returns
-            # else:
             returns = []
-            for r in rewards:
-                ret = self.get_cumulative_returns(r.unsqueeze(0), gamma)
-                returns.append(ret.squeeze(0))
+            if action_mask is not None:
+                for r, am in zip(rewards, action_mask):
+                    ret = self.get_cumulative_returns(r.unsqueeze(0), am.unsqueeze(0), gamma)
+                    returns.append(ret.squeeze(0))
+                return returns
+            else:
+                for r in rewards:
+                    ret = self.get_cumulative_returns(r.unsqueeze(0), gamma)
+                    returns.append(ret.squeeze(0))
             return returns
 
         response_length = rewards.size(1)
@@ -746,15 +746,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         cumulative_return = torch.zeros(rewards.size(0), device=rewards.device)
 
         # Mask invalid responses if action_mask is provided
-        # if action_mask is not None:
-        #     # TODO: THIS MIGHT BE WRONG
-        #     if action_mask.size(1) == rewards.size(1):
-        #         rewards = action_mask * rewards
-        #     # Truncate action_mask to match rewards, for packed samples
-        #     if action_mask.size(1) > rewards.size(1):
-        #         action_mask = action_mask[:, action_mask.size(1) - rewards.size(1):]
-        #     else:
-        #         assert False, "rewards has more elements than action_mask"
+        if action_mask is not None:
+            rewards = action_mask * rewards
 
         # Calculate returns by accumulating discounted rewards
         for t in reversed(range(response_length)):
