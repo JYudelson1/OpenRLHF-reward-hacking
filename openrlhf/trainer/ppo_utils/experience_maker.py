@@ -1,4 +1,4 @@
-import time
+import time, math
 from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
@@ -618,7 +618,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             experience.action_log_probs = remove_zero_rows(experience.action_log_probs, nonzero_row)
             experience.base_action_log_probs = remove_zero_rows(experience.base_action_log_probs, nonzero_row)
             experience.values = remove_zero_rows(experience.values, nonzero_row)
-            experience.info["num_actions"] = remove_zero_rows(experience.info["num_actions"], nonzero_row)
+            for k, v in experience.info.items():
+                experience.info[k] = remove_zero_rows(v, nonzero_row)
             assert experience.action_mask is None, "not implemented yet, sorry"  
             
             assert len(experience.sequences) == len(experience.kl) == len(experience.info["num_actions"]) == len(experience.action_log_probs), f"len(sequences) = {len(experience.sequences)}, len(kl) = {len(experience.kl)}, len(num_actions) = {len(experience.info['num_actions'])}, len(action_log_probs) = {len(experience.action_log_probs)}"
@@ -675,7 +676,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             del experience.info["num_actions"]
             experience.to_device("cpu")
 
-        return experiences
+        return rebalance_experiences(experiences, self.strategy.args.micro_rollout_batch_size)
 
     @torch.no_grad()
     def get_advantages_and_returns(
@@ -1178,3 +1179,62 @@ def remove_zero_rows(feature: Optional[list], nonzero_row_flat: torch.Tensor) ->
     if feature is None:
         return None
     return [feature[i] for i in range(len(feature)) if nonzero_row_flat[i]]
+
+def rebalance_experiences(experiences: list[Experience], micro_rollout_batch_size: int, packing_samples: bool) -> list[Experience]:
+    """
+    Rebalance the experiences so that each experience has the same number of samples.
+    """
+    output = []
+    all_items = {
+        "sequences": [],
+        "action_log_probs": [],
+        "base_action_log_probs": [],
+        "values": [],
+        "returns": [],
+        "advantages": [],
+        "attention_mask": [],
+        "action_mask": [],
+    }
+    for experience in experiences:
+        for key in all_items.keys():
+            value = getattr(experience, key)
+        if value is None:
+            assert all_items[key] is None or all_items[key] == [], f"key {key} is not None in all_items"
+            all_items[key] = None
+            continue
+        if not packing_samples:
+            raise NotImplementedError("not implemented yet, sorry")
+        else:
+            assert isinstance(value, list), f"key {key} is not a list, but a {type(value)}"
+            all_items[key].extend(value)
+
+    all_infos = {}
+    for experience in experiences:
+        for k, v in experience.info.items():
+            if isinstance(v, torch.Tensor):
+                v = v.tolist()
+            if isinstance(v, list):
+                if all_infos.get(k) is None:
+                    all_infos[k] = []
+                all_infos[k].extend(v)
+            else:
+                assert False, f"key {k} has value {v} of type {type(v)}, which is not a list or a tensor"
+
+    total_len = len(all_items["sequences"])
+    for key in all_items.keys():
+        if all_items[key] is not None:
+            assert len(all_items[key]) == total_len, f"key {key} has length {len(all_items[key])} but total_len is {total_len}"
+            
+    for k, v in all_infos.items():
+        assert len(v) == total_len, f"key info/{k} has length {len(v)} but total_len is {total_len}"
+        all_infos[k] = torch.tensor(v)
+    
+    num_groups = math.ceil(total_len / micro_rollout_batch_size)
+    for i in range(num_groups):
+        start = i * micro_rollout_batch_size
+        end = min(start + micro_rollout_batch_size, total_len)
+        info = {k: v[start:end] for k, v in all_infos.items() if v is not None}
+        exp = Experience(**{k: v[start:end] for k, v in all_items.items() if v is not None}, info=info)
+        output.append(exp)
+    return output
+            
