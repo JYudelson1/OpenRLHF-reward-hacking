@@ -293,6 +293,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_ds_universal_ckpt", action="store_true", help="Use deepspeed universal checkpoint", default=False
     )
+    parser.add_argument("--ds_tensor_parallel_size", type=int, default=1, help="DeepSpeed tensor parallel size")
 
     # DeepSpeed
     parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for deepspeed")
