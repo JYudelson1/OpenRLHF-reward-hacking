@@ -676,7 +676,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             del experience.info["num_actions"]
             experience.to_device("cpu")
 
-        return rebalance_experiences(experiences, self.strategy.args.micro_rollout_batch_size)
+        return rebalance_experiences(experiences, self.strategy.args.micro_rollout_batch_size, self.packing_samples)
 
     @torch.no_grad()
     def get_advantages_and_returns(
