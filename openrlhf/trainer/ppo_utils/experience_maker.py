@@ -673,7 +673,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             experience.info["return"] = return_sums
             # remove unnecessary info
             experience.kl = None
-            del experience.info["num_actions"]
+            # del experience.info["num_actions"]
             experience.to_device("cpu")
 
         return rebalance_experiences(experiences, self.strategy.args.micro_rollout_batch_size, self.packing_samples)
