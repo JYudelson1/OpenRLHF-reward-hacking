@@ -372,10 +372,14 @@ class ActorPPOTrainer(BasePPOTrainer):
 
         # TODO: this is a bad indicator to say that data is packed...
         if isinstance(experience.sequences, list):
+            assert len(experience.sequences) == len(experience.action_log_probs) == len(experience.advantages) == len(experience.action_log_probs) == len(experience.info["num_actions"])
+            if experience.base_action_log_probs is not None:
+                assert len(experience.base_action_log_probs) == len(experience.sequences)
+            
             sequences = torch.cat(experience.sequences, dim=0).unsqueeze(0)
             old_action_log_probs = torch.cat(experience.action_log_probs, dim=0).unsqueeze(0)
             advantages = torch.cat(experience.advantages, dim=0).unsqueeze(0)
-            num_actions = [v.numel() for v in experience.advantages]
+            num_actions = experience.info["num_actions"]
             packed_seq_lens = [s.numel() for s in experience.sequences]
             attention_mask = torch.cat(
                 [torch.full_like(s, i + 1) for i, s in enumerate(experience.sequences)], dim=0
