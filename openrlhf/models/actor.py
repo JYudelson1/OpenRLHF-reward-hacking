@@ -218,11 +218,15 @@ class Actor(nn.Module):
                     sequences, attention_mask, packed_seq_lens, ring_attn_group
                 )
             else:
+                print(f"reset_position_ids")
                 position_ids = reset_position_ids(attention_mask)
+                print(f"post-reset_position_ids")
             # explicitly ignore attention_mask for packing_samples
             attention_mask = None
 
+        print(f"pre-model-output")
         output = self.model(sequences, attention_mask=attention_mask, position_ids=position_ids)
+        print(f"post-model-output")
         # https://github.com/OpenRLHF/OpenRLHF/pull/634
         output["logits"] = output["logits"].to(torch.float32)
 
@@ -255,10 +259,11 @@ class Actor(nn.Module):
                 per_token_logps = all_gather(local_per_token_logps, ring_attn_group).reshape((1, -1))
                 log_probs = per_token_logps[:, :-1]
             else:
+                print(f"pre-log_probs_from_logits")
                 log_probs = log_probs_from_logits(
                     output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
                 )
-
+                print(f"post-log_probs_from_logits")
             assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens), f"num_actions: {num_actions}, packed_seq_lens: {packed_seq_lens}"
             action_log_probs = []
             offset = 0
