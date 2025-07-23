@@ -279,6 +279,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             torch.cuda.empty_cache()
             torch.distributed.barrier()
             torch.cuda.synchronize()
+            deepspeed.get_accelerator().empty_cache()
 
             # 4. broadcast weights to vllm engines
             if self.vllm_engines is not None:
