@@ -1121,7 +1121,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         vllm_engine_index=llm_indices[i],
                         step=self.step,
                     )
-                    for i, llm in enumerate(llms)
+                    for llm in llms
                 ]
             )
 
