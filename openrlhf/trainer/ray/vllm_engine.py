@@ -143,7 +143,7 @@ class LLMRayActor:
 
         self.env_data_for_rollout[rank] = data_for_rank
 
-    def generate_env_rollout(self, rank: int, sampling_params, env_makers, is_eval: bool = False, vllm_engine_index: int = 0, step: int = 0) -> list:
+    def generate_env_rollout(self, rank: int, sampling_params, env_makers, is_eval: bool, vllm_engine_index: int, step: int) -> list:
         print(f"LLMRayActor.generate_env_rollout called with {self=} {rank=} {vllm_engine_index=}")
 
         if self.rollouts is not None:
