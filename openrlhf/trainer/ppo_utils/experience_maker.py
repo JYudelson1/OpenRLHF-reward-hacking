@@ -839,8 +839,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Select LLM engines: assign each rank an engine, or cycle through engines if world_size < engine_count
         if len(self.vllm_engines) <= world_size:
             llms = [self.vllm_engines[rank % len(self.vllm_engines)]]
+            llm_indices = [rank % len(self.vllm_engines)]
         else:
             llms = self.vllm_engines[rank::world_size]
+            llm_indices = list(range(len(self.vllm_engines)))[rank::world_size]
 
         args = self.strategy.args
 
@@ -870,6 +872,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             llms=llms,
             sampling_params=sampling_params,
             is_eval=is_eval,
+            llm_indices=llm_indices,
         )
 
         json_rollouts = [
@@ -1081,7 +1084,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         return samples_list
 
     def _generate_vllm_bare(
-        self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params, is_eval: bool = False
+        self, rank, world_size, all_prompt_token_ids, all_full_data, llms, sampling_params, is_eval: bool = False, llm_indices: list[int] = None
     ):
         # print(
         #     f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
@@ -1115,7 +1118,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         sampling_params=sampling_params, 
                         env_makers=self.strategy.args.env_makers, 
                         is_eval=is_eval,
-                        vllm_engine_index=i,
+                        vllm_engine_index=llm_indices[i],
                         step=self.step,
                     )
                     for i, llm in enumerate(llms)
