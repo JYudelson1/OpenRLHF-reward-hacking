@@ -508,23 +508,24 @@ class AgentInterface(ABC):
 
         stats.on_computing_reward_start()
         
+        
+        # Normal reward calculation
+        try:
+            if is_eval:
+                reward = await self.get_reward_in_eval(messages=conversation.messages, state=state)
+            else:
+                reward = await self.get_reward(messages=conversation.messages, state=state)
+        except Exception as e:
+            self.num_errors += 1
+            self.errors.append(f"Error in get_reward: {str(e)}")
+            logger.error(f"Error in get_reward: {str(e)}")
+            conversation.error = True
+            reward = None
+            
         if was_truncated and self.compact_filtering:
             reward = None
         elif hit_max_steps and self.filter_max_steps:
             reward = None
-        else:
-            # Normal reward calculation
-            try:
-                if is_eval:
-                    reward = await self.get_reward_in_eval(messages=conversation.messages, state=state)
-                else:
-                    reward = await self.get_reward(messages=conversation.messages, state=state)
-            except Exception as e:
-                self.num_errors += 1
-                self.errors.append(f"Error in get_reward: {str(e)}")
-                logger.error(f"Error in get_reward: {str(e)}")
-                conversation.error = True
-                reward = None
 
         stats.on_finish()
 
