@@ -334,6 +334,7 @@ class AgentInterface(ABC):
         save_rollout_time_statistics_directory: str | None = "/root/rollout-time-statistics/",
         vllm_engine_index: int = 0,
         compact_filtering: bool = False,
+        filter_max_steps: bool = False,
     ) -> None:
         self.stop_strings = stop_strings
         self.max_steps = max_steps
@@ -343,7 +344,8 @@ class AgentInterface(ABC):
         self.errors = []
         self.vllm_engine_index = vllm_engine_index
         self.compact_filtering = compact_filtering
-
+        self.filter_max_steps = filter_max_steps
+        
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
         """Initialize the states for a new RL environments, given a list of dict elements of the dataset"""
@@ -457,6 +459,7 @@ class AgentInterface(ABC):
         state = initial_state
         
         was_truncated = False
+        hit_max_steps = False
 
         for step in count():
             stats.on_env_step_start()
@@ -478,7 +481,8 @@ class AgentInterface(ABC):
             if not isinstance(new_messages, list):
                 new_messages = [new_messages]
 
-            if self.max_steps is not None and step >= self.max_steps:  # TO DO: check if there is an off by 1 bug here
+            if self.max_steps is not None and step >= self.max_steps:
+                hit_max_steps = True
                 break
             stats.on_computing_is_done_start()
             try:
@@ -505,6 +509,8 @@ class AgentInterface(ABC):
         stats.on_computing_reward_start()
         
         if was_truncated and self.compact_filtering:
+            reward = None
+        elif hit_max_steps and self.filter_max_steps:
             reward = None
         else:
             # Normal reward calculation

@@ -117,6 +117,7 @@ def train(args):
             max_cpus=args.max_cpus,
             truncate_prompt_tokens=args.prompt_max_len,
             compact_filtering=args.compact_filtering,
+            filter_max_steps=args.filter_max_steps,
         )
 
     actor_model = PPORayActorGroup(
@@ -485,6 +486,7 @@ if __name__ == "__main__":
     # Compact filtering: https://www.together.ai/blog/deepswe
     # If true, will mask any trajectory that hits the length limit
     parser.add_argument("--compact_filtering", action="store_true", default=False)
+    parser.add_argument("--filter_max_steps", action="store_true", default=False)
     
     args = parser.parse_args()
 
