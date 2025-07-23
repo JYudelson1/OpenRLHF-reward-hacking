@@ -386,9 +386,8 @@ class AgentInterface(ABC):
         NOTE: This should not include length penalty!"""
         pass
 
-    @abstractmethod
     async def get_extra_metrics(self, messages: list[Message], state: AgentState) -> dict[str, float]:
-        pass
+        return {}
     
     async def get_reward_in_eval(self, messages: List[Message], state: AgentState) -> Reward | None:
         """Get the eval reward for the conversation. Used if the train reward may reflect a different thing than what we'd like to measure"""
