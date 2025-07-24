@@ -374,7 +374,11 @@ class ActorPPOTrainer(BasePPOTrainer):
         # TODO: this is a bad indicator to say that data is packed...
         if isinstance(experience.sequences, list):
             
-            non_zero_indices = [adv[:, -1] != 0.0 for adv in experience.advantages]
+            non_zero_indices = [adv[-1] != 0.0 for adv in experience.advantages]
+            print(f"non_zero_indices: {non_zero_indices}")
+            print(f"{len(experience.advantages)=}")
+            print(f"{experience.advantages[0].shape=}")
+            print(f"{experience.advantages[0]=}")
             advantages = [adv for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True) if is_non_zero]
             sequences = [seq for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
             old_action_log_probs = [log_probs for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True) if is_non_zero]
