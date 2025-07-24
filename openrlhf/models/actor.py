@@ -92,7 +92,7 @@ class Actor(nn.Module):
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
             )
-            self.tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model)
+            # self.tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model)
 
             # LoRA
             if lora_rank > 0:
@@ -224,13 +224,13 @@ class Actor(nn.Module):
             # explicitly ignore attention_mask for packing_samples
             attention_mask = None
             
-        text_sequences = self.tokenizer.convert_ids_to_tokens(sequences.tolist())
-        if action_mask is not None:
-            print(f"{action_mask.shape=}")
-            print(f"{sequences.shape=}")
-            print(f"{len(text_sequences)=}")
-            print(f"{list(zip(text_sequences, action_mask.tolist()))}")
-            assert False
+        # text_sequences = self.tokenizer.convert_ids_to_tokens(sequences.tolist())
+        # if action_mask is not None:
+        #     print(f"{action_mask.shape=}")
+        #     print(f"{sequences.shape=}")
+        #     print(f"{len(text_sequences)=}")
+        #     print(f"{list(zip(text_sequences, action_mask.tolist()))}")
+        #     assert False
 
         output = self.model(sequences, attention_mask=attention_mask, position_ids=position_ids)
         # https://github.com/OpenRLHF/OpenRLHF/pull/634
