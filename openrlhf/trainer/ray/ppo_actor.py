@@ -375,9 +375,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         if isinstance(experience.sequences, list):
             
             non_zero_indices = [adv.item() != 0.0 for adv in experience.info["raw_advantage"]]
-            print(f"non_zero_indices: {non_zero_indices}")
-            print(f"{len(experience.advantages)=}")
-            print(f"{experience.info['raw_advantage']=}")
+            
             filtered_advantages = [adv for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True) if is_non_zero]
             filtered_sequences = [seq for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
             filtered_old_action_log_probs = [log_probs for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True) if is_non_zero]
