@@ -377,9 +377,9 @@ class ActorPPOTrainer(BasePPOTrainer):
             non_zero_indices = [adv.item() != 0.0 for adv in experience.info["raw_advantage"]]
             device = experience.advantages[0].device
             
-            filtered_advantages = [adv if is_non_zero else torch.zeros(1, device=device) for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True)]
-            filtered_sequences = [seq if is_non_zero else torch.zeros(1, device=device) for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) ]
-            filtered_old_action_log_probs = [log_probs if is_non_zero else torch.zeros(1, device=device) for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True)]
+            filtered_advantages = [adv if is_non_zero else torch.zeros(1, device=device, dtype=adv.dtype) for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True)]
+            filtered_sequences = [seq if is_non_zero else torch.zeros(1, device=device, dtype=seq.dtype) for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) ]
+            filtered_old_action_log_probs = [log_probs if is_non_zero else torch.zeros(1, device=device, dtype=log_probs.dtype) for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True)]
             
             # if len(filtered_advantages) == 0:
             #     status = {"policy_loss": torch.tensor(0.0), "actor_lr": self.actor_scheduler.get_last_lr()[0]}
@@ -397,7 +397,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             old_action_log_probs = torch.cat(filtered_old_action_log_probs, dim=0).unsqueeze(0)
             
             attention_mask = torch.cat(
-                [torch.full_like(s, i + 1, dtype=torch.long) for i, s in enumerate(filtered_sequences)], dim=0
+                [torch.full_like(s, i + 1, dtype=s.dtype, device=s.device) for i, s in enumerate(filtered_sequences)], dim=0
             ).unsqueeze(0)
             
             num_actions = [v.numel() for v in filtered_advantages]
