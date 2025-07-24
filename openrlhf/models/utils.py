@@ -81,9 +81,8 @@ def compute_reward(
         reward = []
         for i, (kl_seg, mask_seg) in enumerate(zip(kl, action_mask)):
             kl_reward = -kl_coef * kl_seg
-            last_action_index = torch.where(mask_seg == 0)[0][-1]
-            num_actions = mask_seg.size(0) - last_action_index
-            kl_reward[-num_actions:] += r[i]
+            assert mask_seg.shape == kl_seg.shape, f"{mask_seg.shape=} {kl_seg.shape=}"
+            kl_reward += mask_seg * r[i]
             reward.append(kl_reward)
     elif sample_packing:
         # 
