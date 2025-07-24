@@ -466,7 +466,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 packed_seq_lens = samples.packed_seq_lens
                 if self.strategy.ring_attn_group is not None:
                     assert samples.pad_len is not None
-                    sequences, attention_mask, num_actions, packed_seq_lens, _, _, kl = unpad_sequences(
+                    sequences, attention_mask, num_actions, packed_seq_lens, _, _, kl, action_mask = unpad_sequences(
                         pad_len=samples.pad_len,
                         sequences=sequences,
                         attention_mask=attention_mask,
@@ -476,6 +476,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         action_log_probs=action_log_probs,
                         values=value,
                         kl=kl,
+                        action_mask=action_mask,
                     )
                 # Convert tensor into list of tensors for easier manipulation within dataset
                 sequences = unpacking_samples(sequences, packed_seq_lens)
