@@ -77,6 +77,14 @@ def compute_reward(
         last_reward = torch.zeros_like(kl).scatter_(dim=1, index=eos_indices, src=r.unsqueeze(1).to(kl.dtype))
 
         reward = last_reward + kl_reward
+    elif action_mask is not None and sample_packing:
+        reward = []
+        for i, (kl_seg, mask_seg) in enumerate(zip(kl, action_mask)):
+            kl_reward = -kl_coef * kl_seg
+            last_action_index = torch.where(mask_seg == 0)[0][-1]
+            num_actions = mask_seg.size(0) - last_action_index
+            kl_reward[-num_actions:] += r[i]
+            reward.append(kl_reward)
     elif sample_packing:
         # 
         # TODO: write a more efficient version
