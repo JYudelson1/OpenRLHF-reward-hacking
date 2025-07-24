@@ -373,14 +373,27 @@ class ActorPPOTrainer(BasePPOTrainer):
 
         # TODO: this is a bad indicator to say that data is packed...
         if isinstance(experience.sequences, list):
-            sequences = torch.cat(experience.sequences, dim=0).unsqueeze(0)
-            old_action_log_probs = torch.cat(experience.action_log_probs, dim=0).unsqueeze(0)
-            advantages = torch.cat(experience.advantages, dim=0).unsqueeze(0)
-            num_actions = [v.numel() for v in experience.advantages]
-            packed_seq_lens = [s.numel() for s in experience.sequences]
+            
+            non_zero_indices = [adv[:, -1] != 0.0 for adv in experience.advantages]
+            advantages = [adv for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True) if is_non_zero]
+            sequences = [seq for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
+            old_action_log_probs = [log_probs for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True) if is_non_zero]
+            
+            advantages = torch.cat(advantages, dim=0).unsqueeze(0)
+            sequences = torch.cat(sequences, dim=0).unsqueeze(0)
+            old_action_log_probs = torch.cat(old_action_log_probs, dim=0).unsqueeze(0)
+            
             attention_mask = torch.cat(
                 [torch.full_like(s, i + 1) for i, s in enumerate(experience.sequences)], dim=0
             ).unsqueeze(0)
+            
+            num_actions = [v.numel() for v, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True) if is_non_zero]
+            packed_seq_lens = [s.numel() for s, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
+            if experience.action_mask is not None:
+                action_mask = [mask for mask, is_non_zero in zip(experience.action_mask, non_zero_indices, strict=True) if is_non_zero]
+            else:
+                action_mask = None
+            
             # pad seq makes the sequence a multiple of ring_attention_size.
             if self.strategy.ring_attn_group is not None:
                 pad_len, sequences, attention_mask, num_actions, packed_seq_lens = pad_sequences(
@@ -397,6 +410,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             attention_mask = experience.attention_mask
             if self.args.use_kl_loss and experience.base_action_log_probs is not None:
                 base_action_log_probs = experience.base_action_log_probs
+            action_mask = experience.action_mask
 
         # actor loss
         action_log_probs, output = self.actor(
@@ -426,7 +440,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=experience.action_mask,
+            action_mask=action_mask,
         )
 
         experience.info |= actor_loss_logs
@@ -443,7 +457,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 kl = torch.zeros_like(action_log_probs, dtype=action_log_probs.dtype, device=action_log_probs.device)
 
             if not self.args.packing_samples:
-                kl_mean = masked_mean(kl, experience.action_mask, dim=-1)
+                kl_mean = masked_mean(kl, action_mask, dim=-1)
             else:
                 # convert tensor into list of tensors so that it's easier to manipulate
                 # within dataset.
