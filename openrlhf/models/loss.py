@@ -90,6 +90,8 @@ class PolicyLoss(nn.Module):
             "max_probability_ratio": ratio.max(-1).values,
             "mean_probability_ratio": ratio.mean(-1),
             "max_advantage_absolute_value": advantages.abs().max(-1).values,
+            "ratio_times_advantage": surr1,
+            "ratio_clipped_times_advantage": surr2,
         }
         if action_mask is not None:
             logs["action_mask_sum"] = action_mask.sum(-1)
