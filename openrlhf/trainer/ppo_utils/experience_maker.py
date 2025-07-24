@@ -597,7 +597,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             rewards = rewards + lengths
 
         # calculate return and advantages
-        for experience, reward in zip(experiences, rewards):
+        for experience, reward in zip(experiences, rewards, strict=True):
             experience = experience.to_device("cuda")
             reward = reward.to(device="cuda")
             num_actions = experience.info["num_actions"]
