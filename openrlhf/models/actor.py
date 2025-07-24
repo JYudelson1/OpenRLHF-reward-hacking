@@ -92,7 +92,7 @@ class Actor(nn.Module):
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
             )
-            self.tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model)
+            # self.tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model)
 
             # LoRA
             if lora_rank > 0:
@@ -224,13 +224,13 @@ class Actor(nn.Module):
             # explicitly ignore attention_mask for packing_samples
             attention_mask = None
             
-        if action_mask is not None:
-            print(f"{action_mask.shape=}")
-            print(f"{sequences.shape=}")
-            text_sequences = self.tokenizer.convert_ids_to_tokens(sequences.squeeze(0).tolist())
-            print(f"{len(text_sequences)=}")
-            print(f"{list(zip(text_sequences, action_mask.squeeze(0).tolist()))}")
-            assert False
+        # if action_mask is not None:
+        #     print(f"{action_mask.shape=}")
+        #     print(f"{sequences.shape=}")
+        #     text_sequences = self.tokenizer.convert_ids_to_tokens(sequences.squeeze(0).tolist())
+        #     print(f"{len(text_sequences)=}")
+        #     print(f"{list(zip(text_sequences, action_mask.squeeze(0).tolist()))}")
+        #     assert False
 
         output = self.model(sequences, attention_mask=attention_mask, position_ids=position_ids)
         # https://github.com/OpenRLHF/OpenRLHF/pull/634
@@ -269,10 +269,11 @@ class Actor(nn.Module):
                     output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
                 )
             
-            action_log_probs = []
+            
             if action_mask is not None:
                 action_log_probs = torch.masked_select(log_probs, action_mask.to(dtype=torch.bool)[:, :-1]).unsqueeze(0)
             else:
+                action_log_probs = []
                 offset = 0
                 assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
                 for num_action, seq_len in zip(num_actions, packed_seq_lens):
