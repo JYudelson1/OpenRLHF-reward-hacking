@@ -397,7 +397,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             old_action_log_probs = torch.cat(filtered_old_action_log_probs, dim=0).unsqueeze(0)
             
             attention_mask = torch.cat(
-                [torch.full_like(s, i + 1) for i, s in enumerate(filtered_sequences)], dim=0
+                [torch.full_like(s, i + 1, dtype=torch.long) for i, s in enumerate(filtered_sequences)], dim=0
             ).unsqueeze(0)
             
             num_actions = [v.numel() for v in filtered_advantages]
