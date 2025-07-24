@@ -382,6 +382,16 @@ class ActorPPOTrainer(BasePPOTrainer):
             filtered_sequences = [seq for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
             filtered_old_action_log_probs = [log_probs for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True) if is_non_zero]
             
+            if len(filtered_advantages) == 0:
+                for k, v in experience.info.items():
+                    if k == "kl":
+                        status[k] = (
+                            (v * experience.info["response_length"]).sum() / experience.info["response_length"].sum()
+                        ).item()
+                    else:
+                        status[k] = v.float().mean().item()
+                return status
+            
             advantages = torch.cat(filtered_advantages, dim=0).unsqueeze(0)
             sequences = torch.cat(filtered_sequences, dim=0).unsqueeze(0)
             old_action_log_probs = torch.cat(filtered_old_action_log_probs, dim=0).unsqueeze(0)
