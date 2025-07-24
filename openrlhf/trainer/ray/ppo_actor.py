@@ -383,6 +383,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             filtered_old_action_log_probs = [log_probs for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True) if is_non_zero]
             
             if len(filtered_advantages) == 0:
+                status = {"policy_loss": torch.tensor(0.0), "actor_lr": self.actor_scheduler.get_last_lr()[0]}
                 for k, v in experience.info.items():
                     if k == "kl":
                         status[k] = (
