@@ -7,7 +7,7 @@ from flash_attn.utils.distributed import all_gather
 from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora import LoraLayer
 from torch.nn import functional as F
-from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer
 from transformers.integrations.deepspeed import HfDeepSpeedConfig
 
 from .ring_attn_utils import convert_ring_attn_params
@@ -92,6 +92,7 @@ class Actor(nn.Module):
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
             )
+            self.tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model)
 
             # LoRA
             if lora_rank > 0:
@@ -223,8 +224,7 @@ class Actor(nn.Module):
             # explicitly ignore attention_mask for packing_samples
             attention_mask = None
             
-        tokenizer = self.model.tokenizer
-        text_sequences = tokenizer.convert_ids_to_tokens(sequences.tolist())
+        text_sequences = self.tokenizer.convert_ids_to_tokens(sequences.tolist())
         if action_mask is not None:
             print(f"{action_mask.shape=}")
             print(f"{sequences.shape=}")
