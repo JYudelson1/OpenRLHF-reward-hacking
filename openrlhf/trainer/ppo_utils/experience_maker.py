@@ -596,7 +596,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             lengths = torch.where(rewards_missing, torch.zeros_like(lengths), lengths)
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
             
-            for experience in experiences:
+            for experience, reward in zip(experiences, rewards, strict=True):
+                experience.info["raw_advantage"] = reward
                 experience.info["extra_metrics/frac_mixed_reward_groups"] = torch.tensor([float(frac_nonzero_rows.item()) for _ in experience.sequences])
                 
         rewards = (r + l for r, l in zip(rewards, lengths))
