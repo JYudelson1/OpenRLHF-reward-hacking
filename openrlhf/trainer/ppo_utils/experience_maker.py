@@ -557,44 +557,57 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # get rewards from experiences
         rewards = [experience.info["reward"] for experience in experiences]
+        rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+        
         rewards_missing = [experience.info["reward_missing"] for experience in experiences]
         rewards_missing = torch.cat(rewards_missing).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
         
         # Get lengths
         lengths = [len(element) for experience in experiences for element in experience.sequences]
         lengths = torch.tensor(lengths, dtype=torch.float32).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
-
+        
         # reward shaping
-        if args.advantage_estimator == "rloo":
-            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+        if args.advantage_estimator == "rloo":            
             baseline = (rewards.sum(-1, keepdim=True) - rewards) / (args.n_samples_per_prompt - 1)
             rewards = rewards - baseline
+            nonzero_rows = (rewards != 0).any(dim=1).sum()
+            frac_nonzero_rows = nonzero_rows / rewards.shape[0]
+            
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
             rewards = rewards.flatten().to(device="cpu").chunk(len(experiences))
         elif args.advantage_estimator in ["reinforce_baseline", "dr_grpo"]:
             # REINFORCE++-baseline and Dr. GRPO removed the `/std` in GRPO as `/ std` is not needed in RL variance reduction theory.
             # And `k3 KL` has a larger variance than `k1 KL` under a categorical distribution.
-            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             rewards = rewards - rewards.mean(-1, keepdim=True)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
-            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
             
+            nonzero_rows = (rewards != 0).any(dim=1).sum()
+            frac_nonzero_rows = nonzero_rows / rewards.shape[0]
+            
+            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
+
             lengths = lengths - lengths.mean(-1, keepdim=True)
             lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
             lengths = torch.where(rewards_missing, torch.zeros_like(lengths), lengths)
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
         elif args.advantage_estimator == "grpo":
-            rewards = torch.cat(rewards).reshape(-1, args.n_samples_per_prompt).to(device="cuda")
             rewards = (rewards - rewards.mean(-1, keepdim=True)) / (rewards.std(-1, keepdim=True) + 1e-9)
             rewards = torch.where(rewards_missing, torch.zeros_like(rewards), rewards)
+            
+            nonzero_rows = (rewards != 0).any(dim=1).sum()
+            frac_nonzero_rows = nonzero_rows / rewards.shape[0]
+            
             rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
-
+            
             lengths = (lengths - lengths.mean(-1, keepdim=True)) / (lengths.std(-1, keepdim=True) + 1e-9)
             lengths = lengths * -1.0 * getattr(args, "length_penalty", 0.0)
             lengths = torch.where(rewards_missing, torch.zeros_like(lengths), lengths)
             lengths = lengths.reshape(-1).to(device="cpu").chunk(len(experiences))
-
-            rewards = rewards + lengths
+            
+            for experience in experiences:
+                experience.info["extra_metrics/frac_mixed_reward_groups"] = torch.tensor([float(frac_nonzero_rows.item()) for _ in experience.sequences])
+                
+        rewards = (r + l for r, l in zip(rewards, lengths, strict=True))
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards, strict=True):
