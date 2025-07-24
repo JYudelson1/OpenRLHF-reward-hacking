@@ -376,20 +376,20 @@ class ActorPPOTrainer(BasePPOTrainer):
             
             non_zero_indices = [adv.item() != 0.0 for adv in experience.info["raw_advantage"]]
             
-            filtered_advantages = [adv for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True) if is_non_zero]
-            filtered_sequences = [seq for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
-            filtered_old_action_log_probs = [log_probs for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True) if is_non_zero]
+            filtered_advantages = [adv if is_non_zero else torch.zeros(1,1) for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True)]
+            filtered_sequences = [seq if is_non_zero else torch.zeros(1,1) for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) ]
+            filtered_old_action_log_probs = [log_probs if is_non_zero else torch.zeros(1,1) for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True)]
             
-            if len(filtered_advantages) == 0:
-                status = {"policy_loss": torch.tensor(0.0), "actor_lr": self.actor_scheduler.get_last_lr()[0]}
-                for k, v in experience.info.items():
-                    if k == "kl":
-                        status[k] = (
-                            (v * experience.info["response_length"]).sum() / experience.info["response_length"].sum()
-                        ).item()
-                    else:
-                        status[k] = v.float().mean().item()
-                return status
+            # if len(filtered_advantages) == 0:
+            #     status = {"policy_loss": torch.tensor(0.0), "actor_lr": self.actor_scheduler.get_last_lr()[0]}
+            #     for k, v in experience.info.items():
+            #         if k == "kl":
+            #             status[k] = (
+            #                 (v * experience.info["response_length"]).sum() / experience.info["response_length"].sum()
+            #             ).item()
+            #         else:
+            #             status[k] = v.float().mean().item()
+            #     return status
             
             advantages = torch.cat(filtered_advantages, dim=0).unsqueeze(0)
             sequences = torch.cat(filtered_sequences, dim=0).unsqueeze(0)
