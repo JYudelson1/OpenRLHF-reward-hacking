@@ -41,7 +41,6 @@ class BufferItem:
 
 def split_experience_batch(experience: Experience) -> List[BufferItem]:
     # Prepocess Action Mask
-    
     batch_size = len(experience.sequences)
     batch_kwargs = [{} for _ in range(batch_size)]
     keys = (

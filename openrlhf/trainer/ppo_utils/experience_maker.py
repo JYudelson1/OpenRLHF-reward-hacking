@@ -482,6 +482,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 action_log_probs = unpacking_samples(action_log_probs, packed_seq_lens)
                 if value is not None:
                     value = unpacking_samples(value, num_actions)
+                if action_mask is not None:
+                    action_mask = unpacking_samples(action_mask, num_actions)
                 if base_action_log_probs is not None:
                     base_action_log_probs = unpacking_samples(base_action_log_probs, packed_seq_lens)
 
