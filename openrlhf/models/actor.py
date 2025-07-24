@@ -229,7 +229,7 @@ class Actor(nn.Module):
             print(f"{sequences.shape=}")
             text_sequences = self.tokenizer.convert_ids_to_tokens(sequences.squeeze(0).tolist())
             print(f"{len(text_sequences)=}")
-            print(f"{list(zip(text_sequences, action_mask.tolist()))}")
+            print(f"{list(zip(text_sequences, action_mask.squeeze(0).tolist()))}")
             assert False
 
         output = self.model(sequences, attention_mask=attention_mask, position_ids=position_ids)
