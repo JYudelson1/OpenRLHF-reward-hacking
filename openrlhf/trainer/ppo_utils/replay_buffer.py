@@ -8,7 +8,6 @@ import torch.nn.functional as F
 
 
 from .experience_maker import Experience
-from openrlhf.models.utils import unpacking_samples
 
 
 @dataclass

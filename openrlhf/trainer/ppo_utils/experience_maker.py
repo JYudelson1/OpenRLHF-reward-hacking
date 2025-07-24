@@ -418,7 +418,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             torch.cuda.empty_cache()
 
         # Process results for each sample
-        for i, (samples, action_log_probs, base_action_log_probs, value, rewards, rewards_missing) in enumerate(
+        for i, (samples, action_log_probs, base_action_log_probs, value, rewards, rewards_missing, action_mask) in enumerate(
             zip(
                 samples_list,
                 action_log_probs_list,
@@ -426,6 +426,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 value_list,
                 rewards_list,
                 rewards_missing_list,
+                action_mask_list,
                 strict=True,
             )
         ):
@@ -450,7 +451,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 kl = compute_approx_kl(
                     action_log_probs,
                     base_action_log_probs,
-                    action_mask=samples.action_mask,
+                    action_mask=action_mask,
                     kl_estimator=self.strategy.args.kl_estimator,
                 )
             else:
@@ -483,7 +484,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 if value is not None:
                     value = unpacking_samples(value, num_actions)
                 if action_mask is not None:
-                    action_mask = unpacking_samples(torch.tensor(action_mask), num_actions)
+                    action_mask = unpacking_samples(action_mask, num_actions)
                 if base_action_log_probs is not None:
                     base_action_log_probs = unpacking_samples(base_action_log_probs, packed_seq_lens)
 
@@ -523,7 +524,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 None,
                 None,
                 attention_mask,
-                samples.action_mask,
+                action_mask,
                 info,
                 kl,
                 json_rollouts=samples.json_rollouts,
