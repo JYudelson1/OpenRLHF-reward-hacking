@@ -41,10 +41,6 @@ class BufferItem:
 
 def split_experience_batch(experience: Experience) -> List[BufferItem]:
     # Prepocess Action Mask
-    if experience.action_mask is not None:
-        print(f"{experience.action_mask.shape=}")
-        experience.action_mask = unpacking_samples(experience.action_mask, [len(seq) for seq in experience.sequences])
-        print(f"{len(experience.action_mask)=}")
     
     batch_size = len(experience.sequences)
     batch_kwargs = [{} for _ in range(batch_size)]
@@ -67,7 +63,7 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
         vals = value
         if isinstance(vals, torch.Tensor):
             vals = torch.unbind(vals)
-        assert batch_size == len(vals), f"key {k} has {len(vals)} values, but batch_size is {batch_size}"
+        assert batch_size == len(vals), f"key {key} has {len(vals)} values, but batch_size is {batch_size}"
         for i, v in enumerate(vals):
             batch_kwargs[i][key] = v
 
