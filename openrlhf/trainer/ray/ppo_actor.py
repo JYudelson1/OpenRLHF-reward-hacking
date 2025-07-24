@@ -378,22 +378,22 @@ class ActorPPOTrainer(BasePPOTrainer):
             print(f"non_zero_indices: {non_zero_indices}")
             print(f"{len(experience.advantages)=}")
             print(f"{experience.info['raw_advantage']=}")
-            advantages = [adv for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True) if is_non_zero]
-            sequences = [seq for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
-            old_action_log_probs = [log_probs for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True) if is_non_zero]
+            filtered_advantages = [adv for adv, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True) if is_non_zero]
+            filtered_sequences = [seq for seq, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
+            filtered_old_action_log_probs = [log_probs for log_probs, is_non_zero in zip(experience.action_log_probs, non_zero_indices, strict=True) if is_non_zero]
             
-            advantages = torch.cat(advantages, dim=0).unsqueeze(0)
-            sequences = torch.cat(sequences, dim=0).unsqueeze(0)
-            old_action_log_probs = torch.cat(old_action_log_probs, dim=0).unsqueeze(0)
+            advantages = torch.cat(filtered_advantages, dim=0).unsqueeze(0)
+            sequences = torch.cat(filtered_sequences, dim=0).unsqueeze(0)
+            old_action_log_probs = torch.cat(filtered_old_action_log_probs, dim=0).unsqueeze(0)
             
             attention_mask = torch.cat(
-                [torch.full_like(s, i + 1) for i, s in enumerate(experience.sequences)], dim=0
+                [torch.full_like(s, i + 1) for i, s in enumerate(filtered_sequences)], dim=0
             ).unsqueeze(0)
             
-            num_actions = [v.numel() for v, is_non_zero in zip(experience.advantages, non_zero_indices, strict=True) if is_non_zero]
-            packed_seq_lens = [s.numel() for s, is_non_zero in zip(experience.sequences, non_zero_indices, strict=True) if is_non_zero]
+            num_actions = [v.numel() for v in filtered_advantages]
+            packed_seq_lens = [s.numel() for s in filtered_sequences]
             if experience.action_mask is not None:
-                action_mask = [mask for mask, is_non_zero in zip(experience.action_mask, non_zero_indices, strict=True) if is_non_zero]
+                action_mask = [mask for mask in experience.action_mask if mask.item() != 0.0]
             else:
                 action_mask = None
             
