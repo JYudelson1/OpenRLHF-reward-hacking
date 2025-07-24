@@ -1118,10 +1118,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         sampling_params=sampling_params, 
                         env_makers=self.strategy.args.env_makers, 
                         is_eval=is_eval,
-                        vllm_engine_index=llm_indices[i],
+                        vllm_engine_index=i,
                         step=self.step,
                     )
-                    for llm in llms
+                    for i, llm in zip(llm_indices, llms, strict=True)
                 ]
             )
 
