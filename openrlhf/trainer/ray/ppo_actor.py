@@ -445,8 +445,10 @@ class ActorPPOTrainer(BasePPOTrainer):
             else:
                 # convert tensor into list of tensors so that it's easier to manipulate
                 # within dataset.
-
-                kl = unpacking_samples(kl, experience.packed_seq_lens)
+                if experience.action_mask is not None:
+                    kl = unpacking_samples(kl, [mask.sum() for mask in experience.action_mask])
+                else:
+                    kl = unpacking_samples(kl, experience.packed_seq_lens)
                 kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=action_log_probs.device)
 
             kl_loss = kl_mean.mean()
