@@ -481,18 +481,21 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 # Convert tensor into list of tensors for easier manipulation within dataset
                 sequences = unpacking_samples(sequences, packed_seq_lens)
                 attention_mask = None
-                action_log_probs = unpacking_samples(action_log_probs, packed_seq_lens)
                 if value is not None:
                     value = unpacking_samples(value, num_actions)
                 if action_mask is not None:
                     action_mask = unpacking_samples(action_mask, packed_seq_lens)
-                if base_action_log_probs is not None:
-                    base_action_log_probs = unpacking_samples(base_action_log_probs, packed_seq_lens)
-                    
+                
                 if action_mask is not None:
                     kl = unpacking_samples(kl, [mask.sum() for mask in action_mask])
+                    action_log_probs = unpacking_samples(action_log_probs, [mask.sum() for mask in action_mask])
+                    if base_action_log_probs is not None:
+                        base_action_log_probs = unpacking_samples(base_action_log_probs, [mask.sum() for mask in action_mask])
                 else:
                     kl = unpacking_samples(kl, num_actions)
+                    action_log_probs = unpacking_samples(action_log_probs, num_actions)
+                    if base_action_log_probs is not None:
+                        base_action_log_probs = unpacking_samples(base_action_log_probs, packed_seq_lens)
 
                 kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=device)
 
