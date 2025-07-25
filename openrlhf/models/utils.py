@@ -83,11 +83,16 @@ def compute_reward(
         reward = last_reward + kl_reward
     elif action_mask is not None and sample_packing:
         reward = []
-        for i, (kl_seg, mask_seg) in enumerate(zip(kl, action_mask, strict=True)):
-            print(f"{mask_seg.shape=} {kl_seg.shape=}")
+        # for i, (kl_seg, mask_seg) in enumerate(zip(kl, action_mask, strict=True)):
+        #     print(f"{mask_seg.shape=} {kl_seg.shape=}")
+        #     kl_reward = -kl_coef * kl_seg
+        #     assert mask_seg.shape == kl_seg.shape, f"{mask_seg.shape=} {kl_seg.shape=}"
+        #     kl_reward += mask_seg * r[i]
+        #     reward.append(kl_reward)
+        for kl_seg, reward_seg, actions_list in zip(kl, r, num_actions, strict=True):
             kl_reward = -kl_coef * kl_seg
-            assert mask_seg.shape == kl_seg.shape, f"{mask_seg.shape=} {kl_seg.shape=}"
-            kl_reward += mask_seg * r[i]
+            last_action_length = actions_list[-1]
+            kl_reward += reward_seg
             reward.append(kl_reward)
     elif sample_packing:
         # 
