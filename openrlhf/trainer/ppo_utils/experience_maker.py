@@ -298,6 +298,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 action_mask=action_mask_list,
                 logps_allgather=[True] * len(samples_list),
                 packed_seq_lens=packed_seq_lens_list,
+                return_action_log_probs=True,
             )
 
             if args.colocate_actor_ref or args.colocate_all_models:
