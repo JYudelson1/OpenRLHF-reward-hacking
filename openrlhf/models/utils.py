@@ -89,9 +89,8 @@ def compute_reward(
         #     assert mask_seg.shape == kl_seg.shape, f"{mask_seg.shape=} {kl_seg.shape=}"
         #     kl_reward += mask_seg * r[i]
         #     reward.append(kl_reward)
-        for kl_seg, reward_seg, actions_list in zip(kl, r, num_actions, strict=True):
+        for kl_seg, reward_seg in zip(kl, r, strict=True):
             kl_reward = -kl_coef * kl_seg
-            last_action_length = actions_list[-1]
             kl_reward += reward_seg
             reward.append(kl_reward)
     elif sample_packing:

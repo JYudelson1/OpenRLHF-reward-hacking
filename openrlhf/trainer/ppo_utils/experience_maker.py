@@ -488,8 +488,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     action_mask = unpacking_samples(action_mask, packed_seq_lens)
                 if base_action_log_probs is not None:
                     base_action_log_probs = unpacking_samples(base_action_log_probs, packed_seq_lens)
+                    
+                if action_mask is not None:
+                    kl = unpacking_samples(kl, [mask.sum() for mask in action_mask])
+                else:
+                    kl = unpacking_samples(kl, num_actions)
 
-                kl = unpacking_samples(kl, packed_seq_lens)
                 kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=device)
 
             if not args.use_kl_loss:
