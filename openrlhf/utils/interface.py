@@ -193,7 +193,8 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.n_tokens += len(input_tokens) + len(output_tokens)
         conversation.n_assistant_tokens += len(output_tokens)
         
-        conversation.action_mask.extend([0] * (len(input_tokens) - 1) + [1] * (len(output_tokens) + 1))
+        conversation.action_mask.extend([0] * len(input_tokens) + [1] * len(output_tokens))
+        
         conversation.num_actions_list.append(len(output_tokens))
         
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
@@ -302,8 +303,8 @@ async def _vllm_chat_with_truncation(
     )
     if was_truncated:
         old_len = len(prompt_token_ids)
-        prompt_token_ids = prompt_token_ids[: sampling_params.truncate_prompt_tokens]
-        logger.warning(f"Truncated prompt from {old_len} tokens to {sampling_params.truncate_prompt_tokens} tokens.")
+        #prompt_token_ids = prompt_token_ids[: sampling_params.truncate_prompt_tokens]
+        logger.warning(f"Truncated prompt with {old_len} tokens.")
 
     prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
 
