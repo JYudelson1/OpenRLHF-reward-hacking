@@ -486,6 +486,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     value = unpacking_samples(value, num_actions)
                 if action_mask is not None:
                     action_mask = unpacking_samples(action_mask, packed_seq_lens)
+                    assert all(mask.shape == seq.shape for mask, seq in zip(action_mask, sequences, strict=True)), f"{[mask.shape for mask in action_mask]} {[seq.shape for seq in sequences]}"
                 
                 if action_mask is not None:
                     kl = unpacking_samples(kl, [mask.sum() for mask in action_mask])
