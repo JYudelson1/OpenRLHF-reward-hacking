@@ -271,10 +271,6 @@ class Actor(nn.Module):
             
             
             if action_mask is not None:
-                print(f"{action_mask.shape=}")
-                print(f"{log_probs.shape=}")
-                print(f"{sequences.shape=}")
-                print(f"{output['logits'].shape=}")
                 action_log_probs = torch.masked_select(log_probs, action_mask.to(dtype=torch.bool)[:, 1:]).unsqueeze(0)
             else:
                 action_log_probs = []
