@@ -8,7 +8,6 @@ def compute_approx_kl(
     log_probs: torch.Tensor,
     log_probs_base: torch.Tensor,
     kl_estimator: str = "k1",
-    action_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Compute the approximate KL divergence between two distributions.

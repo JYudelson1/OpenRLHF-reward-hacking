@@ -435,7 +435,6 @@ class ActorPPOTrainer(BasePPOTrainer):
                 kl = compute_approx_kl(
                     action_log_probs,
                     base_action_log_probs,
-                    experience.action_mask,
                     kl_estimator=self.args.kl_estimator,
                 )
             else:
