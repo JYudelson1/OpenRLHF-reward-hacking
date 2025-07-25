@@ -193,7 +193,7 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.n_tokens += len(input_tokens) + len(output_tokens)
         conversation.n_assistant_tokens += len(output_tokens)
         
-        conversation.action_mask.extend([0] * len(input_tokens) + [1] * len(output_tokens))
+        conversation.action_mask.extend([0] * (len(input_tokens) - 1) + [1] * (len(output_tokens) + 1))
         conversation.num_actions_list.append(len(output_tokens))
         
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
