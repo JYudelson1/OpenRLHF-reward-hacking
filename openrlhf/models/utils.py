@@ -57,8 +57,7 @@ def compute_reward(
     reward_clip_range: Tuple[float, float] = None,
     sample_packing: bool = False,
 ) -> Union[torch.Tensor, list[torch.Tensor]]:
-    if kl_coef <= 0.0:
-        kl_coef = 0.0
+    assert kl_coef >= 0.0
 
     if reward_clip_range:
         r = r.clamp(min=reward_clip_range[0], max=reward_clip_range[1])
