@@ -547,7 +547,7 @@ class AgentInterface(ABC):
             logger.error(f"Error in get_extra_metrics {str(e)}")
             conversation.error = True
 
-        conversation.action_mask = conversation.action_mask[:-1]
+        conversation.action_mask = conversation.action_mask[1:]
         return conversation, reward, stats, state
 
 
