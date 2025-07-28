@@ -196,7 +196,7 @@ class AsyncVLLM(AsyncLLMInterface):
         
         conversation.action_mask.extend([0] * len(input_tokens) )
         if was_truncated:
-            conversation.action_mask = conversation.action_mask[:sampling_params.truncate_prompt_tokens]
+            conversation.action_mask = conversation.action_mask[:sampling_params.truncate_prompt_tokens] + [0]
         conversation.action_mask.extend([1] * len(output_tokens))
         
         conversation.num_actions_list.append(len(output_tokens))
