@@ -177,9 +177,10 @@ class AsyncVLLM(AsyncLLMInterface):
             sampling_params.stop = stop_strings
             sampling_params.include_stop_str_in_output = True
 
-        output, was_truncated = await _vllm_chat_with_truncation(
+        output, truncated_tokens = await _vllm_chat_with_truncation(
             llm_engine=self.llm_engine, messages=conversation.messages, sampling_params=sampling_params
         )
+        was_truncated = truncated_tokens > 0
 
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
@@ -195,7 +196,7 @@ class AsyncVLLM(AsyncLLMInterface):
         
         conversation.action_mask.extend([0] * len(input_tokens) )
         if was_truncated:
-            conversation.action_mask = conversation.action_mask[:sampling_params.truncate_prompt_tokens]
+            conversation.action_mask = conversation.action_mask[:-truncated_tokens]
         conversation.action_mask.extend([1] * len(output_tokens))
         
         conversation.num_actions_list.append(len(output_tokens))
@@ -261,7 +262,7 @@ async def _vllm_chat_with_truncation(
     Returns:
         A list of ``RequestOutput`` objects containing the generated
         responses in the same order as the input messages.
-        Optionally, a list of booleans indicating whether each prompt was truncated.
+        Also, the number of truncated tokens (Can be zero)
     """
 
     tokenizer = await llm_engine.get_tokenizer()
@@ -307,7 +308,10 @@ async def _vllm_chat_with_truncation(
     if was_truncated:
         old_len = len(prompt_token_ids)
         prompt_token_ids = prompt_token_ids[: sampling_params.truncate_prompt_tokens]
+        num_truncated_tokens = old_len - sampling_params.truncate_prompt_tokens
         logger.warning(f"Truncated prompt from {old_len} tokens to {sampling_params.truncate_prompt_tokens} tokens.")
+    else:
+        num_truncated_tokens = 0
 
     prompt = TokensPrompt(prompt_token_ids=prompt_token_ids)
 
@@ -331,7 +335,7 @@ async def _vllm_chat_with_truncation(
 
     assert finished_output is not None
 
-    return finished_output, was_truncated
+    return finished_output, num_truncated_tokens
 
 
 class AgentInterface(ABC):
