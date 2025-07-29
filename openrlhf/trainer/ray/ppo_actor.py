@@ -462,7 +462,6 @@ class ActorPPOTrainer(BasePPOTrainer):
         else:
             aux_loss = 0
         loss = actor_loss + aux_loss * self.args.aux_loss_coef + kl_loss * self.kl_ctl.value
-        torch.cuda.empty_cache()
         self.strategy.backward(loss, self.actor, self.actor_optim)
 
         # ptx loss
