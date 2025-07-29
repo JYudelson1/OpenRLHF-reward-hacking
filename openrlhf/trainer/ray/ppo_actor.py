@@ -402,11 +402,13 @@ class ActorPPOTrainer(BasePPOTrainer):
         action_log_probs, output = self.actor(
             sequences,
             num_actions,
+            action_mask=torch.cat(experience.action_mask, dim=0).unsqueeze(0),
             attention_mask=attention_mask,
             return_output=True,
             ring_attn_group=self.strategy.ring_attn_group,
             logps_allgather=True,
             packed_seq_lens=packed_seq_lens,
+            return_action_log_probs=True,
         )
         # unpad sequence ensures that pad tokens do not contribute to the loss calculation.
         if self.strategy.ring_attn_group is not None:
@@ -436,7 +438,6 @@ class ActorPPOTrainer(BasePPOTrainer):
                 kl = compute_approx_kl(
                     action_log_probs,
                     base_action_log_probs,
-                    experience.action_mask,
                     kl_estimator=self.args.kl_estimator,
                 )
             else:
@@ -447,8 +448,10 @@ class ActorPPOTrainer(BasePPOTrainer):
             else:
                 # convert tensor into list of tensors so that it's easier to manipulate
                 # within dataset.
-
-                kl = unpacking_samples(kl, num_actions)
+                if experience.action_mask is not None:
+                    kl = unpacking_samples(kl, [mask.sum() for mask in experience.action_mask])
+                else:
+                    kl = unpacking_samples(kl, experience.packed_seq_lens)
                 kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=action_log_probs.device)
 
             kl_loss = kl_mean.mean()

@@ -108,6 +108,7 @@ def unpad_sequences(
     action_log_probs=None,
     values=None,
     kl=None,
+    action_mask=None,
 ):
     # Removes the padding from the input sequences, attention mask, and other optional tensors after padding.
     if pad_len > 0:
@@ -121,4 +122,8 @@ def unpad_sequences(
             values = values[:, :-pad_len]
         if kl is not None:
             kl = kl[:, :-pad_len]
+        if action_mask is not None:
+            action_mask = action_mask[:, :-pad_len]
+    if action_mask is not None:
+        return sequences, attention_mask, num_actions, packed_seq_lens, action_log_probs, values, kl, action_mask
     return sequences, attention_mask, num_actions, packed_seq_lens, action_log_probs, values, kl

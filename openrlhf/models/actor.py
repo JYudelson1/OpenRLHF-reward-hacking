@@ -7,7 +7,7 @@ from flash_attn.utils.distributed import all_gather
 from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora import LoraLayer
 from torch.nn import functional as F
-from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer
 from transformers.integrations.deepspeed import HfDeepSpeedConfig
 
 from .ring_attn_utils import convert_ring_attn_params
@@ -92,6 +92,7 @@ class Actor(nn.Module):
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
             )
+            # self.tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model)
 
             # LoRA
             if lora_rank > 0:
@@ -201,6 +202,7 @@ class Actor(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         action_mask: Optional[torch.Tensor] = None,
         return_output=False,
+        return_action_log_probs=False,
         ring_attn_group: Optional[dist.ProcessGroup] = None,
         logps_allgather=False,
         packed_seq_lens: Optional[list[int]] = None,
@@ -221,6 +223,14 @@ class Actor(nn.Module):
                 position_ids = reset_position_ids(attention_mask)
             # explicitly ignore attention_mask for packing_samples
             attention_mask = None
+            
+        if action_mask is not None:
+            print(f"{action_mask.shape=}")
+            print(f"{sequences.shape=}")
+            # text_sequences = self.tokenizer.convert_ids_to_tokens(sequences.squeeze(0).tolist())
+            # print(f"{len(text_sequences)=}")
+            # print(f"{list(zip(text_sequences, action_mask.squeeze(0).tolist()))}")
+            # assert False
 
         output = self.model(sequences, attention_mask=attention_mask, position_ids=position_ids)
         # https://github.com/OpenRLHF/OpenRLHF/pull/634
@@ -258,20 +268,28 @@ class Actor(nn.Module):
                 log_probs = log_probs_from_logits(
                     output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
                 )
+            
+            
+            if action_mask is not None:
+                action_log_probs = torch.masked_select(log_probs, action_mask.to(dtype=torch.bool)[:, 1:]).unsqueeze(0)
+            else:
+                action_log_probs = []
+                offset = 0
+                assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
+                for num_action, seq_len in zip(num_actions, packed_seq_lens):
+                    start, end = max(0, offset + seq_len - num_action - 1), offset + seq_len - 1
+                    action_log_probs.append(log_probs[:, start:end])
+                    offset += seq_len
+                action_log_probs = torch.cat(action_log_probs, dim=1)
 
-            assert isinstance(num_actions, list) and len(num_actions) == len(packed_seq_lens)
-            action_log_probs = []
-            offset = 0
-            for num_action, seq_len in zip(num_actions, packed_seq_lens):
-                start, end = max(0, offset + seq_len - num_action - 1), offset + seq_len - 1
-                action_log_probs.append(log_probs[:, start:end])
-                offset += seq_len
-            action_log_probs = torch.cat(action_log_probs, dim=1)
-
-        if return_output:
+        if return_output and return_action_log_probs:
             return (action_log_probs, output)
-        else:
+        elif return_output and not return_action_log_probs:
+            return (log_probs, output)
+        elif return_action_log_probs:
             return action_log_probs
+        else:
+            return log_probs
 
     def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs={"use_reentrant": False}):
         self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)

@@ -279,6 +279,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # Convert samples into lists of tensors and metadata for batch processing
         sequences_list = [s.sequences for s in samples_list]
         attention_mask_list = [s.attention_mask for s in samples_list]
+        action_mask_list = [s.action_mask for s in samples_list]
         num_actions_list = [s.num_actions for s in samples_list]
         packed_seq_lens_list = [s.packed_seq_lens for s in samples_list]
         solutions_list = [s.solutions for s in samples_list]
@@ -294,8 +295,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 sequences=sequences_cpu_list,
                 num_actions=num_actions_list,
                 attention_mask=attention_mask_cpu_list,
+                action_mask=action_mask_list,
                 logps_allgather=[True] * len(samples_list),
                 packed_seq_lens=packed_seq_lens_list,
+                return_action_log_probs=[True] * len(samples_list),
             )
 
             if args.colocate_actor_ref or args.colocate_all_models:
@@ -379,13 +382,15 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
         # Batch call actor model
         action_log_probs_list = []
-        for seq, num_acts, attn_mask, packed_lens in zip(
-            sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list
+        for seq, num_acts, attn_mask, packed_lens, action_mask in zip(
+            sequences_cpu_list, num_actions_list, attention_mask_cpu_list, packed_seq_lens_list, action_mask_list
         ):
             action_log_probs = self.actor(
                 seq.to(device),
                 num_acts,
                 attn_mask.to(device),
+                action_mask=action_mask,
+                return_action_log_probs=True,
                 ring_attn_group=self.strategy.ring_attn_group,
                 logps_allgather=True,
                 packed_seq_lens=packed_lens,
@@ -414,7 +419,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             torch.cuda.empty_cache()
 
         # Process results for each sample
-        for i, (samples, action_log_probs, base_action_log_probs, value, rewards, rewards_missing) in enumerate(
+        for i, (samples, action_log_probs, base_action_log_probs, value, rewards, rewards_missing, action_mask) in enumerate(
             zip(
                 samples_list,
                 action_log_probs_list,
@@ -422,6 +427,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 value_list,
                 rewards_list,
                 rewards_missing_list,
+                action_mask_list,
                 strict=True,
             )
         ):
@@ -446,7 +452,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 kl = compute_approx_kl(
                     action_log_probs,
                     base_action_log_probs,
-                    action_mask=samples.action_mask,
+                    action_mask=action_mask,
                     kl_estimator=self.strategy.args.kl_estimator,
                 )
             else:
@@ -461,7 +467,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 packed_seq_lens = samples.packed_seq_lens
                 if self.strategy.ring_attn_group is not None:
                     assert samples.pad_len is not None
-                    sequences, attention_mask, num_actions, packed_seq_lens, _, _, kl = unpad_sequences(
+                    sequences, attention_mask, num_actions, packed_seq_lens, _, _, kl, action_mask = unpad_sequences(
                         pad_len=samples.pad_len,
                         sequences=sequences,
                         attention_mask=attention_mask,
@@ -471,17 +477,28 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         action_log_probs=action_log_probs,
                         values=value,
                         kl=kl,
+                        action_mask=action_mask,
                     )
                 # Convert tensor into list of tensors for easier manipulation within dataset
                 sequences = unpacking_samples(sequences, packed_seq_lens)
                 attention_mask = None
-                action_log_probs = unpacking_samples(action_log_probs, num_actions)
                 if value is not None:
                     value = unpacking_samples(value, num_actions)
-                if base_action_log_probs is not None:
-                    base_action_log_probs = unpacking_samples(base_action_log_probs, num_actions)
+                if action_mask is not None:
+                    action_mask = unpacking_samples(action_mask, packed_seq_lens)
+                    assert all(mask.shape == seq.shape for mask, seq in zip(action_mask, sequences, strict=True)), f"{[mask.shape for mask in action_mask]} {[seq.shape for seq in sequences]}"
+                
+                if action_mask is not None:
+                    kl = unpacking_samples(kl, [mask.sum() for mask in action_mask])
+                    action_log_probs = unpacking_samples(action_log_probs, [mask.sum() for mask in action_mask])
+                    if base_action_log_probs is not None:
+                        base_action_log_probs = unpacking_samples(base_action_log_probs, [mask.sum() for mask in action_mask])
+                else:
+                    kl = unpacking_samples(kl, num_actions)
+                    action_log_probs = unpacking_samples(action_log_probs, num_actions)
+                    if base_action_log_probs is not None:
+                        base_action_log_probs = unpacking_samples(base_action_log_probs, packed_seq_lens)
 
-                kl = unpacking_samples(kl, num_actions)
                 kl_mean = torch.tensor([each_kl.mean() for each_kl in kl], device=device)
 
             if not args.use_kl_loss:
@@ -517,7 +534,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 None,
                 None,
                 attention_mask,
-                samples.action_mask,
+                action_mask,
                 info,
                 kl,
                 json_rollouts=samples.json_rollouts,
@@ -599,7 +616,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             for experience in experiences:
                 experience.info["extra_metrics/frac_mixed_reward_groups"] = torch.tensor([float(frac_nonzero_rows.item()) for _ in experience.sequences])
                 
-        rewards = (r + l for r, l in zip(rewards, lengths))
+        rewards = (r + l for r, l in zip(rewards, lengths, strict=True))
 
         # calculate return and advantages
         for experience, reward in zip(experiences, rewards, strict=True):
@@ -721,6 +738,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         self,
         rewards: torch.Tensor,
         gamma: float,
+        action_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Function that computes advantages and returns from rewards using REINFORCE.
@@ -737,17 +755,16 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if isinstance(rewards, list):
             # packing samples
             # TODO: this is slow...
-            # if action_mask is not None:
-            #     returns = []
-            #     for r, am in zip(rewards, action_mask):
-            #         ret = self.get_cumulative_returns(r.unsqueeze(0), am.unsqueeze(0), gamma)
-            #         returns.append(ret.squeeze(0))
-            #     return returns
-            # else:
             returns = []
-            for r in rewards:
-                ret = self.get_cumulative_returns(r.unsqueeze(0), gamma)
-                returns.append(ret.squeeze(0))
+            if action_mask is not None:
+                for r, am in zip(rewards, action_mask):
+                    ret = self.get_cumulative_returns(r.unsqueeze(0), am.unsqueeze(0), gamma)
+                    returns.append(ret.squeeze(0))
+                return returns
+            else:
+                for r in rewards:
+                    ret = self.get_cumulative_returns(r.unsqueeze(0), gamma)
+                    returns.append(ret.squeeze(0))
             return returns
 
         response_length = rewards.size(1)
@@ -755,15 +772,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         cumulative_return = torch.zeros(rewards.size(0), device=rewards.device)
 
         # Mask invalid responses if action_mask is provided
-        # if action_mask is not None:
-        #     # TODO: THIS MIGHT BE WRONG
-        #     if action_mask.size(1) == rewards.size(1):
-        #         rewards = action_mask * rewards
-        #     # Truncate action_mask to match rewards, for packed samples
-        #     if action_mask.size(1) > rewards.size(1):
-        #         action_mask = action_mask[:, action_mask.size(1) - rewards.size(1):]
-        #     else:
-        #         assert False, "rewards has more elements than action_mask"
+        if action_mask is not None:
+            rewards = action_mask * rewards
 
         # Calculate returns by accumulating discounted rewards
         for t in reversed(range(response_length)):
@@ -968,6 +978,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 attention_mask = []  # For sequence identification
                 action_masks = []  # For masking assistant responses
                 num_actions = []
+                response_lengths = []
 
                 if full_data[0] is not None:
                     # Sequence packing with multiple turns
@@ -1000,7 +1011,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     #     action_masks.extend(current_action_mask)
                     #     num_actions.append(sum(current_action_mask))  # Total response tokens
                     # action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
-                    action_mask = None
+                    action_mask = []
                     rewards = []
                     for i, (conversation, reward) in enumerate(outputs):
                         input_len = len(conversation.first_prompt_tokens)
@@ -1008,8 +1019,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                         packed_seq_lens.append(total_len)
                         sequences.extend(conversation.all_tokens)
                         attention_mask.extend([i + 1] * total_len)
-
-                        num_actions.append(max(1, total_len - input_len))
+                        action_masks.extend(conversation.action_mask)
+                        num_actions.extend(conversation.num_actions_list)
+                        response_lengths.append(sum(conversation.action_mask))
                         rewards.append(reward)
                 else:
                     # Sequence packing with single turn
@@ -1039,7 +1051,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
 
-                    response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
+                    response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
+                    
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
                     samples_list.append(
                         Samples(
@@ -1061,8 +1074,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 else:
                     sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
-
-                    response_length = torch.tensor(num_actions, device="cuda", dtype=torch.float)
+                    action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
+                    
+                    response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)
                     samples_list.append(
                         Samples(
