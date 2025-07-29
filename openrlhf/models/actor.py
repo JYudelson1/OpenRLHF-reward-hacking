@@ -223,14 +223,6 @@ class Actor(nn.Module):
                 position_ids = reset_position_ids(attention_mask)
             # explicitly ignore attention_mask for packing_samples
             attention_mask = None
-            
-        if action_mask is not None:
-            print(f"{action_mask.shape=}")
-            print(f"{sequences.shape=}")
-            # text_sequences = self.tokenizer.convert_ids_to_tokens(sequences.squeeze(0).tolist())
-            # print(f"{len(text_sequences)=}")
-            # print(f"{list(zip(text_sequences, action_mask.squeeze(0).tolist()))}")
-            # assert False
 
         output = self.model(sequences, attention_mask=attention_mask, position_ids=position_ids)
         # https://github.com/OpenRLHF/OpenRLHF/pull/634
