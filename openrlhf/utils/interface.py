@@ -20,16 +20,12 @@ from vllm.entrypoints.chat_utils import (
     resolve_chat_template_content_format,
 )
 from vllm.inputs import TokensPrompt
-from openai import AsyncOpenAI
-from anthropic import AsyncAnthropic
-from tenacity import retry, stop_after_attempt, wait_exponential
 from plotly.graph_objects import Figure
 import traceback
 import json
 import ray
 import logging
 from dataclasses import dataclass, field
-from sys import stderr
 from datetime import datetime
 from vllm.transformers_utils.tokenizer import get_tokenizer
 
@@ -64,7 +60,7 @@ class AgentConversation:
             key_with_no_name_clashes = "this_prefix_removed_a_name_clash/" + key_with_no_name_clashes
 
         self.extra_metrics[key_with_no_name_clashes] = float(self.error)
-        
+
     def increment_num_steps(self) -> None:
         if self.extra_metrics is None:
             self.extra_metrics = {}
@@ -77,88 +73,6 @@ class AsyncLLMInterface(ABC):
         self, conversation: AgentConversation, stop_strings: list[str] | None
     ) -> None:
         pass
-
-
-@dataclass(frozen=True)
-class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
-    client: AsyncOpenAI | AsyncAnthropic
-    model: str
-    temperature: float
-    max_completion_tokens: int
-
-    async def generate_assistant_message(
-        self,
-        conversation: AgentConversation,
-        stop_strings: list[str] | None,
-    ) -> None:
-        messages = self._merge_tool_and_user_messages(conversation.messages)
-
-        completion_text: str = await self._generate_completion(messages, stop_strings=stop_strings)
-
-        # the together.ai api ignores stop strings
-        # (note: i don't know if it always does or sometimes does)
-        together_ai_api = self.client.base_url is not None and "api.together.xyz" in str(self.client.base_url)
-        if together_ai_api and stop_strings is not None:
-            for stop_string in stop_strings:
-                if stop_string in completion_text:
-                    completion_text = completion_text[: completion_text.index(stop_string)]
-
-        conversation.messages.append({"role": "assistant", "content": completion_text})
-
-    @retry(
-        stop=stop_after_attempt(8),
-        wait=wait_exponential(multiplier=15, min=1),
-        before_sleep=lambda retry_state: print(
-            f"Calling OpenAI or Anthropic API: Attempt {retry_state.attempt_number} Failed: Exception: {retry_state.outcome.exception()}",
-            file=stderr,
-        ),
-    )
-    async def _generate_completion(self, messages: list[Message], stop_strings: list[str] | None) -> str:
-        if isinstance(self.client, AsyncOpenAI):
-            completion = await self.client.chat.completions.create(
-                messages=messages,
-                model=self.model,
-                temperature=self.temperature,
-                max_completion_tokens=self.max_completion_tokens,
-                stop=stop_strings,
-            )
-
-            return completion.choices[0].message.content
-
-        if isinstance(self.client, AsyncAnthropic):
-            completion = await self.client.messages.create(
-                messages=messages[1:] if messages[0]["role"] == "system" else messages,
-                system=[{"type": "text", "text": messages[0]["content"], "cache_control": {"type": "ephemeral"}}]
-                if messages[0]["role"] == "system"
-                else None,
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_completion_tokens,
-                stop_sequences=stop_strings,
-            )
-
-            return completion.content[0].text
-
-        raise TypeError(
-            f"AsyncOpenAIOrAnthropicLLM.client should be of type OpenAI or Anthropic, but found type {type(self.client)}."
-        )
-
-    def _merge_tool_and_user_messages(self, messages: list[Message]) -> list[Message]:
-        merged_messages = []
-
-        for message in messages:
-            if message["role"] == "tool":
-                assert set(message.keys()) == {"role", "content"}
-                message = {"role": "user", "content": f"<tool_call>\n{message['content']}\n<tool_call/>"}
-
-            if len(merged_messages) > 0 and message["role"] == merged_messages[-1]["role"]:
-                assert set(message.keys()) == {"role", "content"}
-                merged_messages[-1]["content"] += "\n\n" + message["content"]
-                continue
-
-            merged_messages.append(message)
-
-        return merged_messages
 
 
 @dataclass(frozen=True)
@@ -193,14 +107,14 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.tokens_by_turn.append({"input_tokens": input_tokens, "output_tokens": output_tokens})
         conversation.n_tokens += len(input_tokens) + len(output_tokens)
         conversation.n_assistant_tokens += len(output_tokens)
-        
-        conversation.action_mask.extend([0] * len(input_tokens) )
+
+        conversation.action_mask.extend([0] * len(input_tokens))
         if was_truncated:
-            conversation.action_mask = conversation.action_mask[:sampling_params.truncate_prompt_tokens] + [0]
+            conversation.action_mask = conversation.action_mask[: sampling_params.truncate_prompt_tokens] + [0]
         conversation.action_mask.extend([1] * len(output_tokens))
-        
+
         conversation.num_actions_list.append(len(output_tokens))
-        
+
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
 
         if was_truncated:
@@ -358,7 +272,7 @@ class AgentInterface(ABC):
         self.vllm_engine_index = vllm_engine_index
         self.compact_filtering = compact_filtering
         self.filter_max_steps = filter_max_steps
-        
+
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
         """Initialize the states for a new RL environments, given a list of dict elements of the dataset"""
@@ -401,7 +315,7 @@ class AgentInterface(ABC):
 
     async def get_extra_metrics(self, messages: list[Message], state: AgentState) -> dict[str, float]:
         return {}
-    
+
     async def get_reward_in_eval(self, messages: List[Message], state: AgentState) -> Reward | None:
         """Get the eval reward for the conversation. Used if the train reward may reflect a different thing than what we'd like to measure"""
         return await self.get_reward(messages, state)
@@ -418,7 +332,9 @@ class AgentInterface(ABC):
             logger.error(f"Error in init_all_states: {str(e)}")
             return [
                 (
-                    AgentConversation(env_name=env_name, extra_metrics={"n_errors": 1.0, "num_steps": 0.0}, error=True),
+                    AgentConversation(
+                        env_name=env_name, extra_metrics={"n_errors": 1.0, "num_steps": 0.0}, error=True
+                    ),
                     None,
                 )
                 for _ in range(len(full_data))
@@ -427,7 +343,11 @@ class AgentInterface(ABC):
         results = await asyncio.gather(
             *[
                 self._generate_single_rollout(
-                    llm=llm, initial_state=state, time_init_env_started=time_init_env_started, env_name=env_name, is_eval=is_eval
+                    llm=llm,
+                    initial_state=state,
+                    time_init_env_started=time_init_env_started,
+                    env_name=env_name,
+                    is_eval=is_eval,
                 )
                 for state in states
             ]
@@ -463,13 +383,18 @@ class AgentInterface(ABC):
         return [(conversation, reward) for conversation, reward, stats, state in results]
 
     async def _generate_single_rollout(
-        self, llm: AsyncLLMInterface, initial_state: AgentState, time_init_env_started: float, env_name: str, is_eval: bool = False
+        self,
+        llm: AsyncLLMInterface,
+        initial_state: AgentState,
+        time_init_env_started: float,
+        env_name: str,
+        is_eval: bool = False,
     ) -> tuple[AgentConversation, Reward | None, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics(time_init_env_started=time_init_env_started)
 
         conversation = AgentConversation(env_name=env_name, extra_metrics={"num_steps": 0.0})
         state = initial_state
-        
+
         was_truncated = False
         hit_max_steps = False
 
@@ -519,8 +444,7 @@ class AgentInterface(ABC):
             await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings)
 
         stats.on_computing_reward_start()
-        
-        
+
         # Normal reward calculation
         try:
             if is_eval:
@@ -533,7 +457,7 @@ class AgentInterface(ABC):
             logger.error(f"Error in get_reward: {str(e)}")
             conversation.error = True
             reward = None
-            
+
         if was_truncated and self.compact_filtering:
             reward = None
         elif hit_max_steps and self.filter_max_steps:
