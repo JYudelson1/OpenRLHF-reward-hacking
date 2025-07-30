@@ -110,7 +110,7 @@ class SFTTrainer(ABC):
         # Restore step and start_epoch
         step = consumed_samples // args.train_batch_size * self.strategy.accumulated_gradient + 1
         start_epoch = consumed_samples // args.train_batch_size // num_update_steps_per_epoch
-        
+
         consumed_samples = consumed_samples % (num_update_steps_per_epoch * args.train_batch_size)
 
         epoch_bar = tqdm(

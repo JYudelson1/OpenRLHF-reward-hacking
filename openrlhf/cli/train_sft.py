@@ -53,7 +53,7 @@ def train(args):
         max_count=args.max_samples,
         train_split=args.train_split,
         eval_split=args.eval_split,
-        return_eval=True
+        return_eval=True,
     )
     train_data = out["train"]
     eval_data = out["validation"]

@@ -86,9 +86,9 @@ class BasePPOTrainer(ABC):
         disable_ds_ckpt: bool = False,
         **generate_kwargs,
     ) -> None:
-        assert not isinstance(reward_model, List) or len(reward_model) == 1 or reward_fn is not None, (
-            "reward_fn must be specified if using multiple reward models"
-        )
+        assert (
+            not isinstance(reward_model, List) or len(reward_model) == 1 or reward_fn is not None
+        ), "reward_fn must be specified if using multiple reward models"
 
         super().__init__()
         self.strategy = strategy

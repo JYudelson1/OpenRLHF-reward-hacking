@@ -97,7 +97,7 @@ def blending_datasets(
             train_data = data[train_split].select(range(min(max_count, len(data[train_split]))))
         else:
             train_data = data.select(range(min(max_count, len(data))))
-        
+
         # Add datasource column to data using map
         def add_datasource(example):
             example["datasource"] = dataset_basename
@@ -111,10 +111,10 @@ def blending_datasets(
                 train_eval_split = train_data.train_test_split(test_size=eval_ratio, seed=seed)
                 train_data = train_eval_split["train"]  # Replace train data with reduced set
                 eval_data = train_eval_split["test"]
-            
+
             eval_data = eval_data.map(add_datasource)
             eval_data_list.append(eval_data)
-        
+
         train_data = train_data.map(add_datasource)
         train_data_list.append(train_data)
 
@@ -128,7 +128,7 @@ def blending_datasets(
         seed=seed,
         stopping_strategy=stopping_strategy,
     )
-    
+
     if strategy.is_rank_0():
         print(f"There are {len(train_dataset)} samples in train dataset")
 

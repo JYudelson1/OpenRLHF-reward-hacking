@@ -40,12 +40,14 @@ def compute_approx_kl(
 
     return log_ratio
 
+
 def get_run_lengths(x: torch.Tensor):
     # Find where values change from 0 to 1 or 1 to 0
     diff = torch.diff(x, prepend=torch.tensor([0]), append=torch.tensor([0]))
     starts = torch.where(diff == 1)[0]  # 0->1 transitions
-    ends = torch.where(diff == -1)[0]   # 1->0 transitions
+    ends = torch.where(diff == -1)[0]  # 1->0 transitions
     return (ends - starts).tolist()
+
 
 def compute_reward(
     r: Union[torch.Tensor, float],
@@ -89,7 +91,7 @@ def compute_reward(
             kl_reward += reward_seg
             reward.append(kl_reward)
     elif sample_packing:
-        # 
+        #
         # TODO: write a more efficient version
         # mask = action_mask[:, :-1]
         # run_lengths = get_run_lengths(mask)

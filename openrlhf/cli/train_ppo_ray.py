@@ -27,22 +27,22 @@ def reward_fn(rewards: List[torch.Tensor]):
 def _validate_args(args):
     actor_world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
 
-    assert args.rollout_batch_size % actor_world_size == 0, (
-        f"rollout_bach_size must be divisible by actor_world_size, got {args.rollout_batch_size} and {actor_world_size}"
-    )
+    assert (
+        args.rollout_batch_size % actor_world_size == 0
+    ), f"rollout_bach_size must be divisible by actor_world_size, got {args.rollout_batch_size} and {actor_world_size}"
 
     assert args.zero_stage != 3 or args.vllm_num_engines > 0, f"ZeRO-3 is only supported when vLLM enabled"
 
     if args.vllm_num_engines > 0:
-        assert actor_world_size % args.vllm_num_engines == 0 or args.vllm_num_engines % actor_world_size == 0, (
-            f"actor_world_size must be divisible by vllm_num_engines, got {actor_world_size} and {args.vllm_num_engines}"
-        )
+        assert (
+            actor_world_size % args.vllm_num_engines == 0 or args.vllm_num_engines % actor_world_size == 0
+        ), f"actor_world_size must be divisible by vllm_num_engines, got {actor_world_size} and {args.vllm_num_engines}"
 
     if args.critic_pretrain:
         critic_world_size = args.critic_num_nodes * args.critic_num_gpus_per_node
-        assert actor_world_size % critic_world_size == 0, (
-            f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
-        )
+        assert (
+            actor_world_size % critic_world_size == 0
+        ), f"actor_world_size must be divisible by critic_world_size, got {actor_world_size} and {critic_world_size}"
 
     if args.use_kl_loss:
         if args.kl_estimator not in ["k2", "k3"]:
@@ -76,7 +76,7 @@ def train(args):
         bundles = [
             {"GPU": 1, "CPU": cpu_per_actor} for _ in range(args.actor_num_nodes * args.actor_num_gpus_per_node)
         ]
-        pg = placement_group(bundles,strategy="PACK")
+        pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
     # init vLLM engine for text generation
@@ -282,7 +282,7 @@ if __name__ == "__main__":
     # Checkpoints
     parser.add_argument("--eval_steps", type=int, default=-1)
     parser.add_argument("--eval_ratio", type=float, default=0.03)
-    
+
     parser.add_argument("--save_steps", type=int, default=-1)
     parser.add_argument("--logging_steps", type=int, default=1)
     parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_ppo_ray")
@@ -344,7 +344,11 @@ if __name__ == "__main__":
     parser.add_argument("--ptx_coef", type=float, default=0.05, help="PPO-ptx loss coef")
     parser.add_argument("--eps_clip_low", type=float, default=0.2, help="Lower bound of the PPO clip range")
     parser.add_argument("--eps_clip_high", type=float, default=0.2, help="Upper bound of the PPO clip range")
-    parser.add_argument("--divide_loss_by", type=float, help="If provided, divide the loss by it instead of the sequence length. A good value for divide_loss_by is generate_max_len")
+    parser.add_argument(
+        "--divide_loss_by",
+        type=float,
+        help="If provided, divide the loss by it instead of the sequence length. A good value for divide_loss_by is generate_max_len",
+    )
     parser.add_argument("--value_clip", type=float, default=0.2, help="PPO value clip range")
     parser.add_argument("--lambd", type=float, default=1, help="PPO GAE lambd")
     parser.add_argument("--gamma", type=float, default=1, help="PPO GAE gamma")
@@ -461,12 +465,24 @@ if __name__ == "__main__":
     parser.add_argument("--mongo_collection_name", type=str, default=None, help="MongoDB collection name")
 
     # Logging transcript
-    parser.add_argument("--transcripts_folder", type=str, default=None, help="Path to the folder for logging transcripts")
-    
+    parser.add_argument(
+        "--transcripts_folder", type=str, default=None, help="Path to the folder for logging transcripts"
+    )
+
     # RL environment paramaters
     # Multiturn RL only
-    parser.add_argument("--envs_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment classes")
-    parser.add_argument("--envs_args_file", type=str, default=None, help="Path to the file that matches dataset names to associated environment arguments")
+    parser.add_argument(
+        "--envs_file",
+        type=str,
+        default=None,
+        help="Path to the file that matches dataset names to associated environment classes",
+    )
+    parser.add_argument(
+        "--envs_args_file",
+        type=str,
+        default=None,
+        help="Path to the file that matches dataset names to associated environment arguments",
+    )
     parser.add_argument("--length_penalty", type=float, default=0.0, help="Length penalty for rewards")
 
     # TensorBoard parameters
@@ -482,12 +498,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_cpus", type=int, default=-1, help="Maximum number of CPUs to use for multiple environments running"
     )
-    
+
     # Compact filtering: https://www.together.ai/blog/deepswe
     # If true, will mask any trajectory that hits the length limit
     parser.add_argument("--compact_filtering", action="store_true", default=False)
     parser.add_argument("--filter_max_steps", action="store_true", default=False)
-    
+
     args = parser.parse_args()
 
     if args.advantage_estimator not in ["gae"]:
@@ -526,52 +542,50 @@ if __name__ == "__main__":
 
     if args.envs_file:
         sys.path.insert(0, os.getcwd())
-        
+
         env_makers = {}
         args.env_makers = {}
-        
+
         with open(args.envs_file, "r") as f:
             env_names_to_classes = json.load(f)
-            
+
         if args.envs_args_file:
             with open(args.envs_args_file, "r") as f:
                 env_args_by_classname = json.load(f)
-                args.__dict__['env_args_by_classname'] = env_args_by_classname
-                
+                args.__dict__["env_args_by_classname"] = env_args_by_classname
+
         dataset_names = args.prompt_data.split(",")
         dataset_basenames = [filename.split("/")[-1] for filename in dataset_names]
-        
+
         for filename in dataset_basenames:
             folder_name = env_names_to_classes[filename]["env_folder"]
             class_name = env_names_to_classes[filename]["env_class"]
-            
+
             env_module = importlib.import_module(folder_name)
             env_maker = getattr(env_module, class_name)
-        
-            args.env_makers[filename] = partial(
-                env_maker, 
-                **env_args_by_classname.get(class_name, {})
-            )
-            
+
+            args.env_makers[filename] = partial(env_maker, **env_args_by_classname.get(class_name, {}))
+
         print(f"Env makers: {args.env_makers}")
         print(f"Env names to classes: {env_names_to_classes}")
-        
+
     if args.mongo_uri == "":
         args.mongo_uri = None
-        
+
     if args.mongo_uri and args.transcripts_folder:
         print("[Warning] You are logging both locally and to MongoDB")
-        
+
     if args.transcripts_folder:
         os.makedirs(args.transcripts_folder, exist_ok=True)
-        
+
     if args.mongo_uri:
         args.mongo_uri = args.mongo_uri.replace("%26", "&")
-        
+
     if args.mongo_uri is not None and args.mongo_db_name is not None and args.mongo_collection_name is None:
         args.mongo_collection_name = args.wandb_run_name + "_" + datetime.now().strftime("%m%dT%H:%M")
         # Create a new collection
         from pymongo import MongoClient
+
         mongo_client = MongoClient(args.mongo_uri)
         db = mongo_client[args.mongo_db_name]
         db.create_collection(args.mongo_collection_name)

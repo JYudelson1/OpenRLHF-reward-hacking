@@ -29,7 +29,7 @@ def request_api_wrapper(url, data, score_key="rewards", try_max_times=5, timeout
     raise Exception(f"Request error for {try_max_times} times, returning None. Please check the API server.")
 
 
-def remote_rm_fn(api_url, queries, solutions = None, score_key="rewards"):
+def remote_rm_fn(api_url, queries, solutions=None, score_key="rewards"):
     """remote reward model API
     api_url: RM API, We assume that the API supports two modes: merging query + response and not merging
     queries: query+response with the template
@@ -41,7 +41,7 @@ def remote_rm_fn(api_url, queries, solutions = None, score_key="rewards"):
 
 
 @ray.remote
-def remote_rm_fn_ray(api_url, queries, solutions = None, score_key="rewards"):
+def remote_rm_fn_ray(api_url, queries, solutions=None, score_key="rewards"):
     return remote_rm_fn(api_url, queries, solutions, score_key)
 
 

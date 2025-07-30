@@ -134,7 +134,9 @@ class Actor(nn.Module):
             self.model = pretrain_or_model
 
     @torch.no_grad()
-    def generate(self, input_ids: torch.Tensor, **kwargs) -> Union[
+    def generate(
+        self, input_ids: torch.Tensor, **kwargs
+    ) -> Union[
         Tuple[torch.LongTensor, torch.LongTensor],
         Tuple[torch.LongTensor, torch.LongTensor, torch.BoolTensor],
     ]:
@@ -260,8 +262,7 @@ class Actor(nn.Module):
                 log_probs = log_probs_from_logits(
                     output["logits"][:, :-1, :], sequences[:, 1:], temperature=self.temperature
                 )
-            
-            
+
             if action_mask is not None:
                 action_log_probs = torch.masked_select(log_probs, action_mask.to(dtype=torch.bool)[:, 1:]).unsqueeze(0)
             else:
