@@ -151,7 +151,7 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
                 model=self.model,
                 temperature=self.temperature,
                 max_completion_tokens=self.max_completion_tokens,
-                stop=stop_strings,
+                stop=stop_strings if self.model != "o3" else None,
             )
 
             print(completion.usage)
