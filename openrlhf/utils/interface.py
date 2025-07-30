@@ -46,20 +46,10 @@ class AgentConversation:
     n_tokens: int = 0
     n_assistant_tokens: int = 0
     was_truncated: bool = False
-    extra_metrics: dict[str, float] | None = None
+    extra_metrics: dict[str, float] | None = field(default_factory=lambda: {"n_errors": 0.0, "num_steps": 0.0})
     error: bool = False
     action_mask: list[int] = field(default_factory=lambda: [0])
     num_actions_list: list[int] = field(default_factory=lambda: [])
-
-    def add_error_to_extra_metrics(self) -> None:
-        if self.extra_metrics is None:
-            self.extra_metrics = {}
-
-        key_with_no_name_clashes = "n_errors"
-        while key_with_no_name_clashes in self.extra_metrics.keys():
-            key_with_no_name_clashes = "this_prefix_removed_a_name_clash/" + key_with_no_name_clashes
-
-        self.extra_metrics[key_with_no_name_clashes] = float(self.error)
 
     def increment_num_steps(self) -> None:
         if self.extra_metrics is None:
@@ -378,7 +368,7 @@ class AgentInterface(ABC):
                 conversation.error = True
 
         for conversation, reward, stats, state in results:
-            conversation.add_error_to_extra_metrics()
+            conversation.extra_metrics["n_errors"] = float(conversation.error)
 
         return [(conversation, reward) for conversation, reward, stats, state in results]
 
@@ -392,7 +382,7 @@ class AgentInterface(ABC):
     ) -> tuple[AgentConversation, Reward | None, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics(time_init_env_started=time_init_env_started)
 
-        conversation = AgentConversation(env_name=env_name, extra_metrics={"num_steps": 0.0})
+        conversation = AgentConversation(env_name=env_name)
         state = initial_state
 
         was_truncated = False
