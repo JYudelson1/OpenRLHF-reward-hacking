@@ -154,8 +154,6 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
                 stop=stop_strings if self.model != "o3" else None,
             )
 
-            print(completion.usage)
-
             cost = openai_or_anthropic_api_cost(
                 model_provider="openai",
                 model_name=self.model,
