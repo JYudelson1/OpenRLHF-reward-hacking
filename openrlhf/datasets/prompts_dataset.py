@@ -64,7 +64,7 @@ class PromptDataset(Dataset):
             }
             if full_data is not None:
                 data_entry["full_data"] = full_data
-                if "input_output" in full_data:
+                if full_data.get("input_output", None) is not None:
                     unit_tests_json = json.loads(full_data["input_output"])
                     unit_tests_json = {"inputs": unit_tests_json["inputs"][:128], "outputs": unit_tests_json["outputs"][:128]}
                     full_data["input_output"] = json.dumps(unit_tests_json)
