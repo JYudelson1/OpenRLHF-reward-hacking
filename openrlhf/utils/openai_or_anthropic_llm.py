@@ -163,6 +163,7 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
 
             async with total_cost_lock:
                 total_cost += cost
+                print(f"total api call cost: ${total_cost}")
 
             return completion.choices[0].message.content
 
@@ -178,7 +179,7 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
                 stop_sequences=stop_strings,
             )
 
-            cost = cost = openai_or_anthropic_api_cost(
+            cost = openai_or_anthropic_api_cost(
                 model_provider="anthropic",
                 model_name=self.model,
                 input_tokens=completion.usage.input_tokens,
@@ -190,6 +191,7 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
 
             async with total_cost_lock:
                 total_cost += cost
+                print(f"total api call cost: ${total_cost}")
 
             return completion.content[0].text
 
