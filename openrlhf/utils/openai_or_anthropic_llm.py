@@ -142,6 +142,9 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
         ),
     )
     async def _generate_completion(self, messages: list[Message], stop_strings: list[str] | None) -> str:
+
+        global total_cost_lock, total_cost
+
         if isinstance(self.client, AsyncOpenAI):
             completion = await self.client.chat.completions.create(
                 messages=messages,
@@ -158,8 +161,6 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
                 output_tokens=completion.usage.output_tokens,
                 cached_input_tokens=completion.usage.input_tokens_details.cached_tokens,
             )
-
-            global total_cost_lock, total_cost
 
             async with total_cost_lock:
                 total_cost += cost
@@ -186,8 +187,6 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
                 output_tokens=completion.usage.output_tokens,
                 cached_input_tokens=0,
             )
-
-            global total_cost_lock, total_cost
 
             async with total_cost_lock:
                 total_cost += cost
