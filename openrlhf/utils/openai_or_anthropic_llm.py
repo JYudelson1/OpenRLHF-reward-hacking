@@ -159,9 +159,9 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
             cost = openai_or_anthropic_api_cost(
                 model_provider="openai",
                 model_name=self.model,
-                input_tokens=completion.usage.input_tokens,
-                output_tokens=completion.usage.output_tokens,
-                cached_input_tokens=completion.usage.input_tokens_details.cached_tokens,
+                input_tokens=completion.usage.prompt_tokens,
+                output_tokens=completion.usage.completion_tokens,
+                cached_input_tokens=0,
             )
 
             async with total_cost_lock:
