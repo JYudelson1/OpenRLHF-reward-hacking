@@ -385,7 +385,12 @@ class ActorPPOTrainer(BasePPOTrainer):
             # pad seq makes the sequence a multiple of ring_attention_size.
             if self.strategy.ring_attn_group is not None:
                 pad_len, sequences, attention_mask, action_mask, num_actions, packed_seq_lens = pad_sequences(
-                    sequences, attention_mask, num_actions, packed_seq_lens, self.strategy.ring_attn_group, action_mask=action_mask
+                    sequences,
+                    attention_mask,
+                    num_actions,
+                    packed_seq_lens,
+                    self.strategy.ring_attn_group,
+                    action_mask=action_mask,
                 )
             if self.args.use_kl_loss and experience.base_action_log_probs is not None:
                 base_action_log_probs = torch.cat(experience.base_action_log_probs, dim=0).unsqueeze(0)
@@ -414,7 +419,16 @@ class ActorPPOTrainer(BasePPOTrainer):
         # unpad sequence ensures that pad tokens do not contribute to the loss calculation.
         if self.strategy.ring_attn_group is not None:
             assert pad_len is not None
-            sequences, attention_mask, num_actions, packed_seq_lens, action_log_probs, _, _, action_mask = unpad_sequences(
+            (
+                sequences,
+                attention_mask,
+                num_actions,
+                packed_seq_lens,
+                action_log_probs,
+                _,
+                _,
+                action_mask,
+            ) = unpad_sequences(
                 pad_len=pad_len,
                 sequences=sequences,
                 attention_mask=attention_mask,

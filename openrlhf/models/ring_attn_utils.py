@@ -76,7 +76,9 @@ def convert_ring_attn_params(sequences, attention_mask, action_mask, packed_seq_
     return sequences, attention_mask, action_mask, position_ids
 
 
-def pad_sequences(sequences, attention_mask, action_mask, num_actions, packed_seq_lens, ring_attn_group, pad_token_id=0):
+def pad_sequences(
+    sequences, attention_mask, action_mask, num_actions, packed_seq_lens, ring_attn_group, pad_token_id=0
+):
     # Pads the input sequences and attention mask to ensure that their lengths are multiples of the ring attention size.
     ring_attn_size = dist.get_world_size(group=ring_attn_group)
     if isinstance(sequences, torch.Tensor):
