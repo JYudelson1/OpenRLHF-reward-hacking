@@ -1138,9 +1138,13 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             ray.get([llm.reset_rollout_cache.remote() for llm in llms])
 
             print(f"Rank {rank} got to the barrier!")
-            torch.distributed.barrier()
+            if self.strategy.ring_attn_group is not None:
+                torch.distributed.barrier(group=self.strategy.ring_attn_group)
+            else:
+                torch.distributed.barrier()
             torch.cuda.synchronize()
             print(f"Rank {rank} passed the barrier!")
+
             ray.get(
                 [
                     llm.remember_env_data_for_rollout.remote(
@@ -1150,7 +1154,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 ]
             )
 
-            torch.distributed.barrier()
+            if self.strategy.ring_attn_group is not None:
+                torch.distributed.barrier(group=self.strategy.ring_attn_group)
+            else:
+                torch.distributed.barrier()
             torch.cuda.synchronize()
 
             outputs = ray.get(
