@@ -100,6 +100,7 @@ class DeepspeedStrategy(ABC):
             self.ring_attn_rank = 0
             return
 
+        print("Setting up ring attention")
         ring_head_stride = getattr(self.args, "ring_head_stride", 1)
         for i in range(dist.get_world_size() // self.ring_attn_size):
             ring_attn_ranks = list(
@@ -108,6 +109,7 @@ class DeepspeedStrategy(ABC):
                     (i + 1) * self.ring_attn_size,
                 )
             )
+            print(f"Setting up ring attention for ranks {ring_attn_ranks}")
             group = dist.new_group(ranks=ring_attn_ranks, backend="nccl")
             if dist.get_rank() in ring_attn_ranks:
                 set_ring_attn_group(group)
@@ -117,6 +119,7 @@ class DeepspeedStrategy(ABC):
         from ring_flash_attn import substitute_hf_flash_attn
 
         substitute_hf_flash_attn(self.ring_attn_group, ring_head_stride)
+        print(f"Ring attention group: {self.ring_attn_group}")
 
     @property
     def ring_attn_group(self):
