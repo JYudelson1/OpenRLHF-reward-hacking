@@ -166,7 +166,8 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
 
             async with total_cost_lock:
                 total_cost += cost
-                print(f"total api call cost: ${total_cost}")
+                if total_cost != float("nan"):
+                    print(f"total api call cost: ${total_cost}")
 
             return completion.choices[0].message.content
 
@@ -192,7 +193,8 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
 
             async with total_cost_lock:
                 total_cost += cost
-                print(f"total api call cost: ${total_cost}")
+                if total_cost != float("nan"):
+                    print(f"total api call cost: ${total_cost}")
 
             return completion.content[0].text
 
