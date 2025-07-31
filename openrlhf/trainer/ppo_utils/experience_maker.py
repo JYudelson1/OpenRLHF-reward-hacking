@@ -227,11 +227,14 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # generate responses
         if self.strategy.ring_attn_group is not None:
             # Only rank 0 in the ring attention group executes the generation function, and then broadcasts it to all other ranks.
+            print(f"RemoteExperienceMaker.make_experience_list called from rank {torch.distributed.get_rank()}")
             if self.strategy.ring_attn_rank == 0:
+                print("Rank 0 generating samples")
                 samples_list = self.generate_samples(all_prompts, **generate_kwargs)
-
+                print(f"Rank 0 generated {len(samples_list)} samples")
                 dist.broadcast_object_list(samples_list, src=dist.get_rank(), group=self.strategy.ring_attn_group)
             else:
+                print(f"Rank {torch.distributed.get_rank()} receiving samples")
                 world_size = torch.distributed.get_world_size() // args.ring_attn_size
                 samples_list = [None] * (
                     args.rollout_batch_size * args.n_samples_per_prompt // world_size // args.micro_rollout_batch_size
@@ -845,6 +848,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         return samples_list
 
     def _generate_vllm(self, all_examples: List[dict], is_eval: bool = False, **kwargs) -> List[Samples]:
+        print(f"RemoteExperienceMaker._generate_vllm called from rank {torch.distributed.get_rank()}")
         from vllm import SamplingParams
 
         all_prompts = [example["prompts"] for example in all_examples]
@@ -1123,9 +1127,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         is_eval: bool = False,
         llm_indices: list[int] = None,
     ):
-        # print(
-        #     f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
-        # )
+        print(
+            f"RemoteExperienceMaker._generate_vllm_bare called with {self=} {rank=} {world_size=} {len(all_full_data)=} {llms=}"
+        )
 
         has_environment = vars(self.strategy.args).get("envs_file", False)
         batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
@@ -1133,9 +1137,10 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         if has_environment:
             ray.get([llm.reset_rollout_cache.remote() for llm in llms])
 
+            print(f"Rank {rank} got to the barrier!")
             torch.distributed.barrier()
             torch.cuda.synchronize()
-
+            print(f"Rank {rank} passed the barrier!")
             ray.get(
                 [
                     llm.remember_env_data_for_rollout.remote(
