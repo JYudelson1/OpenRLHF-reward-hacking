@@ -1159,7 +1159,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             )
 
             if self.strategy.ring_attn_group is not None:
-                dist.barrier(group=self.ring_rank0_group)
+                torch.cuda.synchronize()
+                #dist.barrier(group=self.ring_rank0_group)
             else:
                 torch.distributed.barrier()
                 torch.cuda.synchronize()
@@ -1179,7 +1180,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             )
 
             if self.strategy.ring_attn_group is not None:
-                dist.barrier(group=self.ring_rank0_group)
+                torch.cuda.synchronize()
+                #dist.barrier(group=self.ring_rank0_group)
             else:
                 torch.distributed.barrier()
                 torch.cuda.synchronize()
