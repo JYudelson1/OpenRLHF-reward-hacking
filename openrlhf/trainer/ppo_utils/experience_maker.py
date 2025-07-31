@@ -229,12 +229,12 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             # Only rank 0 in the ring attention group executes the generation function, and then broadcasts it to all other ranks.
             print(f"RemoteExperienceMaker.make_experience_list called from rank {torch.distributed.get_rank()}")
             if self.strategy.ring_attn_rank == 0:
-                print("Rank 0 generating samples")
+                print(f"Rank {torch.distributed.get_rank()} generating samples from RAR {self.strategy.ring_attn_rank}")
                 samples_list = self.generate_samples(all_prompts, **generate_kwargs)
-                print(f"Rank 0 generated {len(samples_list)} samples")
+                print(f"Rank {torch.distributed.get_rank()} generated {len(samples_list)} samples")
                 dist.broadcast_object_list(samples_list, src=dist.get_rank(), group=self.strategy.ring_attn_group)
             else:
-                print(f"Rank {torch.distributed.get_rank()} receiving samples")
+                print(f"Rank {torch.distributed.get_rank()} receiving samples from RAR {self.strategy.ring_attn_rank}")
                 world_size = torch.distributed.get_world_size() // args.ring_attn_size
                 samples_list = [None] * (
                     args.rollout_batch_size * args.n_samples_per_prompt // world_size // args.micro_rollout_batch_size
