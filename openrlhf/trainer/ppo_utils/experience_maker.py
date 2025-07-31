@@ -225,9 +225,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             torch.cuda.synchronize()
 
         # generate responses
+        print(f"RemoteExperienceMaker.make_experience_list called from rank {torch.distributed.get_rank()}")
         if self.strategy.ring_attn_group is not None:
             # Only rank 0 in the ring attention group executes the generation function, and then broadcasts it to all other ranks.
-            print(f"RemoteExperienceMaker.make_experience_list called from rank {torch.distributed.get_rank()}")
             if self.strategy.ring_attn_rank == 0:
                 print(f"Rank {torch.distributed.get_rank()} generating samples from RAR {self.strategy.ring_attn_rank}")
                 samples_list = self.generate_samples(all_prompts, **generate_kwargs)
@@ -892,6 +892,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         assert len(all_prompts) == len(all_full_data) == len(all_solutions)
 
         # Distribute requests to engines and collect responses to outputs
+        print(f"Rank {torch.distributed.get_rank()} (relative rank {rank}) generating samples from RAR {self.strategy.ring_attn_rank}. {llm_indices=}")
         all_outputs = self._generate_vllm_bare(
             rank=rank,
             world_size=world_size,
