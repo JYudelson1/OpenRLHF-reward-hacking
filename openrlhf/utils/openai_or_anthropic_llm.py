@@ -88,19 +88,22 @@ def openai_or_anthropic_api_cost(
     output_tokens: int,
     cached_input_tokens: int,
 ) -> float | int:
-    if model_provider == "openai":
-        return (
-            input_tokens * COST_PER_INPUT_TOKEN[model_provider][model_name]
-            + output_tokens * COST_PER_OUTPUT_TOKEN[model_provider][model_name]
-            + cached_input_tokens * COST_PER_CACHED_INPUT_TOKEN[model_provider][model_name]
-        )
-    elif model_provider == "anthropic":
-        return (
-            input_tokens * COST_PER_INPUT_TOKEN[model_provider][model_name]
-            + output_tokens * COST_PER_OUTPUT_TOKEN[model_provider][model_name]
-        )
-    else:
-        raise ValueError(f"Unknown model provider: {model_provider}")
+    try:
+        if model_provider == "openai":
+            return (
+                input_tokens * COST_PER_INPUT_TOKEN[model_provider][model_name]
+                + output_tokens * COST_PER_OUTPUT_TOKEN[model_provider][model_name]
+                + cached_input_tokens * COST_PER_CACHED_INPUT_TOKEN[model_provider][model_name]
+            )
+        elif model_provider == "anthropic":
+            return (
+                input_tokens * COST_PER_INPUT_TOKEN[model_provider][model_name]
+                + output_tokens * COST_PER_OUTPUT_TOKEN[model_provider][model_name]
+            )
+        else:
+            raise ValueError(f"Unknown model provider: {model_provider}")
+    except KeyError:
+        return float("nan")
 
 
 total_cost = 0.0
