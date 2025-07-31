@@ -1157,7 +1157,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     for i_llm, llm in enumerate(llms)
                 ]
             )
-
+            print(f"Rank {rank} remembered env data")
             if self.strategy.ring_attn_group is not None:
                 torch.cuda.synchronize()
                 #dist.barrier(group=self.ring_rank0_group)
@@ -1178,7 +1178,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                     for i, llm in zip(llm_indices, llms, strict=True)
                 ]
             )
-
+            print(f"Rank {rank} generated env rollouts")
             if self.strategy.ring_attn_group is not None:
                 torch.cuda.synchronize()
                 #dist.barrier(group=self.ring_rank0_group)
