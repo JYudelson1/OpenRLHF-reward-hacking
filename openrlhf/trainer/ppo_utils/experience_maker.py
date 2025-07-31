@@ -1144,7 +1144,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 dist.barrier(device_ids=[0])
             else:
                 torch.distributed.barrier()
-            torch.cuda.synchronize()
+                torch.cuda.synchronize()
             
             print(f"Rank {rank} passed the barrier, with {llm_indices=}!")
 
@@ -1161,7 +1161,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 dist.barrier(group=self.ring_rank0_group)
             else:
                 torch.distributed.barrier()
-            torch.cuda.synchronize()
+                torch.cuda.synchronize()
 
             outputs = ray.get(
                 [
@@ -1181,7 +1181,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 dist.barrier(group=self.ring_rank0_group)
             else:
                 torch.distributed.barrier()
-            torch.cuda.synchronize()
+                torch.cuda.synchronize()
 
             return sum(outputs, [])
 
