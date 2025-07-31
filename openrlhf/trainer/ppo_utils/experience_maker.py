@@ -1139,8 +1139,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             print(f"Rank {rank} got to the barrier!")
             if self.strategy.ring_attn_group is not None:
-                pass
-                #torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size)))
+                torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size*world_size, self.strategy.ring_attn_size)))
             else:
                 torch.distributed.barrier()
             torch.cuda.synchronize()
@@ -1157,8 +1156,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             )
 
             if self.strategy.ring_attn_group is not None:
-                pass
-                #torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size)))
+                torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size*world_size, self.strategy.ring_attn_size)))
             else:
                 torch.distributed.barrier()
             torch.cuda.synchronize()
@@ -1178,8 +1176,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             )
 
             if self.strategy.ring_attn_group is not None:
-                pass
-                #torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size)))
+                torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size*world_size, self.strategy.ring_attn_size)))
             else:
                 torch.distributed.barrier()
             torch.cuda.synchronize()
