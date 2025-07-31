@@ -221,6 +221,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             from openrlhf.trainer.ray.vllm_engine import batch_vllm_engine_call
 
             batch_vllm_engine_call(self.vllm_engines, "wake_up")
+            print(f"Rank {torch.distributed.get_rank()} (RAR {self.strategy.ring_attn_rank}) woke up vLLM")
             torch.distributed.barrier()
             torch.cuda.synchronize()
 
@@ -1140,7 +1141,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             print(f"Rank {rank} got to the barrier!")
             if self.strategy.ring_attn_group is not None:
-                torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size*world_size, self.strategy.ring_attn_size)))
+                dist.barrier(group=self.ring_rank0_group)
             else:
                 torch.distributed.barrier()
             torch.cuda.synchronize()
@@ -1157,7 +1158,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             )
 
             if self.strategy.ring_attn_group is not None:
-                torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size*world_size, self.strategy.ring_attn_size)))
+                dist.barrier(group=self.ring_rank0_group)
             else:
                 torch.distributed.barrier()
             torch.cuda.synchronize()
@@ -1177,7 +1178,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
             )
 
             if self.strategy.ring_attn_group is not None:
-                torch.distributed.barrier(device_ids=list(range(0, self.strategy.ring_attn_size*world_size, self.strategy.ring_attn_size)))
+                dist.barrier(group=self.ring_rank0_group)
             else:
                 torch.distributed.barrier()
             torch.cuda.synchronize()
