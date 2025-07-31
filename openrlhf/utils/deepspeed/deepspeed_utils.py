@@ -11,6 +11,7 @@ def get_train_ds_config(
     grad_accum_dtype=None,
     overlap_comm=False,
     use_ds_universal_ckpt=False,
+    gradient_checkpointing=False,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -37,7 +38,7 @@ def get_train_ds_config(
     if stage == 3:
         zero_opt_dict["reduce_scatter"] = True
 
-    return {
+    config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {
@@ -51,12 +52,19 @@ def get_train_ds_config(
             "load_universal": use_ds_universal_ckpt,
         },
     }
-
+    if gradient_checkpointing:
+        config["activation_checkpointing"] = {
+            "partition_activations": True, 
+            "profile": True, 
+            "cpu_checkpointing": False
+        }
+    return config
 
 def get_eval_ds_config(
     offload,
     stage=0,
     bf16=True,
+    gradient_checkpointing=False,
 ):
     zero_opt_dict = {
         "stage": stage,
@@ -69,7 +77,7 @@ def get_eval_ds_config(
             "pin_memory": True,
         },
     }
-    return {
+    config = {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
         "bf16": {
@@ -79,7 +87,11 @@ def get_eval_ds_config(
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
     }
-
+    if gradient_checkpointing:
+        config["activation_checkpointing"] = {
+            "partition_activations": True, "profile": True, "cpu_checkpointing": False
+            }
+    return config
 
 def get_optimizer_grouped_parameters(
     model,
