@@ -1141,7 +1141,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
 
             print(f"Rank {rank} got to the barrier!")
             if self.strategy.ring_attn_group is not None:
-                dist.barrier(group=self.ring_rank0_group)
+                dist.barrier(device_ids=[0])
             else:
                 torch.distributed.barrier()
             torch.cuda.synchronize()
