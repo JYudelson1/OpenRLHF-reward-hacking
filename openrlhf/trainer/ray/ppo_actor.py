@@ -376,6 +376,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             sequences = torch.cat(experience.sequences, dim=0).unsqueeze(0)
             old_action_log_probs = torch.cat(experience.action_log_probs, dim=0).unsqueeze(0)
             advantages = torch.cat(experience.advantages, dim=0).unsqueeze(0)
+            action_mask = torch.cat(experience.action_mask, dim=0).unsqueeze(0)
             num_actions = [v.numel() for v in experience.advantages]
             packed_seq_lens = [s.numel() for s in experience.sequences]
             attention_mask = torch.cat(
@@ -383,8 +384,8 @@ class ActorPPOTrainer(BasePPOTrainer):
             ).unsqueeze(0)
             # pad seq makes the sequence a multiple of ring_attention_size.
             if self.strategy.ring_attn_group is not None:
-                pad_len, sequences, attention_mask, num_actions, packed_seq_lens = pad_sequences(
-                    sequences, attention_mask, num_actions, packed_seq_lens, self.strategy.ring_attn_group
+                pad_len, sequences, attention_mask, action_mask, num_actions, packed_seq_lens = pad_sequences(
+                    sequences, attention_mask, num_actions, packed_seq_lens, self.strategy.ring_attn_group, action_mask=action_mask
                 )
             if self.args.use_kl_loss and experience.base_action_log_probs is not None:
                 base_action_log_probs = torch.cat(experience.base_action_log_probs, dim=0).unsqueeze(0)
@@ -402,7 +403,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         action_log_probs, output = self.actor(
             sequences,
             num_actions,
-            action_mask=torch.cat(experience.action_mask, dim=0).unsqueeze(0),
+            action_mask=action_mask,
             attention_mask=attention_mask,
             return_output=True,
             ring_attn_group=self.strategy.ring_attn_group,
@@ -413,7 +414,7 @@ class ActorPPOTrainer(BasePPOTrainer):
         # unpad sequence ensures that pad tokens do not contribute to the loss calculation.
         if self.strategy.ring_attn_group is not None:
             assert pad_len is not None
-            sequences, attention_mask, num_actions, packed_seq_lens, action_log_probs, _, _ = unpad_sequences(
+            sequences, attention_mask, num_actions, packed_seq_lens, action_log_probs, _, _, action_mask = unpad_sequences(
                 pad_len=pad_len,
                 sequences=sequences,
                 attention_mask=attention_mask,
@@ -421,6 +422,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 packed_seq_lens=packed_seq_lens,
                 action_log_probs=action_log_probs,
                 ring_attn_group=self.strategy.ring_attn_group,
+                action_mask=action_mask,
             )
 
         # loss function
@@ -428,7 +430,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             action_log_probs,
             old_action_log_probs,
             advantages,
-            action_mask=experience.action_mask,
+            action_mask=action_mask,
         )
 
         experience.info |= actor_loss_logs

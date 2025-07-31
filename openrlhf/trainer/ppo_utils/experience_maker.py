@@ -1053,18 +1053,19 @@ class RemoteExperienceMaker(BaseExperienceMaker):
                 # pad seq makes the sequence a multiple of ring_attention_size.
                 pad_len = None
                 if self.strategy.ring_attn_group is not None:
-                    pad_len, sequences, attention_mask, num_actions, packed_seq_lens = pad_sequences(
+                    pad_len, sequences, attention_mask, action_mask, num_actions, packed_seq_lens = pad_sequences(
                         sequences=sequences,
                         attention_mask=attention_mask,
                         num_actions=num_actions,
                         packed_seq_lens=packed_seq_lens,
                         ring_attn_group=self.strategy.ring_attn_group,
                         pad_token_id=pad_token_id,
+                        action_mask=action_mask,
                     )
 
                     sequences = torch.tensor(sequences, device="cuda").unsqueeze(0)
                     attention_mask = torch.tensor(attention_mask, device="cuda").unsqueeze(0)
-
+                    action_mask = torch.tensor(action_masks, device="cuda").unsqueeze(0)
                     response_length = torch.tensor(response_lengths, device="cuda", dtype=torch.float)
 
                     total_length = torch.tensor(packed_seq_lens, device="cuda", dtype=torch.float)

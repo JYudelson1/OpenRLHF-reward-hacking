@@ -195,8 +195,8 @@ def _get_reward_model(base_pretrained_model, base_llm_model, value_head_prefix="
             else:
                 # convert attention_mask to position_ids
                 if ring_attn_group is not None:
-                    input_ids, attention_mask, position_ids = convert_ring_attn_params(
-                        input_ids, attention_mask, packed_seq_lens, ring_attn_group
+                    input_ids, attention_mask, _, position_ids = convert_ring_attn_params(
+                        input_ids, attention_mask, action_mask=None, packed_seq_lens=packed_seq_lens, ring_attn_group=ring_attn_group
                     )
                 else:
                     position_ids = reset_position_ids(attention_mask)
@@ -274,8 +274,8 @@ def _get_critic_model(base_pretrained_model, base_llm_model, value_head_prefix="
             else:
                 # convert attention_mask to position_ids
                 if ring_attn_group is not None:
-                    input_ids, attention_mask, position_ids = convert_ring_attn_params(
-                        input_ids, attention_mask, packed_seq_lens, ring_attn_group
+                    input_ids, attention_mask, _, position_ids = convert_ring_attn_params(
+                        input_ids, attention_mask, action_mask=None, packed_seq_lens=packed_seq_lens, ring_attn_group=ring_attn_group
                     )
                 else:
                     position_ids = reset_position_ids(attention_mask)

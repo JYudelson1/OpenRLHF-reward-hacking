@@ -218,8 +218,8 @@ class Actor(nn.Module):
             # convert attention_mask to position_ids
             if ring_attn_group is not None:
                 labels = sequences
-                sequences, attention_mask, position_ids = convert_ring_attn_params(
-                    sequences, attention_mask, packed_seq_lens, ring_attn_group
+                sequences, attention_mask, action_mask, position_ids = convert_ring_attn_params(
+                    sequences, attention_mask, action_mask, packed_seq_lens, ring_attn_group
                 )
             else:
                 position_ids = reset_position_ids(attention_mask)

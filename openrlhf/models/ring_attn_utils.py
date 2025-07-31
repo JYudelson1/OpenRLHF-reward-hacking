@@ -60,7 +60,7 @@ def update_ring_attn_params(packed_seq_lens, total_seq_len):
     update_ring_flash_attn_params(cu_seqlens, RING_ATTN_GROUP)
 
 
-def convert_ring_attn_params(sequences, attention_mask, packed_seq_lens, ring_attn_group):
+def convert_ring_attn_params(sequences, attention_mask, action_mask, packed_seq_lens, ring_attn_group):
     # each rank within the ring group will process sequences[start:end]
     ring_attn_rank = dist.get_rank(group=ring_attn_group)
     ring_attn_size = dist.get_world_size(group=ring_attn_group)
@@ -69,12 +69,14 @@ def convert_ring_attn_params(sequences, attention_mask, packed_seq_lens, ring_at
     start, end = ring_attn_rank * local_seq_len, (ring_attn_rank + 1) * local_seq_len
     sequences = sequences[:, start:end]
     attention_mask = attention_mask[:, start:end]
+    if action_mask is not None:
+        action_mask = action_mask[:, start:end]
     position_ids = reset_ring_attn_position_ids(start, end, packed_seq_lens)
     update_ring_attn_params(packed_seq_lens, total_seq_len)
-    return sequences, attention_mask, position_ids
+    return sequences, attention_mask, action_mask, position_ids
 
 
-def pad_sequences(sequences, attention_mask, num_actions, packed_seq_lens, ring_attn_group, pad_token_id=0):
+def pad_sequences(sequences, attention_mask, action_mask, num_actions, packed_seq_lens, ring_attn_group, pad_token_id=0):
     # Pads the input sequences and attention mask to ensure that their lengths are multiples of the ring attention size.
     ring_attn_size = dist.get_world_size(group=ring_attn_group)
     if isinstance(sequences, torch.Tensor):
@@ -82,6 +84,8 @@ def pad_sequences(sequences, attention_mask, num_actions, packed_seq_lens, ring_
         pad_len = (ring_attn_size - seqlen % ring_attn_size) % ring_attn_size
         padded = torch.tensor([pad_token_id] * pad_len, device=sequences.device, dtype=sequences.dtype).unsqueeze(0)
         sequences = torch.cat([sequences, padded], dim=1)
+        if action_mask is not None:
+            action_mask = torch.cat([action_mask, torch.zeros_like(padded)], dim=1)
         max_seq_id = attention_mask.max().item()
         attention_mask = torch.cat(
             [attention_mask, (max_seq_id + 1) * torch.ones(1, pad_len, device="cuda", dtype=torch.float)], dim=-1
@@ -91,11 +95,13 @@ def pad_sequences(sequences, attention_mask, num_actions, packed_seq_lens, ring_
         pad_len = (ring_attn_size - seqlen % ring_attn_size) % ring_attn_size
         sequences += [pad_token_id] * pad_len
         attention_mask += [len(packed_seq_lens) + 1] * pad_len
+        if action_mask is not None:
+            action_mask += [0] * pad_len
     else:
         raise "sequences is not available type"
     num_actions[-1] += pad_len
     packed_seq_lens[-1] += pad_len
-    return pad_len, sequences, attention_mask, num_actions, packed_seq_lens
+    return pad_len, sequences, attention_mask, action_mask, num_actions, packed_seq_lens
 
 
 def unpad_sequences(
