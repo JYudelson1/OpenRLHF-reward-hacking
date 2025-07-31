@@ -460,7 +460,7 @@ class AgentInterface(ABC):
             assert isinstance(extra_metrics, dict)
             assert all(isinstance(key, str) for key in extra_metrics.keys())
             assert all(isinstance(value, float) for value in extra_metrics.values())
-            conversation.extra_metrics = extra_metrics
+            conversation.extra_metrics = conversation.extra_metrics | extra_metrics
         except Exception as e:
             self.num_errors += 1
             self.errors.append(f"Error in get_extra_metrics {str(e)}")
