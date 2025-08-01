@@ -18,7 +18,7 @@ from openrlhf.trainer.ray import (
 )
 from openrlhf.utils import get_strategy
 
-#torch._dynamo.config.activation_memory_budget = 0.1
+torch._dynamo.config.activation_memory_budget = 0.1
 
 
 # NOTE: reward function for multiple reward models, replace this with your own function!
