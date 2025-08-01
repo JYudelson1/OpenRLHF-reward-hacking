@@ -54,7 +54,7 @@ def get_train_ds_config(
     }
     if gradient_checkpointing:
         config["activation_checkpointing"] = {
-            "partition_activations": False, 
+            "partition_activations": True, 
             "profile": True, 
             "cpu_checkpointing": False
         }
