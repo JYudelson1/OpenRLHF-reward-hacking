@@ -56,7 +56,7 @@ def get_train_ds_config(
         config["activation_checkpointing"] = {
             "partition_activations": True, 
             "profile": True, 
-            "cpu_checkpointing": False
+            "cpu_checkpointing": True
         }
     return config
 
