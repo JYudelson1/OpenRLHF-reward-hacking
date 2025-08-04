@@ -88,21 +88,21 @@ class AsyncVLLM(AsyncLLMInterface):
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
 
-        input_tokens = output.prompt_token_ids[conversation.n_tokens :]
         output_tokens = output.outputs[0].token_ids
+        last_input_tokens = output.prompt_token_ids[conversation.n_tokens :]
         
         # If the model is a thinking model, then some number of tokens were removed from the last message
-        num_removed_tokens = conversation.n_tokens - len(input_tokens) + generation_prompt_size
+        num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + generation_prompt_size
         if num_removed_tokens > 0:
-            print(f"Removed {num_removed_tokens} thinking tokens from the last message (REMOVE THIS DEBUG PRINT LATER)")
+            print(f"Removed {num_removed_tokens} thinking tokens from the last message (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
         conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
+        conversation.num_actions_list[-1] -= num_removed_tokens
 
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
-        conversation.n_tokens = len(input_tokens) + len(output_tokens)
-        
+        conversation.n_tokens = conversation.n_tokens + len(last_input_tokens) + len(output_tokens)
 
-        conversation.action_mask.extend([0] * len(input_tokens))
+        conversation.action_mask.extend([0] * len(last_input_tokens))
         if was_truncated:
             conversation.action_mask = conversation.action_mask[: sampling_params.truncate_prompt_tokens] + [0]
         conversation.action_mask.extend([1] * len(output_tokens))
