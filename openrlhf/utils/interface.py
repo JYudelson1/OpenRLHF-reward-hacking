@@ -67,12 +67,12 @@ class AsyncLLMInterface(ABC):
 class AsyncVLLM(AsyncLLMInterface):
     llm_engine: vllm.AsyncLLMEngine
     sampling_params: SamplingParams
-    generation_prompt_size: int = 0
 
     async def generate_assistant_message(
         self,
         conversation: AgentConversation,
         stop_strings: list[str] | None,
+        generation_prompt_size: int,
     ) -> None:
         sampling_params = self.sampling_params
         if stop_strings is not None:
@@ -92,7 +92,7 @@ class AsyncVLLM(AsyncLLMInterface):
         output_tokens = output.outputs[0].token_ids
         
         # If the model is a thinking model, then some number of tokens were removed from the last message
-        num_removed_tokens = conversation.n_tokens - len(input_tokens) + self.generation_prompt_size
+        num_removed_tokens = conversation.n_tokens - len(input_tokens) + generation_prompt_size
         if num_removed_tokens > 0:
             print(f"Removed {num_removed_tokens} thinking tokens from the last message (REMOVE THIS DEBUG PRINT LATER)")
         conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
@@ -320,7 +320,7 @@ class AgentInterface(ABC):
     ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
         
-        await self.get_generation_prompt_size(llm)
+        self.generation_prompt_size = await get_generation_prompt_size(llm)
         
         try:
             states = await self.init_all_states(full_data)
@@ -439,7 +439,7 @@ class AgentInterface(ABC):
             conversation.increment_num_steps()
 
             stats.on_llm_completion_start()
-            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings)
+            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings, generation_prompt_size=self.generation_prompt_size)
 
         stats.on_computing_reward_start()
 
@@ -477,34 +477,6 @@ class AgentInterface(ABC):
 
         conversation.action_mask = conversation.action_mask[1:]
         return conversation, reward, stats, state
-    
-    async def get_generation_prompt_size(self, llm: AsyncLLMInterface) -> None:
-        # Getting the size of the generation prompt, for correctness with thinking models
-        tokenizer = await llm.llm_engine.get_tokenizer()
-        model_config = await llm.llm_engine.get_model_config()
-        prompt_str_gen = apply_hf_chat_template(
-            tokenizer,
-            trust_remote_code=model_config.trust_remote_code,
-            conversation=[{"role": "user", "content": ""}],
-            chat_template=None,
-            add_generation_prompt=True,
-            continue_final_message=False,
-            tools=None,
-            model_config=model_config,
-        )
-        prompt_token_ids_gen = tokenizer.encode(prompt_str_gen, add_special_tokens=False)
-        prompt_str_no_gen = apply_hf_chat_template(
-            tokenizer,
-            trust_remote_code=model_config.trust_remote_code,
-            conversation=[{"role": "user", "content": ""}],
-            chat_template=None,
-            add_generation_prompt=False,
-            continue_final_message=False,
-            tools=None,
-            model_config=model_config,
-        )
-        prompt_token_ids_no_gen = tokenizer.encode(prompt_str_no_gen, add_special_tokens=False)
-        llm.generation_prompt_size = len(prompt_token_ids_gen) - len(prompt_token_ids_no_gen)
 
 
 @dataclass(frozen=True)
@@ -625,3 +597,31 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
     fig.write_html(save_filename)
 
     print(f"Saved plot of time periods spent on different computation during rollout generation to '{save_filename}'.")
+
+async def get_generation_prompt_size(llm: AsyncLLMInterface) -> int:
+    # Getting the size of the generation prompt, for correctness with thinking models
+    tokenizer = await llm.llm_engine.get_tokenizer()
+    model_config = await llm.llm_engine.get_model_config()
+    prompt_str_gen = apply_hf_chat_template(
+        tokenizer,
+        trust_remote_code=model_config.trust_remote_code,
+        conversation=[{"role": "user", "content": ""}],
+        chat_template=None,
+        add_generation_prompt=True,
+        continue_final_message=False,
+        tools=None,
+        model_config=model_config,
+    )
+    prompt_token_ids_gen = tokenizer.encode(prompt_str_gen, add_special_tokens=False)
+    prompt_str_no_gen = apply_hf_chat_template(
+        tokenizer,
+        trust_remote_code=model_config.trust_remote_code,
+        conversation=[{"role": "user", "content": ""}],
+        chat_template=None,
+        add_generation_prompt=False,
+        continue_final_message=False,
+        tools=None,
+        model_config=model_config,
+    )
+    prompt_token_ids_no_gen = tokenizer.encode(prompt_str_no_gen, add_special_tokens=False)
+    return len(prompt_token_ids_gen) - len(prompt_token_ids_no_gen)
