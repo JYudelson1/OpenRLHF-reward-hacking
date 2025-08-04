@@ -95,6 +95,10 @@ class AsyncVLLM(AsyncLLMInterface):
 
         output_tokens = output.outputs[0].token_ids
         last_input_tokens = output.prompt_token_ids[conversation.n_tokens - num_removed_tokens :]
+        print(f"Thread {thread_id}: Last input tokens length: {len(last_input_tokens)} (REMOVE THIS DEBUG PRINT LATER)")
+        print(f"Thread {thread_id}: All input tokens length: {len(output.prompt_token_ids)} (REMOVE THIS DEBUG PRINT LATER)")
+        print(f"Thread {thread_id}: Num removed tokens: {num_removed_tokens} (REMOVE THIS DEBUG PRINT LATER)")
+        print(f"Thread {thread_id}: N tokens: {conversation.n_tokens} (REMOVE THIS DEBUG PRINT LATER)")
         
         # If the model is a thinking model, then some number of tokens were removed from the last message
         if num_removed_tokens > 0:
