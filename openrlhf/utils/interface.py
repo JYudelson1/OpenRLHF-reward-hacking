@@ -49,7 +49,6 @@ class AgentConversation:
     error: bool = False
     action_mask: list[int] = field(default_factory=lambda: [0])
     num_actions_list: list[int] = field(default_factory=lambda: [])
-    last_n_prompt_tokens: int = 0
 
     def increment_num_steps(self) -> None:
         if self.extra_metrics is None:
@@ -88,19 +87,19 @@ class AsyncVLLM(AsyncLLMInterface):
         
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
-            conversation.last_n_prompt_tokens = len(output.prompt_token_ids)
             
-        size_last_message = await size_one_message(self.llm_engine, conversation.messages[-1], add_generation_prompt=True)
+            size_last_message = len(output.prompt_token_ids)
+        else:
+            size_last_message = await size_one_message(self.llm_engine, conversation.messages[-1], add_generation_prompt=True)
         num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
-        conversation.last_n_prompt_tokens = len(output.prompt_token_ids)
 
         output_tokens = output.outputs[0].token_ids
         
         # If the model is a thinking model, then some number of tokens were removed from the last message
         if num_removed_tokens > 0:
             conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
-        if conversation.num_actions_list:
-            conversation.num_actions_list[-1] -= num_removed_tokens
+            if conversation.num_actions_list:
+                conversation.num_actions_list[-1] -= num_removed_tokens
 
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
