@@ -249,9 +249,9 @@ async def _vllm_chat_with_truncation(
 
     return finished_output, num_truncated_tokens
 
-async def size_one_message(llm: AsyncLLMInterface, message: Message, add_generation_prompt: bool = False) -> int:
-    tokenizer = await llm.llm_engine.get_tokenizer()
-    model_config = await llm.llm_engine.get_model_config()
+async def size_one_message(llm: vllm.AsyncLLMEngine, message: Message, add_generation_prompt: bool = False) -> int:
+    tokenizer = await llm.get_tokenizer()
+    model_config = await llm.get_model_config()
     prompt_str = apply_hf_chat_template(
         tokenizer,
         trust_remote_code=model_config.trust_remote_code,
