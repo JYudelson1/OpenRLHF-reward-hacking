@@ -96,7 +96,8 @@ class AsyncVLLM(AsyncLLMInterface):
         if num_removed_tokens > 0:
             print(f"Removed {num_removed_tokens} thinking tokens from the last message (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
         conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
-        conversation.num_actions_list[-1] -= num_removed_tokens
+        if conversation.num_actions_list:
+            conversation.num_actions_list[-1] -= num_removed_tokens
 
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
