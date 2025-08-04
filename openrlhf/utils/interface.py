@@ -28,6 +28,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from vllm.transformers_utils.tokenizer import get_tokenizer
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,8 @@ class AsyncVLLM(AsyncLLMInterface):
             llm_engine=self.llm_engine, messages=conversation.messages, sampling_params=sampling_params
         )
         was_truncated = truncated_tokens > 0
+        
+        thread_id = random.randint(0, 1000000)
 
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
@@ -94,8 +97,8 @@ class AsyncVLLM(AsyncLLMInterface):
         # If the model is a thinking model, then some number of tokens were removed from the last message
         num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + generation_prompt_size
         if num_removed_tokens > 0:
-            print(f"Removed {num_removed_tokens} thinking tokens from the last message (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
-        conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
+            print(f"Thread {thread_id}: Removed {num_removed_tokens} thinking tokens from the action mask (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
+            conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
         if conversation.num_actions_list:
             conversation.num_actions_list[-1] -= num_removed_tokens
 
@@ -104,13 +107,20 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.n_tokens = conversation.n_tokens + len(last_input_tokens) + len(output_tokens)
 
         conversation.action_mask.extend([0] * len(last_input_tokens))
+        print(f"Thread {thread_id}: Added {len(last_input_tokens)} thinking tokens to the action mask (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
+        print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} (REMOVE THIS DEBUG PRINT LATER)")
         if was_truncated:
             conversation.action_mask = conversation.action_mask[: sampling_params.truncate_prompt_tokens] + [0]
+            print(f"Thread {thread_id}: Truncated action mask to {sampling_params.truncate_prompt_tokens} tokens (REMOVE THIS DEBUG PRINT LATER)")
+            print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} (REMOVE THIS DEBUG PRINT LATER)")
         conversation.action_mask.extend([1] * len(output_tokens))
+        print(f"Thread {thread_id}: Added {len(output_tokens)} output tokens to the action mask (REMOVE THIS DEBUG PRINT LATER)")
+        print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} (REMOVE THIS DEBUG PRINT LATER)")
 
         conversation.num_actions_list.append(len(output_tokens))
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
+        print(f"Thread {thread_id}: All tokens: {len(conversation.all_tokens)} (REMOVE THIS DEBUG PRINT LATER)")
 
         if was_truncated:
             conversation.was_truncated = True
