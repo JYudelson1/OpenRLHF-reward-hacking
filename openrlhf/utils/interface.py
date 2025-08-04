@@ -67,6 +67,7 @@ class AsyncLLMInterface(ABC):
 class AsyncVLLM(AsyncLLMInterface):
     llm_engine: vllm.AsyncLLMEngine
     sampling_params: SamplingParams
+    generation_prompt_size: int = 0
 
     async def generate_assistant_message(
         self,
@@ -503,7 +504,7 @@ class AgentInterface(ABC):
             model_config=model_config,
         )
         prompt_token_ids_no_gen = tokenizer.encode(prompt_str_no_gen, add_special_tokens=False)
-        self.generation_prompt_size = len(prompt_token_ids_gen) - len(prompt_token_ids_no_gen)
+        llm.generation_prompt_size = len(prompt_token_ids_gen) - len(prompt_token_ids_no_gen)
 
 
 @dataclass(frozen=True)
