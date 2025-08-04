@@ -104,10 +104,9 @@ class AsyncVLLM(AsyncLLMInterface):
 
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
-        conversation.n_tokens = conversation.n_tokens + len(last_input_tokens) + len(output_tokens)
 
         conversation.action_mask.extend([0] * len(last_input_tokens))
-        print(f"Thread {thread_id}: Added {len(last_input_tokens)} thinking tokens to the action mask (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
+        print(f"Thread {thread_id}: Added {len(last_input_tokens)} tokens to the action mask (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
         print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} (REMOVE THIS DEBUG PRINT LATER)")
         if was_truncated:
             conversation.action_mask = conversation.action_mask[: sampling_params.truncate_prompt_tokens] + [0]
@@ -120,6 +119,7 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.num_actions_list.append(len(output_tokens))
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
+        conversation.n_tokens = len(conversation.all_tokens)
         print(f"Thread {thread_id}: All tokens: {len(conversation.all_tokens)} (REMOVE THIS DEBUG PRINT LATER)")
 
         if was_truncated:
