@@ -40,11 +40,9 @@ AgentState = Any  # State needed to track conversation progress
 class AgentConversation:
     env_name: str
     messages: list[Message] = field(default_factory=lambda: [])
-    tokens_by_turn: list[dict[str, Any]] = field(default_factory=lambda: [])  # to do: better type hint than Any
     first_prompt_tokens: list[int] = field(default_factory=lambda: [])
     all_tokens: list[int] = field(default_factory=lambda: [])
     n_tokens: int = 0
-    n_assistant_tokens: int = 0
     was_truncated: bool = False
     extra_metrics: dict[str, float] | None = field(default_factory=lambda: {"n_errors": 0.0, "num_steps": 0.0})
     error: bool = False
@@ -91,12 +89,17 @@ class AsyncVLLM(AsyncLLMInterface):
 
         input_tokens = output.prompt_token_ids[conversation.n_tokens :]
         output_tokens = output.outputs[0].token_ids
+        
+        # If the model is a thinking model, then some number of tokens were removed from the last message
+        num_removed_tokens = conversation.n_tokens - len(input_tokens) + self.generation_prompt_size
+        if num_removed_tokens > 0:
+            print(f"Removed {num_removed_tokens} thinking tokens from the last message (REMOVE THIS DEBUG PRINT LATER)")
+        conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
 
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
-        conversation.tokens_by_turn.append({"input_tokens": input_tokens, "output_tokens": output_tokens})
-        conversation.n_tokens += len(input_tokens) + len(output_tokens)
-        conversation.n_assistant_tokens += len(output_tokens)
+        conversation.n_tokens = len(input_tokens) + len(output_tokens)
+        
 
         conversation.action_mask.extend([0] * len(input_tokens))
         if was_truncated:
@@ -262,7 +265,8 @@ class AgentInterface(ABC):
         self.vllm_engine_index = vllm_engine_index
         self.compact_filtering = compact_filtering
         self.filter_max_steps = filter_max_steps
-
+        self.generation_prompt_size = 0
+        
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
         """Initialize the states for a new RL environments, given a list of dict elements of the dataset"""
@@ -314,6 +318,9 @@ class AgentInterface(ABC):
         self, llm: AsyncLLMInterface, full_data: list[dict], env_name: str, is_eval: bool = False
     ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
+        
+        await self.get_generation_prompt_size(llm)
+        
         try:
             states = await self.init_all_states(full_data)
         except Exception as e:
@@ -469,6 +476,29 @@ class AgentInterface(ABC):
 
         conversation.action_mask = conversation.action_mask[1:]
         return conversation, reward, stats, state
+    
+    async def get_generation_prompt_size(self, llm: AsyncLLMInterface) -> None:
+        # Getting the size of the generation prompt, for correctness with thinking models
+        tokenizer = await llm.llm_engine.get_tokenizer()
+        prompt_str_gen = apply_hf_chat_template(
+            tokenizer,
+            trust_remote_code=True,
+            conversation=[{"role": "user", "content": ""}],
+            chat_template=None,
+            add_generation_prompt=True,
+            continue_final_message=False,
+        )
+        prompt_token_ids_gen = tokenizer.encode(prompt_str_gen, add_special_tokens=False)
+        prompt_str_no_gen = apply_hf_chat_template(
+            tokenizer,
+            trust_remote_code=True,
+            conversation=[{"role": "user", "content": ""}],
+            chat_template=None,
+            add_generation_prompt=False,
+            continue_final_message=False,
+        )
+        prompt_token_ids_no_gen = tokenizer.encode(prompt_str_no_gen, add_special_tokens=False)
+        self.generation_prompt_size = len(prompt_token_ids_gen) - len(prompt_token_ids_no_gen)
 
 
 @dataclass(frozen=True)
