@@ -49,6 +49,7 @@ class AgentConversation:
     error: bool = False
     action_mask: list[int] = field(default_factory=lambda: [0])
     num_actions_list: list[int] = field(default_factory=lambda: [])
+    last_n_prompt_tokens: int = 0
 
     def increment_num_steps(self) -> None:
         if self.extra_metrics is None:
