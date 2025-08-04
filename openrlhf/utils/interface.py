@@ -74,7 +74,6 @@ class AsyncVLLM(AsyncLLMInterface):
         self,
         conversation: AgentConversation,
         stop_strings: list[str] | None,
-        generation_prompt_size: int,
     ) -> None:
         sampling_params = self.sampling_params
         if stop_strings is not None:
@@ -87,25 +86,18 @@ class AsyncVLLM(AsyncLLMInterface):
         )
         was_truncated = truncated_tokens > 0
         
-        thread_id = random.randint(0, 1000000)
-
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
             conversation.last_n_prompt_tokens = len(output.prompt_token_ids)
             
-        num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + (conversation.n_tokens - conversation.last_n_prompt_tokens)
+        size_last_message = await size_one_message(self.llm_engine, conversation.messages[-1], add_generation_prompt=True)
+        num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
         conversation.last_n_prompt_tokens = len(output.prompt_token_ids)
 
         output_tokens = output.outputs[0].token_ids
-        last_input_tokens = output.prompt_token_ids[conversation.n_tokens - num_removed_tokens :]
-        print(f"Thread {thread_id}: Last input tokens length: {len(last_input_tokens)} (REMOVE THIS DEBUG PRINT LATER)")
-        print(f"Thread {thread_id}: All input tokens length: {len(output.prompt_token_ids)} (REMOVE THIS DEBUG PRINT LATER)")
-        print(f"Thread {thread_id}: Num removed tokens: {num_removed_tokens} (REMOVE THIS DEBUG PRINT LATER)")
-        print(f"Thread {thread_id}: N tokens: {conversation.n_tokens} (REMOVE THIS DEBUG PRINT LATER)")
         
         # If the model is a thinking model, then some number of tokens were removed from the last message
         if num_removed_tokens > 0:
-            print(f"Thread {thread_id}: Removed {num_removed_tokens} thinking tokens from the action mask (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
             conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
         if conversation.num_actions_list:
             conversation.num_actions_list[-1] -= num_removed_tokens
@@ -113,22 +105,15 @@ class AsyncVLLM(AsyncLLMInterface):
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
 
-        conversation.action_mask.extend([0] * len(last_input_tokens))
-        print(f"Thread {thread_id}: Added {len(last_input_tokens)} tokens to the action mask (gp={generation_prompt_size}) (REMOVE THIS DEBUG PRINT LATER)")
-        print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} (REMOVE THIS DEBUG PRINT LATER)")
+        conversation.action_mask.extend([0] * size_last_message)
         if was_truncated:
             conversation.action_mask = conversation.action_mask[: sampling_params.truncate_prompt_tokens] + [0]
-            print(f"Thread {thread_id}: Truncated action mask to {sampling_params.truncate_prompt_tokens} tokens (REMOVE THIS DEBUG PRINT LATER)")
-            print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} (REMOVE THIS DEBUG PRINT LATER)")
         conversation.action_mask.extend([1] * len(output_tokens))
-        print(f"Thread {thread_id}: Added {len(output_tokens)} output tokens to the action mask (REMOVE THIS DEBUG PRINT LATER)")
-        print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} (REMOVE THIS DEBUG PRINT LATER)")
 
         conversation.num_actions_list.append(len(output_tokens))
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-        conversation.n_tokens = conversation.n_tokens - num_removed_tokens + len(last_input_tokens) + len(output_tokens)
-        print(f"Thread {thread_id}: All tokens: {len(conversation.all_tokens)} (REMOVE THIS DEBUG PRINT LATER)")
+        conversation.n_tokens = len(conversation.all_tokens)
 
         if was_truncated:
             conversation.was_truncated = True
@@ -264,6 +249,21 @@ async def _vllm_chat_with_truncation(
 
     return finished_output, num_truncated_tokens
 
+async def size_one_message(llm: AsyncLLMInterface, message: Message, add_generation_prompt: bool = False) -> int:
+    tokenizer = await llm.llm_engine.get_tokenizer()
+    model_config = await llm.llm_engine.get_model_config()
+    prompt_str = apply_hf_chat_template(
+        tokenizer,
+        trust_remote_code=model_config.trust_remote_code,
+        conversation=[message],
+        chat_template=None,
+        add_generation_prompt=add_generation_prompt,
+        continue_final_message=False,
+        tools=None,
+        model_config=model_config,
+    )
+    prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+    return len(prompt_token_ids)
 
 class AgentInterface(ABC):
     def __init__(
@@ -285,7 +285,6 @@ class AgentInterface(ABC):
         self.vllm_engine_index = vllm_engine_index
         self.compact_filtering = compact_filtering
         self.filter_max_steps = filter_max_steps
-        self.generation_prompt_size = 0
         
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
@@ -338,9 +337,7 @@ class AgentInterface(ABC):
         self, llm: AsyncLLMInterface, full_data: list[dict], env_name: str, is_eval: bool = False
     ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
-        
-        self.generation_prompt_size = await get_generation_prompt_size(llm)
-        
+                
         try:
             states = await self.init_all_states(full_data)
         except Exception as e:
@@ -458,7 +455,7 @@ class AgentInterface(ABC):
             conversation.increment_num_steps()
 
             stats.on_llm_completion_start()
-            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings, generation_prompt_size=self.generation_prompt_size)
+            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings)
 
         stats.on_computing_reward_start()
 
@@ -616,31 +613,3 @@ def make_rollout_time_statistics_plot(stats: list[RolloutTimeStatistics], save_f
     fig.write_html(save_filename)
 
     print(f"Saved plot of time periods spent on different computation during rollout generation to '{save_filename}'.")
-
-async def get_generation_prompt_size(llm: AsyncLLMInterface) -> int:
-    # Getting the size of the generation prompt, for correctness with thinking models
-    tokenizer = await llm.llm_engine.get_tokenizer()
-    model_config = await llm.llm_engine.get_model_config()
-    prompt_str_gen = apply_hf_chat_template(
-        tokenizer,
-        trust_remote_code=model_config.trust_remote_code,
-        conversation=[{"role": "user", "content": ""}],
-        chat_template=None,
-        add_generation_prompt=True,
-        continue_final_message=False,
-        tools=None,
-        model_config=model_config,
-    )
-    prompt_token_ids_gen = tokenizer.encode(prompt_str_gen, add_special_tokens=False)
-    prompt_str_no_gen = apply_hf_chat_template(
-        tokenizer,
-        trust_remote_code=model_config.trust_remote_code,
-        conversation=[{"role": "user", "content": ""}],
-        chat_template=None,
-        add_generation_prompt=False,
-        continue_final_message=False,
-        tools=None,
-        model_config=model_config,
-    )
-    prompt_token_ids_no_gen = tokenizer.encode(prompt_str_no_gen, add_special_tokens=False)
-    return len(prompt_token_ids_gen) - len(prompt_token_ids_no_gen)
