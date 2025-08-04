@@ -91,8 +91,10 @@ class AsyncVLLM(AsyncLLMInterface):
 
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
+            conversation.last_n_prompt_tokens = len(output.prompt_token_ids)
             
-        num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + generation_prompt_size
+        num_removed_tokens = len(output.prompt_token_ids) - conversation.last_n_prompt_tokens
+        conversation.last_n_prompt_tokens = len(output.prompt_token_ids)
 
         output_tokens = output.outputs[0].token_ids
         last_input_tokens = output.prompt_token_ids[conversation.n_tokens - num_removed_tokens :]
