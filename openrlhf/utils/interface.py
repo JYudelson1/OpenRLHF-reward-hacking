@@ -120,7 +120,7 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.num_actions_list.append(len(output_tokens))
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
-        conversation.n_tokens = len(conversation.all_tokens)
+        conversation.n_tokens = conversation.n_tokens - num_removed_tokens + len(last_input_tokens) + len(output_tokens)
         print(f"Thread {thread_id}: All tokens: {len(conversation.all_tokens)} (REMOVE THIS DEBUG PRINT LATER)")
 
         if was_truncated:
