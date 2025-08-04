@@ -480,22 +480,27 @@ class AgentInterface(ABC):
     async def get_generation_prompt_size(self, llm: AsyncLLMInterface) -> None:
         # Getting the size of the generation prompt, for correctness with thinking models
         tokenizer = await llm.llm_engine.get_tokenizer()
+        model_config = await llm.llm_engine.get_model_config()
         prompt_str_gen = apply_hf_chat_template(
             tokenizer,
-            trust_remote_code=True,
+            trust_remote_code=model_config.trust_remote_code,
             conversation=[{"role": "user", "content": ""}],
             chat_template=None,
             add_generation_prompt=True,
             continue_final_message=False,
+            tools=None,
+            model_config=model_config,
         )
         prompt_token_ids_gen = tokenizer.encode(prompt_str_gen, add_special_tokens=False)
         prompt_str_no_gen = apply_hf_chat_template(
             tokenizer,
-            trust_remote_code=True,
+            trust_remote_code=model_config.trust_remote_code,
             conversation=[{"role": "user", "content": ""}],
             chat_template=None,
             add_generation_prompt=False,
             continue_final_message=False,
+            tools=None,
+            model_config=model_config,
         )
         prompt_token_ids_no_gen = tokenizer.encode(prompt_str_no_gen, add_special_tokens=False)
         self.generation_prompt_size = len(prompt_token_ids_gen) - len(prompt_token_ids_no_gen)
