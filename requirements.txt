@@ -17,7 +17,7 @@ tensorboard
 torch
 torchmetrics
 tqdm
-transformers==4.51.1
+transformers==4.55.0
 transformers_stream_generator
 wandb
 wheel
