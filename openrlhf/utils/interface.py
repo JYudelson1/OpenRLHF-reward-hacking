@@ -85,6 +85,10 @@ class AsyncVLLM(AsyncLLMInterface):
         )
         was_truncated = truncated_tokens > 0
         
+        if was_truncated:
+            conversation.was_truncated = True
+            return
+        
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
             
@@ -107,17 +111,12 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.action_mask.extend([0] * size_last_message)
         if was_truncated:
             conversation.action_mask = conversation.action_mask[: sampling_params.truncate_prompt_tokens] + [0]
-            if num_removed_tokens > 0:
-                conversation.action_mask = conversation.action_mask[:-1]
         conversation.action_mask.extend([1] * len(output_tokens))
 
         conversation.num_actions_list.append(len(output_tokens))
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
         conversation.n_tokens = len(conversation.all_tokens)
-
-        if was_truncated:
-            conversation.was_truncated = True
 
 
 async def _vllm_chat_with_truncation(
@@ -271,7 +270,7 @@ class AgentInterface(ABC):
         self,
         stop_strings: list[str] | None = None,
         max_steps: int | None = None,
-        stop_on_truncation: bool = False,
+        stop_on_truncation: bool = True,
         save_rollout_time_statistics_directory: str | None = "/root/rollout-time-statistics/",
         vllm_engine_index: int = 0,
         compact_filtering: bool = False,
