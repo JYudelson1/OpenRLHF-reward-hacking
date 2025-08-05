@@ -456,6 +456,10 @@ class AgentInterface(ABC):
 
             stats.on_llm_completion_start()
             await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings)
+            
+            if conversation.was_truncated:
+                was_truncated = True
+                break
 
         stats.on_computing_reward_start()
 
