@@ -99,14 +99,21 @@ class AsyncVLLM(AsyncLLMInterface):
             else:
                 break
         size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
-            
+        thread_id = random.randint(0, 1000000)
         num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
+        print(f"Thread {thread_id}: Num removed tokens: {num_removed_tokens} ")
+        print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} ")
+        print(f"Thread {thread_id}: Num actions list: {len(conversation.num_actions_list)} ")
+        print(f"Thread {thread_id}: All tokens: {len(conversation.all_tokens)} ")
+        print(f"Thread {thread_id}: N tokens: {conversation.n_tokens} ")
+        print(f"Thread {thread_id}: Size last message: {size_last_message} ")
 
         output_tokens = output.outputs[0].token_ids
         
         # If the model is a thinking model, then some number of tokens were removed from the last message
         if num_removed_tokens > 0:
             conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
+            print(f"Thread {thread_id}: New action mask size: {len(conversation.action_mask)} ")
             if conversation.num_actions_list:
                 conversation.num_actions_list[-1] -= num_removed_tokens
 
@@ -114,14 +121,14 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.messages.append(output_message)
 
         conversation.action_mask.extend([0] * size_last_message)
-        if was_truncated:
-            conversation.action_mask = conversation.action_mask[: sampling_params.truncate_prompt_tokens] + [0]
         conversation.action_mask.extend([1] * len(output_tokens))
+        print(f"Thread {thread_id}: New action mask size post add: {len(conversation.action_mask)} ")
 
         conversation.num_actions_list.append(len(output_tokens))
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
         conversation.n_tokens = len(conversation.all_tokens)
+        print(f"Thread {thread_id}: New n tokens: {conversation.n_tokens} ")
 
 
 async def _vllm_chat_with_truncation(
