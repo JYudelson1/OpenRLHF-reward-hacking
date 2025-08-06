@@ -64,7 +64,8 @@ class LLMRayActor:
 
         self.compact_filtering = kwargs.pop("compact_filtering", False)
         self.filter_max_steps = kwargs.pop("filter_max_steps", False)
-
+        self.thinking = kwargs.pop("thinking", False)
+        
         num_gpus = kwargs.pop("num_gpus")
         if bundle_indices is not None:
             os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
@@ -183,6 +184,7 @@ class LLMRayActor:
                         vllm_engine_index=vllm_engine_index,
                         compact_filtering=self.compact_filtering,
                         filter_max_steps=self.filter_max_steps,
+                        thinking=self.thinking,
                     )
                     task = env.generate_rollouts(
                         llm=async_llm,
@@ -288,6 +290,7 @@ def create_vllm_engines(
     truncate_prompt_tokens=None,
     compact_filtering=False,
     filter_max_steps=False,
+    thinking=False,
 ):
     import vllm
 
@@ -368,6 +371,7 @@ def create_vllm_engines(
             truncate_prompt_tokens=truncate_prompt_tokens,
             compact_filtering=compact_filtering,
             filter_max_steps=filter_max_steps,
+            thinking=thinking,
         )
 
         vllm_engines.append(engine)

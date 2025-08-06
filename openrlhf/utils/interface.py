@@ -59,7 +59,7 @@ class AgentConversation:
 class AsyncLLMInterface(ABC):
     @abstractmethod
     async def generate_assistant_message(
-        self, conversation: AgentConversation, stop_strings: list[str] | None
+        self, conversation: AgentConversation, stop_strings: list[str] | None, thinking: bool = False,
     ) -> None:
         pass
 
@@ -73,6 +73,7 @@ class AsyncVLLM(AsyncLLMInterface):
         self,
         conversation: AgentConversation,
         stop_strings: list[str] | None,
+        thinking: bool = False,
     ) -> None:
         sampling_params = self.sampling_params
         if stop_strings is not None:
@@ -110,16 +111,17 @@ class AsyncVLLM(AsyncLLMInterface):
 
         output_tokens = output.outputs[0].token_ids
         
-        # If the model is a thinking model, then some number of tokens were removed from the last message
-        if num_removed_tokens > 0:
-            conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
-            # print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
-        elif num_removed_tokens < 0:
-            conversation.action_mask.extend([1] * (-num_removed_tokens))
-            # print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
+        if thinking:
+            # If the model is a thinking model, then some number of tokens were removed from the last message
+            if num_removed_tokens > 0:
+                conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
+                # print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
+            elif num_removed_tokens < 0:
+                conversation.action_mask.extend([1] * (-num_removed_tokens))
+                # print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
 
-        if conversation.num_actions_list:
-                conversation.num_actions_list[-1] -= num_removed_tokens
+            if conversation.num_actions_list:
+                    conversation.num_actions_list[-1] -= num_removed_tokens
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
 
@@ -293,6 +295,7 @@ class AgentInterface(ABC):
         vllm_engine_index: int = 0,
         compact_filtering: bool = False,
         filter_max_steps: bool = False,
+        thinking: bool = False,
     ) -> None:
         self.stop_strings = stop_strings
         self.max_steps = max_steps
@@ -303,6 +306,7 @@ class AgentInterface(ABC):
         self.vllm_engine_index = vllm_engine_index
         self.compact_filtering = compact_filtering
         self.filter_max_steps = filter_max_steps
+        self.thinking = thinking
         
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
@@ -473,7 +477,7 @@ class AgentInterface(ABC):
             conversation.increment_num_steps()
 
             stats.on_llm_completion_start()
-            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings)
+            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings, thinking=self.thinking)
             
             if conversation.was_truncated:
                 was_truncated = True
