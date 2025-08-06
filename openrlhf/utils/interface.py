@@ -92,9 +92,14 @@ class AsyncVLLM(AsyncLLMInterface):
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
             
-            size_last_message = len(output.prompt_token_ids)
-        else:
-            size_last_message = await size_one_message(self.llm_engine, conversation.messages[-1], add_generation_prompt=True)
+        last_prompt_messages = []
+        for message in reversed(conversation.messages):
+            if message["role"] != "assistant":
+                last_prompt_messages.append(message)
+            else:
+                break
+        size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
+            
         num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
 
         output_tokens = output.outputs[0].token_ids
@@ -129,7 +134,7 @@ async def _vllm_chat_with_truncation(
     add_generation_prompt: bool = True,
     continue_final_message: bool = False,
     tools: list[dict[str, Any]] | None = None,
-) -> tuple[RequestOutput, bool]:
+) -> tuple[RequestOutput, int]:
     """
     Generate responses for a chat conversation.
 
@@ -222,6 +227,7 @@ async def _vllm_chat_with_truncation(
         prompt_token_ids = prompt_token_ids[: sampling_params.truncate_prompt_tokens]
         num_truncated_tokens = old_len - sampling_params.truncate_prompt_tokens
         logger.warning(f"Truncated prompt from {old_len} tokens to {sampling_params.truncate_prompt_tokens} tokens.")
+        return None, num_truncated_tokens
     else:
         num_truncated_tokens = 0
 
@@ -249,13 +255,13 @@ async def _vllm_chat_with_truncation(
 
     return finished_output, num_truncated_tokens
 
-async def size_one_message(llm: vllm.AsyncLLMEngine, message: Message, add_generation_prompt: bool = False) -> int:
+async def size_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Message], add_generation_prompt: bool = False) -> int:
     tokenizer = await llm.get_tokenizer()
     model_config = await llm.get_model_config()
     prompt_str = apply_hf_chat_template(
         tokenizer,
         trust_remote_code=model_config.trust_remote_code,
-        conversation=[message],
+        conversation=[message] if isinstance(message, Message) else message,
         chat_template=None,
         add_generation_prompt=add_generation_prompt,
         continue_final_message=False,
