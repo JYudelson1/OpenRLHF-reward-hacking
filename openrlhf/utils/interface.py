@@ -101,6 +101,8 @@ class AsyncVLLM(AsyncLLMInterface):
         size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
         thread_id = random.randint(0, 1000000)
         num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
+        if num_removed_tokens < 0:
+            num_removed_tokens = 0
         print(f"Thread {thread_id}: Num removed tokens: {num_removed_tokens} ")
         print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} ")
         print(f"Thread {thread_id}: Num actions list: {len(conversation.num_actions_list)} ")
