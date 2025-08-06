@@ -46,6 +46,7 @@ class AgentConversation:
     n_tokens: int = 0
     was_truncated: bool = False
     extra_metrics: dict[str, float] | None = field(default_factory=lambda: {"n_errors": 0.0, "num_steps": 0.0})
+    not_plotted_extra_metrics: Any = None
     error: bool = False
     action_mask: list[int] = field(default_factory=lambda: [0])
     num_actions_list: list[int] = field(default_factory=lambda: [])
@@ -329,6 +330,9 @@ class AgentInterface(ABC):
     async def get_extra_metrics(self, messages: list[Message], state: AgentState) -> dict[str, float]:
         return {}
 
+    async def get_not_plotted_extra_metrics(self, messages: list[Message], state: AgentState) -> Any:
+        return {}
+
     async def get_reward_in_eval(self, messages: List[Message], state: AgentState) -> Reward | None:
         """Get the eval reward for the conversation. Used if the train reward may reflect a different thing than what we'd like to measure"""
         return await self.get_reward(messages, state)
@@ -493,6 +497,16 @@ class AgentInterface(ABC):
             self.num_errors += 1
             self.errors.append(f"Error in get_extra_metrics {str(e)}")
             logger.error(f"Error in get_extra_metrics {str(e)}")
+            conversation.error = True
+
+        try:
+            not_plotted_extra_metrics = await self.get_not_plotted_extra_metrics(messages=conversation.messages, state=state)
+            json.dumps(not_plotted_extra_metrics) # this line fails if not_plotted_extra_metrics is not json serializable
+            conversation.extra_metrics = conversation.extra_metrics | extra_metrics
+        except Exception as e:
+            self.num_errors += 1
+            self.errors.append(f"Error in get_not_plotted_extra_metrics {str(e)}")
+            logger.error(f"Error in get_not_plotted_extra_metrics {str(e)}")
             conversation.error = True
 
         conversation.action_mask = conversation.action_mask[1:]
