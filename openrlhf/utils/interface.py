@@ -88,6 +88,7 @@ class AsyncVLLM(AsyncLLMInterface):
         
         if was_truncated:
             conversation.was_truncated = True
+            conversation.action_mask = [0] * conversation.n_tokens
             return
         
         if conversation.n_tokens == 0:
@@ -96,7 +97,7 @@ class AsyncVLLM(AsyncLLMInterface):
         last_prompt_messages = []
         for message in reversed(conversation.messages):
             if message["role"] != "assistant":
-                last_prompt_messages.append(message)
+                last_prompt_messages.insert(0, message)
             else:
                 break
         size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
