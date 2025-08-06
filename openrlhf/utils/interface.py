@@ -113,7 +113,7 @@ class AsyncVLLM(AsyncLLMInterface):
         # If the model is a thinking model, then some number of tokens were removed from the last message
         if num_removed_tokens > 0:
             conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
-            print(f"Thread {thread_id}: New action mask size: {len(conversation.action_mask)} ")
+            print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
             if conversation.num_actions_list:
                 conversation.num_actions_list[-1] -= num_removed_tokens
 
