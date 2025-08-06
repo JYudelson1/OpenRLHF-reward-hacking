@@ -256,7 +256,7 @@ async def _vllm_chat_with_truncation(
     return finished_output, num_truncated_tokens
 
 async def size_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Message], add_generation_prompt: bool = False) -> int:
-    if isinstance(message, Message):
+    if not isinstance(message, list):
         message = [message]
     tokenizer = await llm.get_tokenizer()
     model_config = await llm.get_model_config()
