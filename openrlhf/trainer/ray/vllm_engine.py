@@ -239,8 +239,24 @@ class LLMRayActor:
                 print(f"Error logging rollouts to MongoDB: {e}")
             
         if self.transcripts_folder is not None:
-            messages = [{"conversation": conversation.messages, "reward": reward} for (conversation, reward) in rollouts]
-            with open(os.path.join(self.transcripts_folder, f"rollouts_rank{rank}_{datetime.now().strftime('%m%dT%H:%M')}.json"), "w") as f:
+            messages = [
+                {
+                    "reward": reward,
+                    "conversation": conversation.messages,
+                    "env_name": conversation.env_name,
+                    "was_truncated": conversation.was_truncated,
+                    "extra_metrics": conversation.extra_metrics,
+                    "error": conversation.error,
+                } for (conversation, reward)
+                in rollouts
+            ]
+            with open(
+                os.path.join(
+                    self.transcripts_folder,
+                    f"rollouts_step_{step}_rank_{rank}_{datetime.now().strftime('%m%dT%H:%M')}.json"
+                ),
+                "w"
+            ) as f:
                 json.dump(messages, f)
 
         self.rollouts = {
