@@ -246,6 +246,7 @@ class LLMRayActor:
                     "env_name": conversation.env_name,
                     "was_truncated": conversation.was_truncated,
                     "extra_metrics": conversation.extra_metrics,
+                    "not_plotted_extra_metrics": conversation.not_plotted_extra_metrics,
                     "error": conversation.error,
                 } for (conversation, reward)
                 in rollouts
