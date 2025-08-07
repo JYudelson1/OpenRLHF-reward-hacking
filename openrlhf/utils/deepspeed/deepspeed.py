@@ -257,6 +257,7 @@ class DeepspeedStrategy(ABC):
         is_actor = isinstance(model, Actor)
         ds_config = self.get_ds_eval_config(offload=getattr(model, "_offload", False))
 
+        print(f"{model=} {is_actor=} {os.environ.get('LOCAL_RANK')=} {ds_config=}")
         engine, *_ = deepspeed.initialize(
             model=model.model if is_actor else model,
             args={"local_rank": int(os.environ.get("LOCAL_RANK", "-1"))},
