@@ -96,6 +96,7 @@ class Actor(nn.Module):
             else:
                 model_class = AutoModelForCausalLM
 
+            print(f"{model_class=}")
             self.model = model_class.from_pretrained(
                 pretrain_or_model,
                 trust_remote_code=True,
