@@ -72,7 +72,7 @@ setup(
     description="A Ray-based High-performance RLHF framework.",
     long_description=_fetch_readme(),
     long_description_content_type="text/markdown",
-    install_requires=_fetch_requirements("requirements.txt"),
+    install_requires=_fetch_requirements("requirements.txt") + ["transformers==0.56.0.dev0"],
     extras_require={
         "vllm": ["vllm==0.10.1"],
         "vllm_latest": ["vllm>0.10.1"],
