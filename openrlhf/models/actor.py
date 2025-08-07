@@ -7,7 +7,7 @@ from flash_attn.utils.distributed import all_gather
 from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora import LoraLayer
 from torch.nn import functional as F
-from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer, Mxfp4Config
 from transformers.integrations.deepspeed import HfDeepSpeedConfig
 
 from .ring_attn_utils import convert_ring_attn_params
@@ -79,7 +79,7 @@ class Actor(nn.Module):
                 nf4_config = None
             """
 
-            nf4_config = BitsAndBytesConfig(
+            nf4_config = Mxfp4Config(
                 quant_method="mxfp4",
                 modules_to_not_convert=[
                     "model.layers.*.self_attn",
