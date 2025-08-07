@@ -101,7 +101,7 @@ class Actor(nn.Module):
                 pretrain_or_model,
                 trust_remote_code=True,
                 attn_implementation=attn_implementation,
-                quantization_config=nf4_config,
+                # quantization_config=nf4_config,
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
             )
