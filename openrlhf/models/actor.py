@@ -89,8 +89,6 @@ class Actor(nn.Module):
                 ],
             )
 
-            nf4_config = None
-
             if use_liger_kernel:
                 from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
