@@ -308,7 +308,7 @@ async def size_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Messag
     prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
     message_size = len(prompt_token_ids)
     if remove_system_prompt_size:
-        message_size -= await size_messages(llm, [], add_generation_prompt=False)
+        message_size -= len(tokenizer.apply_chat_template([], tokenize=True))
     return message_size
 
 async def tokenize_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Message], add_generation_prompt: bool = False) -> list[int]:
@@ -330,7 +330,7 @@ async def tokenize_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Me
     )
     prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
     if remove_system_prompt_size:
-        prompt_token_ids = prompt_token_ids[await size_messages(llm, [], add_generation_prompt=False):]
+        prompt_token_ids = prompt_token_ids[len(tokenizer.apply_chat_template([], tokenize=True)):]
     return prompt_token_ids
 
 class AgentInterface(ABC):
