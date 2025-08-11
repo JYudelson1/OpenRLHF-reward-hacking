@@ -100,7 +100,7 @@ class AsyncVLLM(AsyncLLMInterface):
                 last_prompt_messages.insert(0, message)
             else:
                 break
-        size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
+        size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=False)
         #thread_id = random.randint(0, 1000000)
         num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
         # print(f"Thread {thread_id}: Num removed tokens: {num_removed_tokens} ")
