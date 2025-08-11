@@ -427,8 +427,8 @@ class AgentInterface(ABC):
             
             seq_ids = conversation.all_tokens
             action_mask = conversation.action_mask
-            tokenizer = await llm.get_tokenizer()
-            real_tokens = tokenizer.decode(seq_ids)
+            tokenizer = await llm.llm_engine.get_tokenizer()
+            real_tokens = tokenizer.convert_ids_to_tokens(seq_ids)
             print(zip(real_tokens, action_mask, strict=True))
             assert False
 
