@@ -424,6 +424,13 @@ class AgentInterface(ABC):
 
         for conversation, reward, stats, state in results:
             conversation.extra_metrics["n_errors"] = float(conversation.error)
+            
+            seq_ids = conversation.all_tokens
+            action_mask = conversation.action_mask
+            tokenizer = await llm.get_tokenizer()
+            real_tokens = tokenizer.decode(seq_ids)
+            print(zip(real_tokens, action_mask, strict=True))
+            assert False
 
         return [(conversation, reward) for conversation, reward, stats, state in results]
 
