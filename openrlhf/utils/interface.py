@@ -111,6 +111,13 @@ class AsyncVLLM(AsyncLLMInterface):
         print(f"Thread {thread_id}: All tokens: {len(conversation.all_tokens)} ")
         print(f"Thread {thread_id}: N tokens: {conversation.n_tokens} ")
         print(f"Thread {thread_id}: Size last message: {size_last_message} ")
+        
+        tokenizer = await self.llm_engine.get_tokenizer()
+        real_tokens = tokenizer.convert_ids_to_tokens(conversation.all_tokens)
+        input_tokens = tokenizer.convert_ids_to_tokens(output.prompt_token_ids)
+        print(list(zip(input_tokens, real_tokens, strict=False)))
+        print(input_tokens[len(real_tokens):])
+        assert False
 
         output_tokens = output.outputs[0].token_ids
         
