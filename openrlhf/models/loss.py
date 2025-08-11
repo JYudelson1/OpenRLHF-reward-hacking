@@ -90,14 +90,16 @@ class PolicyLoss(nn.Module):
         try:
             max_probability_ratio = ratio.max(-1).values
             mean_probability_ratio = ratio.mean(-1)
+            max_advantage_absolute_value = advantages.abs().max(-1).values
         except IndexError:
             max_probability_ratio = 0.0
             mean_probability_ratio = 0.0
+            max_advantage_absolute_value = 0.0
 
         logs = {
             "max_probability_ratio": max_probability_ratio,
             "mean_probability_ratio": mean_probability_ratio,
-            "max_advantage_absolute_value": advantages.abs().max(-1).values,
+            "max_advantage_absolute_value": max_advantage_absolute_value,
             "ratio_times_advantage": surr1,
             "ratio_clipped_times_advantage": surr2,
         }
