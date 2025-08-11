@@ -118,6 +118,7 @@ class AsyncVLLM(AsyncLLMInterface):
             # If the model is a thinking model, then some number of tokens were removed from the last message
             if num_removed_tokens > 0:
                 conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
+                
                 # print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
             elif num_removed_tokens < 0:
                 conversation.action_mask.extend([1] * (-num_removed_tokens))
@@ -125,6 +126,7 @@ class AsyncVLLM(AsyncLLMInterface):
 
             if conversation.num_actions_list:
                     conversation.num_actions_list[-1] -= num_removed_tokens
+                    
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
 
@@ -136,7 +138,10 @@ class AsyncVLLM(AsyncLLMInterface):
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
         conversation.n_tokens = len(conversation.all_tokens)
-        print(f"Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}")
+        if thinking:
+            print(f"Removed {num_removed_tokens} tokens. Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}")
+        else:
+            print(f"Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}")
         # print(f"Thread {thread_id}: New n tokens: {conversation.n_tokens} ")
 
 
