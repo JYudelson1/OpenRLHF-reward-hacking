@@ -126,7 +126,7 @@ class AsyncVLLM(AsyncLLMInterface):
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
 
-        conversation.action_mask.extend([0] * (len(output.prompt_token_ids) - len(conversation.action_mask) + 1))
+        conversation.action_mask.extend([0] * (len(output.prompt_token_ids) - len(conversation.action_mask)))
         conversation.action_mask.extend([1] * len(output_tokens))
         conversation.action_mask = conversation.action_mask[1:]
         # print(f"Thread {thread_id}: New action mask size post add: {len(conversation.action_mask)} ")
