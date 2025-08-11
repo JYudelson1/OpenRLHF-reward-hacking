@@ -62,7 +62,6 @@ class AsyncLLMInterface(ABC):
         self,
         conversation: AgentConversation,
         stop_strings: list[str] | None,
-        thinking: bool = False,
     ) -> None:
         pass
 
@@ -76,7 +75,6 @@ class AsyncVLLM(AsyncLLMInterface):
         self,
         conversation: AgentConversation,
         stop_strings: list[str] | None,
-        thinking: bool = False,
         compact_filtering: bool = False,
         system_prompt_size: int = 0,
     ) -> None:
@@ -114,16 +112,15 @@ class AsyncVLLM(AsyncLLMInterface):
 
         output_tokens = output.outputs[0].token_ids
 
-        if thinking:
-            # If the model is a thinking model, then some number of tokens were removed from the last message
-            if num_removed_tokens > 0:
-                conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
+        # If the model is a thinking model, then some number of tokens were removed from the last message
+        if num_removed_tokens > 0:
+            conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
 
-            elif num_removed_tokens < 0:
-                conversation.action_mask.extend([1] * (-num_removed_tokens))
+        elif num_removed_tokens < 0:
+            conversation.action_mask.extend([1] * (-num_removed_tokens))
 
-            if conversation.num_actions_list:
-                conversation.num_actions_list[-1] -= num_removed_tokens
+        if conversation.num_actions_list:
+            conversation.num_actions_list[-1] -= num_removed_tokens
 
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
@@ -317,7 +314,6 @@ class AgentInterface(ABC):
         vllm_engine_index: int = 0,
         compact_filtering: bool = False,
         filter_max_steps: bool = False,
-        thinking: bool = False,
     ) -> None:
         self.stop_strings = stop_strings
         self.max_steps = max_steps
@@ -328,7 +324,6 @@ class AgentInterface(ABC):
         self.vllm_engine_index = vllm_engine_index
         self.compact_filtering = compact_filtering
         self.filter_max_steps = filter_max_steps
-        self.thinking = thinking
 
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
@@ -507,7 +502,6 @@ class AgentInterface(ABC):
             await llm.generate_assistant_message(
                 conversation,
                 stop_strings=self.stop_strings,
-                thinking=self.thinking,
                 compact_filtering=self.compact_filtering,
                 system_prompt_size=system_prompt_size,
             )

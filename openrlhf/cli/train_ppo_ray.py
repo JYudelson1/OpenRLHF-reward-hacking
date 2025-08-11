@@ -118,7 +118,6 @@ def train(args):
             truncate_prompt_tokens=args.prompt_max_len,
             compact_filtering=args.compact_filtering,
             filter_max_steps=args.filter_max_steps,
-            thinking=args.thinking,
         )
 
     actor_model = PPORayActorGroup(
@@ -505,9 +504,6 @@ if __name__ == "__main__":
     parser.add_argument("--compact_filtering", action="store_true", default=False)
     parser.add_argument("--filter_max_steps", action="store_true", default=False)
     
-    # Temp
-    parser.add_argument("--thinking", action="store_true", default=False)
-
     args = parser.parse_args()
 
     if args.advantage_estimator not in ["gae"]:
