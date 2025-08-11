@@ -109,30 +109,8 @@ class AsyncVLLM(AsyncLLMInterface):
         size_last_message = await size_messages(
             self.llm_engine, last_prompt_messages, add_generation_prompt=True, system_prompt_size=system_prompt_size
         )
-        thread_id = random.randint(0, 1000000)
-        num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
-        print(f"Thread {thread_id}: Num removed tokens: {num_removed_tokens} ")
-        print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} ")
-        print(f"Thread {thread_id}: Num actions list: {len(conversation.num_actions_list)} ")
-        print(f"Thread {thread_id}: All tokens: {len(conversation.all_tokens)} ")
-        print(f"Thread {thread_id}: N tokens: {conversation.n_tokens} ")
-        print(f"Thread {thread_id}: Size last message: {size_last_message} ")
 
-        if num_removed_tokens > 0:
-            tokenizer = await self.llm_engine.get_tokenizer()
-            real_tokens = tokenizer.convert_ids_to_tokens(conversation.all_tokens)
-            input_tokens = tokenizer.convert_ids_to_tokens(output.prompt_token_ids)
-            last_message = await tokenize_messages(
-                self.llm_engine,
-                last_prompt_messages,
-                add_generation_prompt=True,
-                system_prompt_size=system_prompt_size,
-            )
-            last_message_tokens = tokenizer.convert_ids_to_tokens(last_message)
-            print(list(zip(input_tokens, real_tokens, strict=False)))
-            print(input_tokens[len(real_tokens) :])
-            print(last_message_tokens)
-            assert False
+        num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
 
         output_tokens = output.outputs[0].token_ids
 
@@ -141,10 +119,8 @@ class AsyncVLLM(AsyncLLMInterface):
             if num_removed_tokens > 0:
                 conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
 
-                print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
             elif num_removed_tokens < 0:
                 conversation.action_mask.extend([1] * (-num_removed_tokens))
-                print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
 
             if conversation.num_actions_list:
                 conversation.num_actions_list[-1] -= num_removed_tokens
@@ -154,22 +130,11 @@ class AsyncVLLM(AsyncLLMInterface):
 
         conversation.action_mask.extend([0] * (len(output.prompt_token_ids) - len(conversation.action_mask)))
         conversation.action_mask.extend([1] * len(output_tokens))
-        print(f"Thread {thread_id}: New action mask size post add: {len(conversation.action_mask)} ")
 
         conversation.num_actions_list.append(len(output_tokens))
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
         conversation.n_tokens = len(conversation.all_tokens)
-        if thinking:
-            print(
-                f"Removed {num_removed_tokens} tokens. Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}"
-            )
-        else:
-            print(
-                f"Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}"
-            )
-        # print(f"Thread {thread_id}: New n tokens: {conversation.n_tokens} ")
-
 
 async def _vllm_chat_with_truncation(
     llm_engine: vllm.AsyncLLMEngine,
@@ -333,34 +298,6 @@ async def size_messages(
     return message_size
 
 
-async def tokenize_messages(
-    llm: vllm.AsyncLLMEngine,
-    message: Message | list[Message],
-    add_generation_prompt: bool = False,
-    system_prompt_size: int = 0,
-) -> list[int]:
-    if not isinstance(message, list):
-        message = [message]
-
-    remove_system_prompt_size = not any(message["role"] == "system" for message in message)
-    tokenizer = await llm.get_tokenizer()
-    model_config = await llm.get_model_config()
-    prompt_str = apply_hf_chat_template(
-        tokenizer,
-        trust_remote_code=model_config.trust_remote_code,
-        conversation=message,
-        chat_template=None,
-        add_generation_prompt=add_generation_prompt,
-        continue_final_message=False,
-        tools=None,
-        model_config=model_config,
-    )
-    prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
-    if remove_system_prompt_size:
-        prompt_token_ids = prompt_token_ids[system_prompt_size:]
-    return prompt_token_ids
-
-
 def get_default_system_prompt_size(tokenizer) -> int:
     sys_1 = {"role": "system", "content": ""}
     msg_1 = {"role": "user", "content": ""}
@@ -392,7 +329,6 @@ class AgentInterface(ABC):
         self.compact_filtering = compact_filtering
         self.filter_max_steps = filter_max_steps
         self.thinking = thinking
-        
 
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
@@ -445,7 +381,7 @@ class AgentInterface(ABC):
         self, llm: AsyncLLMInterface, full_data: list[dict], env_name: str, is_eval: bool = False
     ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
-        
+
         tokenizer = await llm.llm_engine.get_tokenizer()
         system_prompt_size = get_default_system_prompt_size(tokenizer)
 
@@ -505,13 +441,6 @@ class AgentInterface(ABC):
 
         for conversation, reward, stats, state in results:
             conversation.extra_metrics["n_errors"] = float(conversation.error)
-
-            seq_ids = conversation.all_tokens
-            action_mask = conversation.action_mask
-            tokenizer = await llm.llm_engine.get_tokenizer()
-            real_tokens = tokenizer.convert_ids_to_tokens(seq_ids)
-            print(list(zip(real_tokens, action_mask, strict=True)))
-            assert False
 
         return [(conversation, reward) for conversation, reward, stats, state in results]
 
