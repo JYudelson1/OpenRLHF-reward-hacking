@@ -57,7 +57,7 @@ class Actor(nn.Module):
         self.temperature = temperature
 
         if isinstance(pretrain_or_model, str):
-            attn_implementation = "flash_attention_2" if use_flash_attention_2 else "eager"
+            attn_implementation = "flash_attention_3" if use_flash_attention_2 else "eager"
 
             # Note: dschf is defined in function scope to avoid global effects
             # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
