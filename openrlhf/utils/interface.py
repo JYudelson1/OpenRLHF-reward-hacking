@@ -100,7 +100,7 @@ class AsyncVLLM(AsyncLLMInterface):
                 last_prompt_messages.insert(0, message)
             else:
                 break
-        size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=False)
+        size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
         #thread_id = random.randint(0, 1000000)
         num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
         # print(f"Thread {thread_id}: Num removed tokens: {num_removed_tokens} ")
@@ -126,10 +126,7 @@ class AsyncVLLM(AsyncLLMInterface):
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
 
-        if thinking:
-            conversation.action_mask.extend([0] * size_last_message)
-        else:
-            conversation.action_mask.extend([0] * (len(output.prompt_token_ids) - conversation.n_tokens))
+        conversation.action_mask.extend([0] * (len(output.prompt_token_ids) - len(conversation.action_mask) + 1))
         conversation.action_mask.extend([1] * len(output_tokens))
         conversation.action_mask = conversation.action_mask[1:]
         # print(f"Thread {thread_id}: New action mask size post add: {len(conversation.action_mask)} ")
