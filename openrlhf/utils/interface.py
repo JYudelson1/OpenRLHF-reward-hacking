@@ -47,7 +47,7 @@ class AgentConversation:
     was_truncated: bool = False
     extra_metrics: dict[str, float] | None = field(default_factory=lambda: {"n_errors": 0.0, "num_steps": 0.0})
     error: bool = False
-    action_mask: list[int] = field(default_factory=lambda: [0])
+    action_mask: list[int] = field(default_factory=lambda: [])
     num_actions_list: list[int] = field(default_factory=lambda: [])
 
     def increment_num_steps(self) -> None:
@@ -520,7 +520,6 @@ class AgentInterface(ABC):
             logger.error(f"Error in get_extra_metrics {str(e)}")
             conversation.error = True
 
-        conversation.action_mask = conversation.action_mask[1:]
         return conversation, reward, stats, state
 
 
