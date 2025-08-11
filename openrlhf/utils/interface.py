@@ -74,6 +74,7 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation: AgentConversation,
         stop_strings: list[str] | None,
         thinking: bool = False,
+        compact_filtering: bool = False,
     ) -> None:
         sampling_params = self.sampling_params
         if stop_strings is not None:
@@ -88,7 +89,8 @@ class AsyncVLLM(AsyncLLMInterface):
         
         if was_truncated:
             conversation.was_truncated = True
-            conversation.action_mask = [0] * conversation.n_tokens
+            if compact_filtering:
+                conversation.action_mask = [0] * conversation.n_tokens
             return
         
         if conversation.n_tokens == 0:
@@ -479,7 +481,7 @@ class AgentInterface(ABC):
             conversation.increment_num_steps()
 
             stats.on_llm_completion_start()
-            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings, thinking=self.thinking)
+            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings, thinking=self.thinking, compact_filtering=self.compact_filtering)
             
             if conversation.was_truncated:
                 was_truncated = True
