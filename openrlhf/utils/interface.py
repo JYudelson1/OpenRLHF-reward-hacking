@@ -88,7 +88,7 @@ class AsyncVLLM(AsyncLLMInterface):
         
         if was_truncated:
             conversation.was_truncated = True
-            conversation.action_mask = [0] * (conversation.n_tokens + 1)
+            conversation.action_mask = [0] * conversation.n_tokens
             return
         
         if conversation.n_tokens == 0:
