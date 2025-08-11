@@ -100,7 +100,7 @@ class Actor(nn.Module):
             self.model = model_class.from_pretrained(
                 pretrain_or_model,
                 trust_remote_code=True,
-                attn_implementation="eager", # attn_implementation,
+                attn_implementation=attn_implementation,
                 quantization_config=nf4_config,
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
