@@ -446,7 +446,8 @@ class AgentInterface(ABC):
     ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
         
-        system_prompt_size = get_default_system_prompt_size(llm.llm_engine.tokenizer)
+        tokenizer = await llm.llm_engine.get_tokenizer()
+        system_prompt_size = get_default_system_prompt_size(tokenizer)
 
         try:
             states = await self.init_all_states(full_data)
