@@ -92,9 +92,9 @@ class PolicyLoss(nn.Module):
             mean_probability_ratio = ratio.mean(-1)
             max_advantage_absolute_value = advantages.abs().max(-1).values
         except IndexError:
-            max_probability_ratio = 0.0
-            mean_probability_ratio = 0.0
-            max_advantage_absolute_value = 0.0
+            max_probability_ratio = torch.tensor(0.0)
+            mean_probability_ratio = torch.tensor(0.0)
+            max_advantage_absolute_value = torch.tensor(0.0)
 
         logs = {
             "max_probability_ratio": max_probability_ratio,
