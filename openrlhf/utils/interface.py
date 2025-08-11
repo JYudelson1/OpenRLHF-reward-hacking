@@ -116,8 +116,11 @@ class AsyncVLLM(AsyncLLMInterface):
             tokenizer = await self.llm_engine.get_tokenizer()
             real_tokens = tokenizer.convert_ids_to_tokens(conversation.all_tokens)
             input_tokens = tokenizer.convert_ids_to_tokens(output.prompt_token_ids)
+            last_message = await tokenize_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
+            last_message_tokens = tokenizer.convert_ids_to_tokens(last_message)
             print(list(zip(input_tokens, real_tokens, strict=False)))
             print(input_tokens[len(real_tokens):])
+            print(last_message_tokens)
             assert False
 
         output_tokens = output.outputs[0].token_ids
@@ -301,6 +304,24 @@ async def size_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Messag
     )
     prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
     return len(prompt_token_ids)
+
+async def tokenize_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Message], add_generation_prompt: bool = False) -> list[int]:
+    if not isinstance(message, list):
+        message = [message]
+    tokenizer = await llm.get_tokenizer()
+    model_config = await llm.get_model_config()
+    prompt_str = apply_hf_chat_template(
+        tokenizer,
+        trust_remote_code=model_config.trust_remote_code,
+        conversation=message,
+        chat_template=None,
+        add_generation_prompt=add_generation_prompt,
+        continue_final_message=False,
+        tools=None,
+        model_config=model_config,
+    )
+    prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+    return prompt_token_ids
 
 class AgentInterface(ABC):
     def __init__(
