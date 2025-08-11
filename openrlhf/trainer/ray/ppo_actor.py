@@ -332,7 +332,8 @@ class ActorPPOTrainer(BasePPOTrainer):
                 if "kl" in status:
                     status["kl"] *= status["response_length"]
                     status = self.strategy.all_reduce(status)
-                    status["kl"] /= status["response_length"]
+                    if status["response_length"] != 0:
+                        status["kl"] /= status["response_length"]
 
                 short_status = {}
 
