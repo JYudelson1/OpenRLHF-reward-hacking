@@ -66,7 +66,6 @@ class Actor(nn.Module):
             else:
                 dschf = None
 
-            """
             if load_in_4bit:
                 assert bf16, "we only support bnb_4bit_compute_dtype = bf16"
                 nf4_config = BitsAndBytesConfig(
@@ -77,8 +76,8 @@ class Actor(nn.Module):
                 )
             else:
                 nf4_config = None
-            """
 
+            """
             nf4_config = Mxfp4Config(
                 quant_method="mxfp4",
                 modules_to_not_convert=[
@@ -88,6 +87,7 @@ class Actor(nn.Module):
                     "lm_head"
                 ],
             )
+            """
 
             if use_liger_kernel:
                 from liger_kernel.transformers import AutoLigerKernelForCausalLM
