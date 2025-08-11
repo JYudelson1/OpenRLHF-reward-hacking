@@ -59,7 +59,10 @@ class AgentConversation:
 class AsyncLLMInterface(ABC):
     @abstractmethod
     async def generate_assistant_message(
-        self, conversation: AgentConversation, stop_strings: list[str] | None, thinking: bool = False,
+        self,
+        conversation: AgentConversation,
+        stop_strings: list[str] | None,
+        thinking: bool = False,
     ) -> None:
         pass
 
@@ -75,6 +78,7 @@ class AsyncVLLM(AsyncLLMInterface):
         stop_strings: list[str] | None,
         thinking: bool = False,
         compact_filtering: bool = False,
+        system_prompt_size: int = 0,
     ) -> None:
         sampling_params = self.sampling_params
         if stop_strings is not None:
@@ -86,58 +90,65 @@ class AsyncVLLM(AsyncLLMInterface):
             llm_engine=self.llm_engine, messages=conversation.messages, sampling_params=sampling_params
         )
         was_truncated = truncated_tokens > 0
-        
+
         if was_truncated:
             conversation.was_truncated = True
             if compact_filtering:
                 conversation.action_mask = [0] * conversation.n_tokens
             return
-        
+
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = output.prompt_token_ids
-            
+
         last_prompt_messages = []
         for message in reversed(conversation.messages):
             if message["role"] != "assistant":
                 last_prompt_messages.insert(0, message)
             else:
                 break
-        size_last_message = await size_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
+        size_last_message = await size_messages(
+            self.llm_engine, last_prompt_messages, add_generation_prompt=True, system_prompt_size=system_prompt_size
+        )
         thread_id = random.randint(0, 1000000)
-        num_removed_tokens =  conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
+        num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
         print(f"Thread {thread_id}: Num removed tokens: {num_removed_tokens} ")
         print(f"Thread {thread_id}: Action mask size: {len(conversation.action_mask)} ")
         print(f"Thread {thread_id}: Num actions list: {len(conversation.num_actions_list)} ")
         print(f"Thread {thread_id}: All tokens: {len(conversation.all_tokens)} ")
         print(f"Thread {thread_id}: N tokens: {conversation.n_tokens} ")
         print(f"Thread {thread_id}: Size last message: {size_last_message} ")
-        
+
         if num_removed_tokens > 0:
             tokenizer = await self.llm_engine.get_tokenizer()
             real_tokens = tokenizer.convert_ids_to_tokens(conversation.all_tokens)
             input_tokens = tokenizer.convert_ids_to_tokens(output.prompt_token_ids)
-            last_message = await tokenize_messages(self.llm_engine, last_prompt_messages, add_generation_prompt=True)
+            last_message = await tokenize_messages(
+                self.llm_engine,
+                last_prompt_messages,
+                add_generation_prompt=True,
+                system_prompt_size=system_prompt_size,
+            )
             last_message_tokens = tokenizer.convert_ids_to_tokens(last_message)
             print(list(zip(input_tokens, real_tokens, strict=False)))
-            print(input_tokens[len(real_tokens):])
+            print(input_tokens[len(real_tokens) :])
             print(last_message_tokens)
             assert False
 
         output_tokens = output.outputs[0].token_ids
-        
+
         if thinking:
             # If the model is a thinking model, then some number of tokens were removed from the last message
             if num_removed_tokens > 0:
                 conversation.action_mask = conversation.action_mask[:-num_removed_tokens]
-                
+
                 print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
             elif num_removed_tokens < 0:
                 conversation.action_mask.extend([1] * (-num_removed_tokens))
                 print(f"Thread {thread_id}: New action mask size post remove: {len(conversation.action_mask)} ")
 
             if conversation.num_actions_list:
-                    conversation.num_actions_list[-1] -= num_removed_tokens
-                    
+                conversation.num_actions_list[-1] -= num_removed_tokens
+
         output_message = {"role": "assistant", "content": output.outputs[0].text}
         conversation.messages.append(output_message)
 
@@ -150,9 +161,13 @@ class AsyncVLLM(AsyncLLMInterface):
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
         conversation.n_tokens = len(conversation.all_tokens)
         if thinking:
-            print(f"Removed {num_removed_tokens} tokens. Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}")
+            print(
+                f"Removed {num_removed_tokens} tokens. Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}"
+            )
         else:
-            print(f"Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}")
+            print(
+                f"Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}"
+            )
         # print(f"Thread {thread_id}: New n tokens: {conversation.n_tokens} ")
 
 
@@ -287,12 +302,18 @@ async def _vllm_chat_with_truncation(
 
     return finished_output, num_truncated_tokens
 
-async def size_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Message], add_generation_prompt: bool = False) -> int:
+
+async def size_messages(
+    llm: vllm.AsyncLLMEngine,
+    message: Message | list[Message],
+    add_generation_prompt: bool = False,
+    system_prompt_size: int = 0,
+) -> int:
     if not isinstance(message, list):
         message = [message]
-        
+
     remove_system_prompt_size = not any(message["role"] == "system" for message in message)
-        
+
     tokenizer = await llm.get_tokenizer()
     model_config = await llm.get_model_config()
     prompt_str = apply_hf_chat_template(
@@ -308,13 +329,19 @@ async def size_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Messag
     prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
     message_size = len(prompt_token_ids)
     if remove_system_prompt_size:
-        message_size -= len(tokenizer.apply_chat_template([], tokenize=True))
+        message_size -= system_prompt_size
     return message_size
 
-async def tokenize_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Message], add_generation_prompt: bool = False) -> list[int]:
+
+async def tokenize_messages(
+    llm: vllm.AsyncLLMEngine,
+    message: Message | list[Message],
+    add_generation_prompt: bool = False,
+    system_prompt_size: int = 0,
+) -> list[int]:
     if not isinstance(message, list):
         message = [message]
-        
+
     remove_system_prompt_size = not any(message["role"] == "system" for message in message)
     tokenizer = await llm.get_tokenizer()
     model_config = await llm.get_model_config()
@@ -330,8 +357,18 @@ async def tokenize_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Me
     )
     prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
     if remove_system_prompt_size:
-        prompt_token_ids = prompt_token_ids[len(tokenizer.apply_chat_template([], tokenize=True)):]
+        prompt_token_ids = prompt_token_ids[system_prompt_size:]
     return prompt_token_ids
+
+
+def get_default_system_prompt_size(tokenizer) -> int:
+    sys_1 = {"role": "system", "content": ""}
+    msg_1 = {"role": "user", "content": ""}
+    len_1 = len(tokenizer.apply_chat_template([sys_1, msg_1], tokenize=True))
+    len_2 = len(tokenizer.apply_chat_template([sys_1], tokenize=True))
+    len_3 = len(tokenizer.apply_chat_template([msg_1], tokenize=True))
+    return len_3 - (len_1 - len_2)
+
 
 class AgentInterface(ABC):
     def __init__(
@@ -356,6 +393,7 @@ class AgentInterface(ABC):
         self.filter_max_steps = filter_max_steps
         self.thinking = thinking
         
+
     @abstractmethod
     async def init_all_states(self, full_data: list[dict]) -> list[AgentState]:
         """Initialize the states for a new RL environments, given a list of dict elements of the dataset"""
@@ -407,7 +445,9 @@ class AgentInterface(ABC):
         self, llm: AsyncLLMInterface, full_data: list[dict], env_name: str, is_eval: bool = False
     ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
-                
+        
+        system_prompt_size = get_default_system_prompt_size(llm.llm_engine.tokenizer)
+
         try:
             states = await self.init_all_states(full_data)
         except Exception as e:
@@ -432,6 +472,7 @@ class AgentInterface(ABC):
                     time_init_env_started=time_init_env_started,
                     env_name=env_name,
                     is_eval=is_eval,
+                    system_prompt_size=system_prompt_size,
                 )
                 for state in states
             ]
@@ -463,7 +504,7 @@ class AgentInterface(ABC):
 
         for conversation, reward, stats, state in results:
             conversation.extra_metrics["n_errors"] = float(conversation.error)
-            
+
             seq_ids = conversation.all_tokens
             action_mask = conversation.action_mask
             tokenizer = await llm.llm_engine.get_tokenizer()
@@ -480,6 +521,7 @@ class AgentInterface(ABC):
         time_init_env_started: float,
         env_name: str,
         is_eval: bool = False,
+        system_prompt_size: int = 0,
     ) -> tuple[AgentConversation, Reward | None, "RolloutTimeStatistics", AgentState | None]:
         stats = RolloutTimeStatistics(time_init_env_started=time_init_env_started)
 
@@ -532,8 +574,14 @@ class AgentInterface(ABC):
             conversation.increment_num_steps()
 
             stats.on_llm_completion_start()
-            await llm.generate_assistant_message(conversation, stop_strings=self.stop_strings, thinking=self.thinking, compact_filtering=self.compact_filtering)
-            
+            await llm.generate_assistant_message(
+                conversation,
+                stop_strings=self.stop_strings,
+                thinking=self.thinking,
+                compact_filtering=self.compact_filtering,
+                system_prompt_size=system_prompt_size,
+            )
+
             if conversation.was_truncated:
                 was_truncated = True
                 break
