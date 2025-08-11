@@ -290,6 +290,9 @@ async def _vllm_chat_with_truncation(
 async def size_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Message], add_generation_prompt: bool = False) -> int:
     if not isinstance(message, list):
         message = [message]
+        
+    remove_system_prompt_size = not any(message["role"] == "system" for message in message)
+        
     tokenizer = await llm.get_tokenizer()
     model_config = await llm.get_model_config()
     prompt_str = apply_hf_chat_template(
@@ -303,11 +306,16 @@ async def size_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Messag
         model_config=model_config,
     )
     prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
-    return len(prompt_token_ids)
+    message_size = len(prompt_token_ids)
+    if remove_system_prompt_size:
+        message_size -= await size_messages(llm, [], add_generation_prompt=False)
+    return message_size
 
 async def tokenize_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Message], add_generation_prompt: bool = False) -> list[int]:
     if not isinstance(message, list):
         message = [message]
+        
+    remove_system_prompt_size = not any(message["role"] == "system" for message in message)
     tokenizer = await llm.get_tokenizer()
     model_config = await llm.get_model_config()
     prompt_str = apply_hf_chat_template(
@@ -321,6 +329,8 @@ async def tokenize_messages(llm: vllm.AsyncLLMEngine, message: Message | list[Me
         model_config=model_config,
     )
     prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+    if remove_system_prompt_size:
+        prompt_token_ids = prompt_token_ids[await size_messages(llm, [], add_generation_prompt=False):]
     return prompt_token_ids
 
 class AgentInterface(ABC):
