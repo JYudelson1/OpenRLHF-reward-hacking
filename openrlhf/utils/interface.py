@@ -88,7 +88,7 @@ class AsyncVLLM(AsyncLLMInterface):
         
         if was_truncated:
             conversation.was_truncated = True
-            conversation.action_mask = [0] * conversation.n_tokens
+            conversation.action_mask = [0] * (conversation.n_tokens + 1)
             return
         
         if conversation.n_tokens == 0:
@@ -134,6 +134,7 @@ class AsyncVLLM(AsyncLLMInterface):
 
         conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
         conversation.n_tokens = len(conversation.all_tokens)
+        print(f"Added {size_last_message} 0 tokens, {len(output_tokens)} 1 tokens. Action mask size: {len(conversation.action_mask)}. n_tokens: {conversation.n_tokens}")
         # print(f"Thread {thread_id}: New n tokens: {conversation.n_tokens} ")
 
 
