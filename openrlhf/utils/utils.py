@@ -174,6 +174,7 @@ def print_gpu_memory_usage():
     #     return
 
     try:
+        print("\n\n\n\n\n\n\n\n")
         pynvml.nvmlInit()
         count = pynvml.nvmlDeviceGetCount()
         for i in range(count):
@@ -183,6 +184,7 @@ def print_gpu_memory_usage():
                 f"[GPU {i}: {info.used/1024**3:.2f} GiB used / {info.total/1024**3:.2f} GiB total",
                 flush=True,
             )
+        print("\n\n\n\n\n\n\n\n")
         sys.stdout.flush()
     except pynvml.NVMLError as e:
         print(f"NVML error: {e}. Are NVIDIA drivers/NVML installed and a GPU present?", flush=True)
