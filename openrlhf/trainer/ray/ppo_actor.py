@@ -336,6 +336,8 @@ class ActorPPOTrainer(BasePPOTrainer):
                 desc=f"Train epoch [{epoch + 1}/{self.max_epochs}]",
                 disable=not self.strategy.is_rank_0(),
             )
+            print(f"Memory at train step {epoch + 1}")
+            print_gpu_memory_usage()
             for experience in pbar:
                 experience.to_device(device)
                 status = self.training_step(experience)
