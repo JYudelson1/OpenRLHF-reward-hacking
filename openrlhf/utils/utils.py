@@ -180,18 +180,20 @@ def _collect_nvml_memory_snapshots():
     return snapshots
 
 
+def _nvml_worker(q: multiprocessing.Queue):
+    """Top-level worker to make it picklable under spawn."""
+    try:
+        q.put({"ok": True, "data": _collect_nvml_memory_snapshots()})
+    except Exception as e:  # noqa: BLE001
+        q.put({"ok": False, "error": repr(e)})
+
+
 def _try_nvml_with_timeout(timeout_seconds: float = 3.0):
     """Run NVML collection in a separate process with a timeout."""
     ctx = multiprocessing.get_context("spawn")
     queue: multiprocessing.Queue = ctx.Queue()
 
-    def _worker(q: multiprocessing.Queue):
-        try:
-            q.put({"ok": True, "data": _collect_nvml_memory_snapshots()})
-        except Exception as e:  # noqa: BLE001
-            q.put({"ok": False, "error": repr(e)})
-
-    proc = ctx.Process(target=_worker, args=(queue,), daemon=True)
+    proc = ctx.Process(target=_nvml_worker, args=(queue,), daemon=True)
     proc.start()
     proc.join(timeout_seconds)
     if proc.is_alive():
