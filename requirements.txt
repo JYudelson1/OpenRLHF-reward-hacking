@@ -25,3 +25,4 @@ anthropic
 openai
 tenacity
 plotly
+pynvml
