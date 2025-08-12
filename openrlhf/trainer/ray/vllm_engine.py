@@ -19,6 +19,7 @@ from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.interface import AsyncVLLM
 
 from .utils import get_bundle_indices, ray_noset_visible_devices
+from openrlhf.utils import print_gpu_memory_usage
 
 logger = init_logger(__name__)
 
@@ -128,7 +129,11 @@ class LLMRayActor:
         self.async_event_loop.run_until_complete(self.llm_engine.sleep(level=level))
 
     def wake_up(self):
+        print("LLMRayActor.wake_up called")
+        print_gpu_memory_usage()
         self.async_event_loop.run_until_complete(self.llm_engine.wake_up())
+        print("LLMRayActor.wake_up finished")
+        print_gpu_memory_usage()
 
     def reset_rollout_cache(self) -> None:
         self.env_data_for_rollout = {}
