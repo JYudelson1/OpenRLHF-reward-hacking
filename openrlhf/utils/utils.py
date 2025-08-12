@@ -167,10 +167,11 @@ def print_gpu_memory_usage():
     else:
         rank = 0
         
-    if rank != 0:
+    if rank != 0 and torch.cuda.device_count() > 1:
+        
         return
     
-    for i in range(8):
+    for i in range(torch.cuda.device_count()):
         device = torch.device(f'cuda:{i}')
         allocated = torch.cuda.memory_allocated(device) / 1024**3  # GB
         cached = torch.cuda.memory_reserved(device) / 1024**3      # GB
