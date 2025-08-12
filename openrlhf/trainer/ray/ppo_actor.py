@@ -945,23 +945,24 @@ class ActorModelRayActor(BasePPORole):
             
         # Debug memory usage
         if torch.distributed.get_rank() == 0:
-            print(f"\n=== Memory Debug ===")
-            print(f"Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+            import gc
+    
+            # Find all tensors in memory
+            tensors = []
+            for obj in gc.get_objects():
+                if torch.is_tensor(obj) and obj.is_cuda:
+                    tensors.append((obj.numel() * obj.element_size(), obj.shape, obj.dtype))
             
-            # The actual DeepSpeed engine is self.actor.model now
-            print(f"Type of self.actor: {type(self.actor)}")
-            print(f"Type of self.actor.model: {type(self.actor.model)}")
+            # Sort by size
+            tensors.sort(reverse=True, key=lambda x: x[0])
             
-            # For DeepSpeed engine, parameters are accessed differently
-            if hasattr(self.actor.model, 'module'):
-                # DeepSpeed wrapped model
-                actual_params = self.actor.model.module.parameters()
-                param_memory = sum(p.numel() * p.element_size() for p in actual_params)
-                print(f"Wrapped model params: {param_memory / 1e9:.2f} GB")
-            
-            # Check what stage we're in
-            if hasattr(self.actor.model, 'zero_optimization_stage'):
-                print(f"ZeRO stage: {self.actor.model.zero_optimization_stage()}")
+            print(f"\n=== Top 10 largest tensors ===")
+            total_size = 0
+            for size, shape, dtype in tensors[:10]:
+                size_gb = size / 1e9
+                total_size += size_gb
+                print(f"  {size_gb:.3f} GB: shape={shape}, dtype={dtype}")
+            print(f"Total of top 10: {total_size:.2f} GB")
 
         # initial offload
         if strategy.args.deepspeed_enable_sleep:
