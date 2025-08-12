@@ -6,6 +6,7 @@ from transformers import AutoTokenizer
 
 import torch
 import pynvml
+import sys
 
 
 def get_tokenizer(pretrain, model, padding_side="left", strategy=None, use_fast=True):
@@ -149,6 +150,7 @@ def blending_datasets(
         return train_dataset
 
 
+
 def convert_token_to_id(token, tokenizer):
     if isinstance(token, str):
         token = tokenizer.encode(token, add_special_tokens=False)
@@ -160,17 +162,17 @@ def convert_token_to_id(token, tokenizer):
 
 def print_gpu_memory_usage():
     if not torch.cuda.is_available():
-        print("CUDA is not available")
+        print("CUDA is not available", flush=True)
         return
-    
+
     # if torch.distributed.is_initialized():
     #     rank = torch.distributed.get_rank()
     # else:
     #     rank = 0
-        
+
     # if rank != 0:
     #     return
-    
+
     try:
         pynvml.nvmlInit()
         count = pynvml.nvmlDeviceGetCount()
@@ -178,10 +180,12 @@ def print_gpu_memory_usage():
             handle = pynvml.nvmlDeviceGetHandleByIndex(i)
             info = pynvml.nvmlDeviceGetMemoryInfo(handle)
             print(
-                f"GPU {i}: {info.used/1024**3:.2f} GiB used / {info.total/1024**3:.2f} GiB total"
+                f"[GPU {i}: {info.used/1024**3:.2f} GiB used / {info.total/1024**3:.2f} GiB total",
+                flush=True,
             )
+        sys.stdout.flush()
     except pynvml.NVMLError as e:
-        print(f"NVML error: {e}. Are NVIDIA drivers/NVML installed and a GPU present?")
+        print(f"NVML error: {e}. Are NVIDIA drivers/NVML installed and a GPU present?", flush=True)
     finally:
         try:
             pynvml.nvmlShutdown()

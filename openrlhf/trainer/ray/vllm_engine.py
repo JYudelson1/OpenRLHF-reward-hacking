@@ -129,10 +129,10 @@ class LLMRayActor:
         self.async_event_loop.run_until_complete(self.llm_engine.sleep(level=level))
 
     def wake_up(self):
-        print("LLMRayActor.wake_up called")
+        print("LLMRayActor.wake_up called", flush=True)
         print_gpu_memory_usage()
         self.async_event_loop.run_until_complete(self.llm_engine.wake_up())
-        print("LLMRayActor.wake_up finished")
+        print("LLMRayActor.wake_up finished", flush=True)
         print_gpu_memory_usage()
 
     def reset_rollout_cache(self) -> None:
