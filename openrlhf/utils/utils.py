@@ -4,6 +4,8 @@ from typing import List
 from datasets import interleave_datasets, load_dataset, load_from_disk, concatenate_datasets
 from transformers import AutoTokenizer
 
+import torch
+
 
 def get_tokenizer(pretrain, model, padding_side="left", strategy=None, use_fast=True):
     tokenizer = AutoTokenizer.from_pretrained(pretrain, trust_remote_code=True, use_fast=use_fast)
@@ -153,3 +155,25 @@ def convert_token_to_id(token, tokenizer):
         return token[0]
     else:
         raise ValueError("token should be int or str")
+
+
+def print_gpu_memory_usage():
+    if not torch.cuda.is_available():
+        print("CUDA is not available")
+        return
+    
+    if torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = 0
+        
+    if rank != 0:
+        return
+    
+    for i in range(torch.cuda.device_count()):
+        device = torch.device(f'cuda:{i}')
+        allocated = torch.cuda.memory_allocated(device) / 1024**3  # GB
+        cached = torch.cuda.memory_reserved(device) / 1024**3      # GB
+        total = torch.cuda.get_device_properties(device).total_memory / 1024**3  # GB
+        
+        print(f"GPU {i}: {allocated:.2f}GB allocated, {cached:.2f}GB cached, {total:.2f}GB total")

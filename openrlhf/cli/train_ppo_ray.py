@@ -16,7 +16,7 @@ from openrlhf.trainer.ray import (
     RewardModelRayActor,
     create_vllm_engines,
 )
-from openrlhf.utils import get_strategy
+from openrlhf.utils import get_strategy, print_gpu_memory_usage
 
 
 # NOTE: reward function for multiple reward models, replace this with your own function!
@@ -93,6 +93,8 @@ def train(args):
                 f"and {args.vllm_num_engines * args.vllm_tensor_parallel_size}"
             )
 
+        print_gpu_memory_usage()
+        print("Creating vLLM engines")
         vllm_engines = create_vllm_engines(
             args.vllm_num_engines,
             args.vllm_tensor_parallel_size,
@@ -119,7 +121,9 @@ def train(args):
             compact_filtering=args.compact_filtering,
             filter_max_steps=args.filter_max_steps,
         )
+        print_gpu_memory_usage()
 
+    print("Creating actor model")
     actor_model = PPORayActorGroup(
         args.actor_num_nodes,
         args.actor_num_gpus_per_node,
@@ -127,10 +131,12 @@ def train(args):
         pg=pg,
         num_gpus_per_actor=0.2 if pg else 1,
     )
-
+    print_gpu_memory_usage()
+    
     if args.init_kl_coef == 0:
         ref_model = None
     else:
+        print("Creating ref model")
         ref_model = PPORayActorGroup(
             args.ref_num_nodes,
             args.ref_num_gpus_per_node,
@@ -138,7 +144,7 @@ def train(args):
             pg=pg,
             num_gpus_per_actor=0.2 if pg else 1,
         )
-
+        print_gpu_memory_usage()
     if not args.colocate_all_models:
         pg = None
 
@@ -192,7 +198,8 @@ def train(args):
             refs.extend(reward_model.async_init_model_from_pretrained(strategy, reward_pretrain))
 
     ray.get(refs)
-
+    print("Finished init model from pretrained")
+    print_gpu_memory_usage()
     if args.critic_pretrain:
         # critic scheduler initialization depends on max_step, so we have to init critic after actor
         # TODO: use first reward model as critic model

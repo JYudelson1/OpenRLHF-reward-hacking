@@ -28,6 +28,7 @@ from openrlhf.utils.deepspeed.deepspeed_utils import offload_deepspeed_states, r
 from openrlhf.utils.distributed_sampler import DistributedSampler
 from openrlhf.utils.distributed_util import init_process_group
 from openrlhf.utils import AgentInterface
+from openrlhf.utils import print_gpu_memory_usage
 
 from .launcher import BasePPORole
 from .utils import get_physical_gpu_id
@@ -225,7 +226,11 @@ class ActorPPOTrainer(BasePPOTrainer):
                     self.replay_buffer.normalize(
                         self.strategy, "advantages", divide_by_std=not self.args.no_advantage_std_norm
                     )
+                print("Memory before ppo_train")
+                print_gpu_memory_usage()
                 status = self.ppo_train(steps)
+                print("Memory after ppo_train")
+                print_gpu_memory_usage()
                 self.replay_buffer.clear()
 
                 if "kl" in status:
@@ -246,7 +251,11 @@ class ActorPPOTrainer(BasePPOTrainer):
 
     def ppo_train(self, global_steps):
         # 1. ensure all experience makers done
+        print("Flushing experience maker")
+        print_gpu_memory_usage()
         self.experience_maker.flush()
+        print("Flushed experience maker")
+        print_gpu_memory_usage()
         torch.distributed.barrier()
         status = {}
 
@@ -276,8 +285,12 @@ class ActorPPOTrainer(BasePPOTrainer):
             if self.strategy.args.deepspeed_enable_sleep:
                 self.offload_states()
 
+            print("Emptying cache in ppo_train")
+            print_gpu_memory_usage()
             torch.cuda.empty_cache()
             deepspeed.get_accelerator().empty_cache()
+            print("Emptied cache in ppo_train")
+            print_gpu_memory_usage()
             torch.distributed.barrier()
             torch.cuda.synchronize()
 

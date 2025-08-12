@@ -1,5 +1,5 @@
 from .processor import get_processor, reward_normalization
-from .utils import blending_datasets, get_strategy, get_tokenizer
+from .utils import blending_datasets, get_strategy, get_tokenizer, print_gpu_memory_usage
 from .interface import AgentInterface, AgentConversation
 
 __all__ = [
@@ -10,4 +10,5 @@ __all__ = [
     "get_tokenizer",
     "AgentInterface",
     "AgentConversation",
+    "print_gpu_memory_usage",
 ]

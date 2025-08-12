@@ -12,7 +12,7 @@ from tqdm import tqdm
 from openrlhf.models import Actor, get_llm_for_sequence_regression
 from openrlhf.trainer.ray.utils import ray_noset_visible_devices
 from openrlhf.utils.deepspeed import DeepspeedStrategy
-
+from openrlhf.utils import print_gpu_memory_usage
 
 class DistributedTorchRayActor:
     def __init__(self, world_size, rank, master_addr, master_port):
@@ -233,6 +233,7 @@ class PPORayActorGroup:
         world_size = self._num_nodes * self._num_gpus_per_node
 
         # Use placement group to lock resources for models of same type
+        print_gpu_memory_usage()
         if self._num_gpus_per_node > 1 and pg is None:
             bundles = [{"GPU": 1, "CPU": 1} for _ in range(self._num_nodes * self._num_gpus_per_node)]
             if self._resources:
@@ -258,6 +259,7 @@ class PPORayActorGroup:
                 resources=self._resources,
             ).remote(world_size, 0, None, None)
         self._actor_handlers = [master_actor]
+        print_gpu_memory_usage()
 
         # Create worker actors
         if world_size > 1:
