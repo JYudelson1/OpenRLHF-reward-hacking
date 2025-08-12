@@ -1144,8 +1144,7 @@ def combine_reward_and_environment_is(logs: dict[str, Any]) -> None:
         logs[key] = logs[key] / logs[environment_is_key]
         del logs[environment_is_key]
 
-def create_actor_with_zero3(pretrain, strategy, **kwargs):
-    ds_config = strategy.get_ds_train_config(is_actor=True)
+def create_actor_with_zero3(pretrain, strategy, ds_config, **kwargs):
     
     # Only use Init context for ZeRO-3
     if ds_config.get("zero_optimization", {}).get("stage", 0) == 3:
