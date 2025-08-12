@@ -944,25 +944,24 @@ class ActorModelRayActor(BasePPORole):
             strategy.print(f"Loaded the checkpoint: {ckpt_path}, consumed_samples: {self.consumed_samples}")
             
         # Debug memory usage
-        if torch.distributed.get_rank() == 0:
-            import gc
-    
-            # Find all tensors in memory
-            tensors = []
-            for obj in gc.get_objects():
-                if torch.is_tensor(obj) and obj.is_cuda:
-                    tensors.append((obj.numel() * obj.element_size(), obj.shape, obj.dtype))
-            
-            # Sort by size
-            tensors.sort(reverse=True, key=lambda x: x[0])
-            
-            print(f"\n=== Top 10 largest tensors ===")
-            total_size = 0
-            for size, shape, dtype in tensors[:10]:
-                size_gb = size / 1e9
-                total_size += size_gb
-                print(f"  {size_gb:.3f} GB: shape={shape}, dtype={dtype}")
-            print(f"Total of top 10: {total_size:.2f} GB")
+        import gc
+
+        # Find all tensors in memory
+        tensors = []
+        for obj in gc.get_objects():
+            if torch.is_tensor(obj) and obj.is_cuda:
+                tensors.append((obj.numel() * obj.element_size(), obj.shape, obj.dtype))
+        
+        # Sort by size
+        tensors.sort(reverse=True, key=lambda x: x[0])
+        
+        print(f"\n(Rank {torch.distributed.get_rank()}) === Top 10 largest tensors ===")
+        total_size = 0
+        for size, shape, dtype in tensors[:10]:
+            size_gb = size / 1e9
+            total_size += size_gb
+            print(f"(Rank {torch.distributed.get_rank()})  {size_gb:.3f} GB: shape={shape}, dtype={dtype}")
+        print(f"(Rank {torch.distributed.get_rank()}) Total of top 10: {total_size:.2f} GB")
 
         # initial offload
         if strategy.args.deepspeed_enable_sleep:
