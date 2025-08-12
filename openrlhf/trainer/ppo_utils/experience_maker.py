@@ -16,7 +16,7 @@ from openrlhf.models.ring_attn_utils import pad_sequences, unpad_sequences
 from openrlhf.models.utils import compute_approx_kl, compute_reward, masked_mean, unpacking_samples
 from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.remote_rm_utils import remote_rm_fn_ray
-from openrlhf.utils import AgentConversation
+from openrlhf.utils import print_gpu_memory_usage
 
 logger = init_logger(__name__)
 
@@ -888,6 +888,8 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         assert len(all_prompts) == len(all_full_data) == len(all_solutions)
 
         # Distribute requests to engines and collect responses to outputs
+        print("About to call vLLM")
+        print_gpu_memory_usage()
         all_outputs = self._generate_vllm_bare(
             rank=rank,
             world_size=world_size,
@@ -922,6 +924,9 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         # for i, llm in enumerate(llms):
         #     all_output_refs.append(llm.get_responses.remote(rank))
         # all_outputs = sum(ray.get(all_output_refs), [])
+        
+        print("Finished calling vLLM")
+        print_gpu_memory_usage()
 
         samples_list = []
         for i in range(0, len(all_outputs), args.micro_rollout_batch_size):
