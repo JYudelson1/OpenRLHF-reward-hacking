@@ -210,9 +210,15 @@ class DeepspeedStrategy(ABC):
     def _ds_init_train_model(self, model, optim, scheduler):
         is_actor = isinstance(model, Actor)
         ds_config = self.get_ds_train_config(is_actor)
+        
+        inner_model = model.model if is_actor else model
+        params = filter(lambda p: p.requires_grad, inner_model.parameters())
+        
+        print(f"Init-ing at local rank {int(os.environ.get('LOCAL_RANK', '-1'))}")
 
         engine, optim, _, scheduler = deepspeed.initialize(
-            model=model.model if is_actor else model,
+            model=inner_model,
+            model_parameters=params,
             optimizer=optim,
             lr_scheduler=scheduler,
             config=ds_config,

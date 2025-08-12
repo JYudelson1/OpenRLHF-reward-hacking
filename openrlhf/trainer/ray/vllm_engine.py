@@ -347,6 +347,8 @@ def create_vllm_engines(
         bundles = [{"GPU": 1, "CPU": cpu_per_actor} for _ in range(num_engines * tensor_parallel_size)]
         shared_pg = placement_group(bundles, strategy="PACK")
         ray.get(shared_pg.ready())
+        
+    print(f"Rank {torch.distributed.get_rank()} creating engines")
 
     for i in range(num_engines):
         bundle_indices = None
