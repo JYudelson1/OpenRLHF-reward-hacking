@@ -108,7 +108,10 @@ class AsyncVLLM(AsyncLLMInterface):
             self.llm_engine, last_prompt_messages, add_generation_prompt=True, system_prompt_size=system_prompt_size
         )
 
-        num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
+        if conversation.n_tokens == 0:
+            num_removed_tokens = 0
+        else:   
+            num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
 
         output_tokens = output.outputs[0].token_ids
 
