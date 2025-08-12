@@ -5,6 +5,7 @@ from datasets import interleave_datasets, load_dataset, load_from_disk, concaten
 from transformers import AutoTokenizer
 
 import torch
+import pynvml
 
 
 def get_tokenizer(pretrain, model, padding_side="left", strategy=None, use_fast=True):
@@ -162,9 +163,27 @@ def print_gpu_memory_usage():
         print("CUDA is not available")
         return
     
-    device = torch.cuda.current_device()  # Gets the current GPU device
-    allocated = torch.cuda.memory_allocated(device) / 1024**3  # GB
-    cached = torch.cuda.memory_reserved(device) / 1024**3      # GB
-    total = torch.cuda.get_device_properties(device).total_memory / 1024**3  # GB
+    if torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = 0
+        
+    if rank != 0:
+        return
     
-    print(f"GPU {device}: {allocated:.2f}GB allocated, {cached:.2f}GB cached, {total:.2f}GB total")
+    try:
+        pynvml.nvmlInit()
+        count = pynvml.nvmlDeviceGetCount()
+        for i in range(count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            print(
+                f"GPU {i}: {info.used/1024**3:.2f} GiB used / {info.total/1024**3:.2f} GiB total"
+            )
+    except pynvml.NVMLError as e:
+        print(f"NVML error: {e}. Are NVIDIA drivers/NVML installed and a GPU present?")
+    finally:
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
