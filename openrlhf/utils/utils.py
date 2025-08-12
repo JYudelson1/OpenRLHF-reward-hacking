@@ -177,6 +177,7 @@ def print_gpu_memory_usage():
         print("\n\n\n\n\n\n\n\n")
         pynvml.nvmlInit()
         count = pynvml.nvmlDeviceGetCount()
+        print(f"count: {count}")
         for i in range(count):
             handle = pynvml.nvmlDeviceGetHandleByIndex(i)
             info = pynvml.nvmlDeviceGetMemoryInfo(handle)
