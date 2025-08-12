@@ -61,10 +61,11 @@ class Actor(nn.Module):
 
             # Note: dschf is defined in function scope to avoid global effects
             # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
-            # if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            #     dschf = HfDeepSpeedConfig(ds_config)
-            # else:
-            #     dschf = None
+            if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+                dschf = HfDeepSpeedConfig(ds_config)
+                print(dschf)
+            else:
+                dschf = None
 
             if load_in_4bit:
                 assert bf16, "we only support bnb_4bit_compute_dtype = bf16"
