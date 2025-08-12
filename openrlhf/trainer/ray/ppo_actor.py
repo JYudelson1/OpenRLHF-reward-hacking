@@ -942,10 +942,40 @@ class ActorModelRayActor(BasePPORole):
             _, states = strategy.load_ckpt(self.actor.model, ckpt_path)
             self.consumed_samples = states["consumed_samples"]
             strategy.print(f"Loaded the checkpoint: {ckpt_path}, consumed_samples: {self.consumed_samples}")
+            
+        # Debug memory usage
+        if torch.distributed.get_rank() == 0:
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
+            
+            print(f"\n=== Memory Debug ===")
+            print(f"Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+            print(f"Reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
+            
+            # Check parameter memory
+            param_memory = sum(p.numel() * p.element_size() for p in self.actor.model.parameters())
+            print(f"Actor params size: {param_memory / 1e9:.2f} GB")
+            
+            # Check what deepspeed thinks
+            if hasattr(self.actor.model, 'module'):
+                actual_model = self.actor.model.module
+            else:
+                actual_model = self.actor.model
+            
+            print(f"Model has {sum(p.numel() for p in actual_model.parameters()) / 1e9:.2f}B parameters")
+            
+            # Check optimizer state memory
+            if hasattr(self.actor_optim, 'state_dict'):
+                optim_state = self.actor_optim.state_dict()
+                if 'state' in optim_state and optim_state['state']:
+                    print(f"Optimizer has {len(optim_state['state'])} parameter groups with states")
 
         # initial offload
         if strategy.args.deepspeed_enable_sleep:
             offload_deepspeed_states(self.actor.model)
+            
+        print("WE JUST OFFLOADED")
 
     def prepare_datasets(self):
         strategy = self.strategy
