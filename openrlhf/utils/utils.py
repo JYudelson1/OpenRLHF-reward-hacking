@@ -163,13 +163,13 @@ def print_gpu_memory_usage():
         print("CUDA is not available")
         return
     
-    if torch.distributed.is_initialized():
-        rank = torch.distributed.get_rank()
-    else:
-        rank = 0
+    # if torch.distributed.is_initialized():
+    #     rank = torch.distributed.get_rank()
+    # else:
+    #     rank = 0
         
-    if rank != 0:
-        return
+    # if rank != 0:
+    #     return
     
     try:
         pynvml.nvmlInit()
