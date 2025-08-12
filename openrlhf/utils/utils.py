@@ -7,6 +7,9 @@ from transformers import AutoTokenizer
 import torch
 import pynvml
 import sys
+import subprocess
+import multiprocessing
+import socket
 
 
 def get_tokenizer(pretrain, model, padding_side="left", strategy=None, use_fast=True):
@@ -160,37 +163,111 @@ def convert_token_to_id(token, tokenizer):
         raise ValueError("token should be int or str")
 
 
+def _collect_nvml_memory_snapshots():
+    """Collect (index, used_bytes, total_bytes) per GPU using NVML.
+    This function is designed to run in a separate process to avoid hangs.
+    """
+    import pynvml as _p
+
+    _p.nvmlInit()
+    count = _p.nvmlDeviceGetCount()
+    snapshots = []
+    for i in range(count):
+        handle = _p.nvmlDeviceGetHandleByIndex(i)
+        info = _p.nvmlDeviceGetMemoryInfo(handle)
+        snapshots.append((i, int(info.used), int(info.total)))
+    _p.nvmlShutdown()
+    return snapshots
+
+
+def _try_nvml_with_timeout(timeout_seconds: float = 3.0):
+    """Run NVML collection in a separate process with a timeout."""
+    ctx = multiprocessing.get_context("spawn")
+    queue: multiprocessing.Queue = ctx.Queue()
+
+    def _worker(q: multiprocessing.Queue):
+        try:
+            q.put({"ok": True, "data": _collect_nvml_memory_snapshots()})
+        except Exception as e:  # noqa: BLE001
+            q.put({"ok": False, "error": repr(e)})
+
+    proc = ctx.Process(target=_worker, args=(queue,), daemon=True)
+    proc.start()
+    proc.join(timeout_seconds)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join()
+        return {"ok": False, "error": "timeout"}
+
+    if not queue.empty():
+        return queue.get()
+
+    return {"ok": False, "error": "no-result"}
+
+
+def _fallback_nvidia_smi(timeout_seconds: float = 3.0):
+    """Use nvidia-smi to collect memory usage per GPU."""
+    try:
+        cmd = [
+            "nvidia-smi",
+            "--query-gpu=memory.used,memory.total",
+            "--format=csv,noheader,nounits",
+        ]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout_seconds
+        )
+        if result.returncode != 0:
+            return {"ok": False, "error": result.stderr.strip()}
+        lines = []
+        for idx, line in enumerate(result.stdout.strip().splitlines()):
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 2:
+                used_mib = float(parts[0])
+                total_mib = float(parts[1])
+                # Convert MiB to bytes to keep same units as NVML path
+                lines.append((idx, int(used_mib * 1024 * 1024), int(total_mib * 1024 * 1024)))
+        return {"ok": True, "data": lines}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": repr(e)}
+
+
 def print_gpu_memory_usage():
     if not torch.cuda.is_available():
         print("CUDA is not available", flush=True)
         return
 
-    # if torch.distributed.is_initialized():
-    #     rank = torch.distributed.get_rank()
-    # else:
-    #     rank = 0
-
-    # if rank != 0:
-    #     return
-
+    # Compose a unique prefix to avoid Ray log deduplication
+    hostname = socket.gethostname()
+    pid = os.getpid()
     try:
-        print("\n\n\n\n\n\n\n\n")
-        pynvml.nvmlInit()
-        count = pynvml.nvmlDeviceGetCount()
-        print(f"count: {count}")
-        for i in range(count):
-            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else None
+    except Exception:  # noqa: BLE001
+        rank = None
+    prefix_parts = [f"host={hostname}", f"pid={pid}"]
+    if rank is not None:
+        prefix_parts.append(f"rank={rank}")
+    prefix = " ".join(prefix_parts)
+
+    # Try NVML in a subprocess with timeout to avoid hangs
+    nvml_result = _try_nvml_with_timeout(timeout_seconds=3.0)
+    if nvml_result.get("ok"):
+        for i, used_bytes, total_bytes in nvml_result["data"]:
             print(
-                f"[GPU {i}: {info.used/1024**3:.2f} GiB used / {info.total/1024**3:.2f} GiB total",
+                f"[{prefix}] GPU {i}: {used_bytes/1024**3:.2f} GiB used / {total_bytes/1024**3:.2f} GiB total",
                 flush=True,
             )
-        print("\n\n\n\n\n\n\n\n")
         sys.stdout.flush()
-    except pynvml.NVMLError as e:
-        print(f"NVML error: {e}. Are NVIDIA drivers/NVML installed and a GPU present?", flush=True)
-    finally:
-        try:
-            pynvml.nvmlShutdown()
-        except Exception:
-            pass
+        return
+
+    # Fallback to nvidia-smi if NVML fails or times out
+    print(f"[{prefix}] NVML unavailable ({nvml_result.get('error')}); falling back to nvidia-smi", flush=True)
+    smi_result = _fallback_nvidia_smi(timeout_seconds=3.0)
+    if smi_result.get("ok"):
+        for i, used_bytes, total_bytes in smi_result["data"]:
+            print(
+                f"[{prefix}] GPU {i}: {used_bytes/1024**3:.2f} GiB used / {total_bytes/1024**3:.2f} GiB total",
+                flush=True,
+            )
+    else:
+        print(f"[{prefix}] nvidia-smi unavailable ({smi_result.get('error')})", flush=True)
+    sys.stdout.flush()
