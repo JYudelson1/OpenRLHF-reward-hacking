@@ -945,31 +945,23 @@ class ActorModelRayActor(BasePPORole):
             
         # Debug memory usage
         if torch.distributed.get_rank() == 0:
-            import gc
-            gc.collect()
-            torch.cuda.empty_cache()
-            
             print(f"\n=== Memory Debug ===")
             print(f"Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
-            print(f"Reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
             
-            # Check parameter memory
-            param_memory = sum(p.numel() * p.element_size() for p in self.actor.model.parameters())
-            print(f"Actor params size: {param_memory / 1e9:.2f} GB")
+            # The actual DeepSpeed engine is self.actor.model now
+            print(f"Type of self.actor: {type(self.actor)}")
+            print(f"Type of self.actor.model: {type(self.actor.model)}")
             
-            # Check what deepspeed thinks
+            # For DeepSpeed engine, parameters are accessed differently
             if hasattr(self.actor.model, 'module'):
-                actual_model = self.actor.model.module
-            else:
-                actual_model = self.actor.model
+                # DeepSpeed wrapped model
+                actual_params = self.actor.model.module.parameters()
+                param_memory = sum(p.numel() * p.element_size() for p in actual_params)
+                print(f"Wrapped model params: {param_memory / 1e9:.2f} GB")
             
-            print(f"Model has {sum(p.numel() for p in actual_model.parameters()) / 1e9:.2f}B parameters")
-            
-            # Check optimizer state memory
-            if hasattr(self.actor_optim, 'state_dict'):
-                optim_state = self.actor_optim.state_dict()
-                if 'state' in optim_state and optim_state['state']:
-                    print(f"Optimizer has {len(optim_state['state'])} parameter groups with states")
+            # Check what stage we're in
+            if hasattr(self.actor.model, 'zero_optimization_stage'):
+                print(f"ZeRO stage: {self.actor.model.zero_optimization_stage()}")
 
         # initial offload
         if strategy.args.deepspeed_enable_sleep:
@@ -1176,10 +1168,11 @@ def combine_reward_and_environment_is(logs: dict[str, Any]) -> None:
 
 def create_actor_with_zero3(pretrain, strategy, ds_config, **kwargs):
     
-    # Only use Init context for ZeRO-3
     if ds_config.get("zero_optimization", {}).get("stage", 0) == 3:
+        print(f"[RANK {torch.distributed.get_rank()}] Using ZeRO-3 Init context")
         with deepspeed.zero.Init(dtype=torch.bfloat16 if strategy.args.bf16 else torch.float16,
                                  config_dict_or_path=ds_config):
             return Actor(pretrain, ds_config=ds_config, **kwargs)
     else:
+        print(f"[RANK {torch.distributed.get_rank()}] NOT using ZeRO-3 Init (stage={ds_config.get('zero_optimization', {}).get('stage', 0)})")
         return Actor(pretrain, ds_config=ds_config, **kwargs)
