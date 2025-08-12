@@ -855,8 +855,9 @@ class ActorModelRayActor(BasePPORole):
 
         self._setup_distributed(strategy)
 
-        actor = Actor(
+        actor = create_actor_with_zero3(
             pretrain,
+            strategy=strategy,
             use_flash_attention_2=strategy.args.flash_attn,
             bf16=strategy.args.bf16,
             load_in_4bit=strategy.args.load_in_4bit,
@@ -877,8 +878,9 @@ class ActorModelRayActor(BasePPORole):
         )
 
         if args.enable_ema:
-            ema_model = Actor(
+            ema_model = create_actor_with_zero3(
                 pretrain,
+                strategy=strategy,
                 use_flash_attention_2=strategy.args.flash_attn,
                 bf16=strategy.args.bf16,
                 load_in_4bit=strategy.args.load_in_4bit,
@@ -1141,3 +1143,14 @@ def combine_reward_and_environment_is(logs: dict[str, Any]) -> None:
         environment_is_key = "environment_is/" + key.removeprefix("reward/")
         logs[key] = logs[key] / logs[environment_is_key]
         del logs[environment_is_key]
+
+def create_actor_with_zero3(pretrain, strategy, **kwargs):
+    ds_config = strategy.get_ds_train_config(is_actor=True)
+    
+    # Only use Init context for ZeRO-3
+    if ds_config.get("zero_optimization", {}).get("stage", 0) == 3:
+        with deepspeed.zero.Init(dtype=torch.bfloat16 if strategy.args.bf16 else torch.float16,
+                                 config_dict_or_path=ds_config):
+            return Actor(pretrain, ds_config=ds_config, **kwargs)
+    else:
+        return Actor(pretrain, ds_config=ds_config, **kwargs)
