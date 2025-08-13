@@ -77,6 +77,7 @@ class AsyncVLLM(AsyncLLMInterface):
         stop_strings: list[str] | None,
         compact_filtering: bool = False,
         system_prompt_size: int = 0,
+        tools: list[dict[str, Any]] | None = None,
     ) -> None:
         sampling_params = self.sampling_params
         if stop_strings is not None:
@@ -85,7 +86,7 @@ class AsyncVLLM(AsyncLLMInterface):
             sampling_params.include_stop_str_in_output = True
 
         output, truncated_tokens = await _vllm_chat_with_truncation(
-            llm_engine=self.llm_engine, messages=conversation.messages, sampling_params=sampling_params
+            llm_engine=self.llm_engine, messages=conversation.messages, sampling_params=sampling_params, tools=tools
         )
         was_truncated = truncated_tokens > 0
 
@@ -370,6 +371,9 @@ class AgentInterface(ABC):
 
     async def get_extra_metrics(self, messages: list[Message], state: AgentState) -> dict[str, float]:
         return {}
+    
+    def get_tools(self, state: AgentState) -> list[dict[str, Any]]:
+        return []
 
     async def get_reward_in_eval(self, messages: List[Message], state: AgentState) -> Reward | None:
         """Get the eval reward for the conversation. Used if the train reward may reflect a different thing than what we'd like to measure"""
@@ -507,6 +511,7 @@ class AgentInterface(ABC):
                 stop_strings=self.stop_strings,
                 compact_filtering=self.compact_filtering,
                 system_prompt_size=system_prompt_size,
+                tools=self.get_tools(state),
             )
 
             if conversation.was_truncated:
