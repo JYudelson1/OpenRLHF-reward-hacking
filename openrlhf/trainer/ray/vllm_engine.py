@@ -2,7 +2,7 @@ from itertools import pairwise
 import asyncio
 import json
 import os
-from time import perf_counter
+from time import perf_counter, time
 import queue
 from collections import defaultdict
 from typing import Any, List
@@ -421,6 +421,9 @@ def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_o
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
     torch.cuda.synchronize()
+    
+    if method_name == "sleep":
+        time.sleep(5)
 
 def _batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
     import torch
