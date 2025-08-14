@@ -8,11 +8,12 @@ from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora import LoraLayer
 from torch.nn import functional as F
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer
-from transformers.integrations.deepspeed import HfDeepSpeedConfig
+from transformers.integrations.deepspeed import HfDeepSpeedConfig, deepspeed_config
 
 from .ring_attn_utils import convert_ring_attn_params
 from .utils import log_probs_from_logits, reset_position_ids
 
+from openrlhf.utils import check_meta_tensors
 
 class Actor(nn.Module):
     """
@@ -63,7 +64,7 @@ class Actor(nn.Module):
             # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
             if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
                 dschf = HfDeepSpeedConfig(ds_config)
-                print(dschf)
+                print(deepspeed_config())
             else:
                 dschf = None
 
@@ -93,6 +94,7 @@ class Actor(nn.Module):
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
             )
+            check_meta_tensors(self.model, "After model creation")
             # self.tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model)
 
             # LoRA

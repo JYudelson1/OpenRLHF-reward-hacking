@@ -28,7 +28,7 @@ from openrlhf.utils.deepspeed.deepspeed_utils import offload_deepspeed_states, r
 from openrlhf.utils.distributed_sampler import DistributedSampler
 from openrlhf.utils.distributed_util import init_process_group
 from openrlhf.utils import AgentInterface
-from openrlhf.utils import print_gpu_memory_usage
+from openrlhf.utils import print_gpu_memory_usage, check_meta_tensors
 
 from .launcher import BasePPORole
 from .utils import get_physical_gpu_id
@@ -1172,7 +1172,9 @@ def create_actor_with_zero3(pretrain, strategy, ds_config, **kwargs):
         print(f"[RANK {torch.distributed.get_rank()}] Using ZeRO-3 Init context")
         with deepspeed.zero.Init(dtype=torch.bfloat16 if strategy.args.bf16 else torch.float16,
                                  config_dict_or_path=ds_config):
-            return Actor(pretrain, ds_config=ds_config, **kwargs)
+            actor =  Actor(pretrain, ds_config=ds_config, **kwargs)
+            check_meta_tensors(actor.model, "After Actor init")
+            return actor
     else:
         print(f"[RANK {torch.distributed.get_rank()}] NOT using ZeRO-3 Init (stage={ds_config.get('zero_optimization', {}).get('stage', 0)})")
         return Actor(pretrain, ds_config=ds_config, **kwargs)

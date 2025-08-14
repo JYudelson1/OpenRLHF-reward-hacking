@@ -273,3 +273,17 @@ def print_gpu_memory_usage():
     else:
         print(f"[{prefix}] nvidia-smi unavailable ({smi_result.get('error')})", flush=True)
     sys.stdout.flush()
+    
+def check_meta_tensors(model, location):
+    meta_count = 0
+    real_count = 0
+    for name, param in model.named_parameters():
+        if param.is_meta:
+            meta_count += 1
+            if meta_count <= 3:  # Print first few
+                print(f"[{location}] Meta tensor: {name}, shape={param.shape}")
+        else:
+            real_count += 1
+
+    print(f"[{location}] Meta: {meta_count}, Real: {real_count}")
+    return meta_count, real_count

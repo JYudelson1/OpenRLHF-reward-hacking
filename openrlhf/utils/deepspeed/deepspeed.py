@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader
 from openrlhf.models import Actor
 from openrlhf.models.ring_attn_utils import get_ring_attn_group, set_ring_attn_group
 from openrlhf.utils.distributed_sampler import DistributedSampler
+from openrlhf.utils import check_meta_tensors
 
 from .deepspeed_utils import (
     _z3_params_to_fetch,
@@ -214,7 +215,17 @@ class DeepspeedStrategy(ABC):
         inner_model = model.model if is_actor else model
         params = filter(lambda p: p.requires_grad, inner_model.parameters())
         
+        # Right BEFORE deepspeed.initialize in strategy.prepare
+        print(f"[RANK {torch.distributed.get_rank()}] Before DeepSpeed init:")
+        # Count parameters
+        param_count = sum(p.numel() for p in inner_model.parameters())
+        print(f"  Model has {param_count / 1e9:.2f}B parameters")
+        print(f"  Model type: {type(inner_model)}")
+        print(f"  First param name: {next(inner_model.named_parameters())[0] if param_count > 0 else 'NO PARAMS'}")
+        
         print(f"Init-ing at local rank {int(os.environ.get('LOCAL_RANK', '-1'))}")
+        
+        check_meta_tensors(inner_model, "Before DS init")
 
         engine, optim, _, scheduler = deepspeed.initialize(
             model=inner_model,
