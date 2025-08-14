@@ -1,5 +1,5 @@
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-
+import deepspeed
 
 def get_train_ds_config(
     offload,
@@ -125,14 +125,23 @@ def offload_deepspeed_states(model, pin_memory=True, non_blocking=True):
     # if zero_stage == 3 and not adam_offload:
     import torch
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum, OffloadStateTypeEnum
+    
+    offload_state_types = [
+        OffloadStateTypeEnum.optim_states,
+        OffloadStateTypeEnum.contiguous_grad_buffer,
+        OffloadStateTypeEnum.hp_params,
+    ]
+
+    if deepspeed.__version__ >= "0.16.5":
+        # These offload types are fixed in https://github.com/deepspeedai/DeepSpeed/pull/7050
+        offload_state_types += [
+            OffloadStateTypeEnum.lp_grads,
+            OffloadStateTypeEnum.lp_params,
+        ]
 
     model.optimizer.offload_states(
         include=[
-            OffloadStateTypeEnum.optim_states,
-            OffloadStateTypeEnum.contiguous_grad_buffer,
-            OffloadStateTypeEnum.hp_params,
-            # OffloadStateTypeEnum.lp_grads,
-            # OffloadStateTypeEnum.lp_params, # Not released yet, fixed in https://github.com/deepspeedai/DeepSpeed/pull/7050
+            offload_state_types
         ],
         device=OffloadDeviceEnum.cpu,
         pin_memory=pin_memory,

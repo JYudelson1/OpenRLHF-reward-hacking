@@ -248,7 +248,7 @@ class DeepspeedStrategy(ABC):
     def get_ds_train_config(self, is_actor):
         # DS Config
         ds_config = get_train_ds_config(
-            offload=False,
+            offload=True,
             adam_offload=self.adam_offload,
             stage=self.stage,
             bf16=self.bf16,
