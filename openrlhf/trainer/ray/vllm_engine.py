@@ -418,7 +418,8 @@ def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_o
     """
     
     _batch_vllm_engine_call(engines, method_name, *args, rank_0_only=rank_0_only, **kwargs)
-    torch.distributed.barrier()
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
     torch.cuda.synchronize()
 
 def _batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
