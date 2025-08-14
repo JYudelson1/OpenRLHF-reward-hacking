@@ -416,6 +416,12 @@ def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_o
     Returns:
         List of results from ray.get() if on rank 0, None otherwise
     """
+    
+    _batch_vllm_engine_call(engines, method_name, *args, rank_0_only=rank_0_only, **kwargs)
+    torch.distributed.barrier()
+    torch.cuda.synchronize()
+
+def _batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
     import torch
 
     if rank_0_only and torch.distributed.get_rank() != 0:
