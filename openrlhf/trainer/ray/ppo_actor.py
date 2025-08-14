@@ -283,7 +283,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             status.update(self.ppo_train_actor(global_steps))
 
             if self.strategy.args.deepspeed_enable_sleep:
-                self.offload_states()
+                self.offload_states(non_blocking=False)
 
             print("Emptying cache in ppo_train")
             print_gpu_memory_usage()
@@ -806,8 +806,9 @@ class ActorPPOTrainer(BasePPOTrainer):
     def reload_states(self):
         reload_deepspeed_states(self.actor.model)
 
-    def offload_states(self):
-        offload_deepspeed_states(self.actor.model)
+    def offload_states(self, non_blocking=True):
+        offload_deepspeed_states(self.actor.model, non_blocking=non_blocking)
+        print(f"Offloaded deepspeed states")
 
     def log_rollouts_wandb(
         self, json_rollouts, episode=None, steps=None, i_experience=None, global_step=None, train_or_eval=None
