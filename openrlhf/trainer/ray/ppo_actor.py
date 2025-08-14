@@ -1168,14 +1168,4 @@ def combine_reward_and_environment_is(logs: dict[str, Any]) -> None:
         del logs[environment_is_key]
 
 def create_actor_with_zero3(pretrain, strategy, ds_config, **kwargs):
-    
-    if ds_config.get("zero_optimization", {}).get("stage", 0) == 3:
-        print(f"[RANK {torch.distributed.get_rank()}] Using ZeRO-3 Init context")
-        with deepspeed.zero.Init(dtype=torch.bfloat16 if strategy.args.bf16 else torch.float16,
-                                 config_dict_or_path=ds_config):
-            actor =  Actor(pretrain, ds_config=ds_config, **kwargs)
-            check_meta_tensors(actor.model, "After Actor init")
-            return actor
-    else:
-        print(f"[RANK {torch.distributed.get_rank()}] NOT using ZeRO-3 Init (stage={ds_config.get('zero_optimization', {}).get('stage', 0)})")
-        return Actor(pretrain, ds_config=ds_config, **kwargs)
+    return Actor(pretrain, ds_config=ds_config, **kwargs)
