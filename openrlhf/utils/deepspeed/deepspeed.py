@@ -218,7 +218,7 @@ class DeepspeedStrategy(ABC):
         # Right BEFORE deepspeed.initialize in strategy.prepare
         print(f"[RANK {torch.distributed.get_rank()}] Before DeepSpeed init:")
         # Count parameters
-        param_count = sum(p.numel() for p in inner_model.named_parameters())
+        param_count = sum(p[1].numel() for p in inner_model.named_parameters())
         print(f"  Model has {param_count / 1e9:.2f}B parameters")
         print(f"  Model type: {type(inner_model)}")
         print(f"  First param name: {next(inner_model.named_parameters())[0] if param_count > 0 else 'NO PARAMS'}")
