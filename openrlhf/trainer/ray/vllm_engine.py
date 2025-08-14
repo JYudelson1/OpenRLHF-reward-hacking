@@ -2,7 +2,8 @@ from itertools import pairwise
 import asyncio
 import json
 import os
-from time import perf_counter, time
+from time import perf_counter
+import time
 import queue
 from collections import defaultdict
 from typing import Any, List
