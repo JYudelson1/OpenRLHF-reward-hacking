@@ -348,7 +348,6 @@ def create_vllm_engines(
         shared_pg = placement_group(bundles, strategy="PACK")
         ray.get(shared_pg.ready())
         
-    print(f"Rank {torch.distributed.get_rank()} creating engines")
 
     for i in range(num_engines):
         bundle_indices = None
