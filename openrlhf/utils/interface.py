@@ -216,6 +216,7 @@ async def _vllm_chat_with_truncation(
         content_format=resolved_content_format,
     )
 
+    print(f"{tokenizer=} {conversation=} {chat_template=} {tools=} {model_config=} {add_generation_prompt=} {continue_final_message=}")
     prompt_str = apply_hf_chat_template(
         tokenizer,
         trust_remote_code=model_config.trust_remote_code,
