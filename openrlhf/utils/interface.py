@@ -266,6 +266,8 @@ async def _vllm_chat_with_truncation(
 
     assert finished_output is not None
 
+    print(f"{finished_output=})
+    
     return finished_output, num_truncated_tokens
 
 
