@@ -267,6 +267,7 @@ async def _vllm_chat_with_truncation(
 
     assert finished_output is not None
 
+    print(f"{finished_output=}")
     print(f"{tokenizer.decode(finished_output.prompt_token_ids)=}")
     
     return finished_output, num_truncated_tokens
