@@ -311,6 +311,7 @@ async def _vllm_chat_with_truncation(
 
     assert finished_output is not None
 
+    """
     print(f"{tokenizer.decode(finished_output.outputs[0].token_ids)=}")
     print(f"{finished_output.outputs[0].finish_reason=}")
     try:
@@ -323,6 +324,7 @@ async def _vllm_chat_with_truncation(
         print(f"{parsed_completion_messages=}")
     except Exception as e:
         print(f"{e=}")
+    """
     
     return finished_output, num_truncated_tokens
 
