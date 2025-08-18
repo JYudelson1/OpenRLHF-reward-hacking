@@ -313,6 +313,8 @@ async def _vllm_chat_with_truncation(
 
     print(f"{finished_output=}")
     print(f"{tokenizer.decode(finished_output.prompt_token_ids)=}")
+    parsed_completion_messages = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS).parse_messages_from_completion_tokens(finished_output.token_ids, Role.ASSISTANT)
+    print(f"{parsed_completion_messages=}")
     
     return finished_output, num_truncated_tokens
 
