@@ -261,9 +261,9 @@ async def _vllm_chat_with_truncation(
         system_message = openai_harmony.Message.from_role_and_content(
             Role.SYSTEM,
             SystemContent(
-                tools=[
-                    ToolNamespaceConfig(name="all_tools", description="all tools", tools=harmony_tools)
-                ]
+                tools={
+                    "all_tools": ToolNamespaceConfig(name="all_tools", description="all tools", tools=harmony_tools)
+                }
             )
         )
         conversation = Conversation.from_messages(
