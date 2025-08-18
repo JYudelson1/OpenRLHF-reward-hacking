@@ -1,3 +1,4 @@
+from openai_harmony import Role, ToolDescription, Message, SystemContent, ToolNamespaceConfig, Conversation, load_harmony_encoding, HarmonyEncodingName
 from abc import ABC, abstractmethod
 import os
 import asyncio
@@ -141,6 +142,7 @@ async def _vllm_chat_with_truncation(
     llm_engine: vllm.AsyncLLMEngine,
     messages: list[Message],
     sampling_params: SamplingParams,
+    use_harmony: bool,
     lora_request: Optional[LoRARequest] = None,
     chat_template: Optional[str] = None,
     chat_template_content_format: ChatTemplateContentFormatOption = "auto",
@@ -195,41 +197,78 @@ async def _vllm_chat_with_truncation(
         Also, the number of truncated tokens (Can be zero)
     """
 
-    tokenizer = await llm_engine.get_tokenizer()
     model_config = await llm_engine.get_model_config()
-    resolved_content_format = resolve_chat_template_content_format(
-        chat_template,
-        tools,
-        chat_template_content_format,
-        tokenizer,
-        model_config=model_config,
-        # trust_remote_code=model_config.trust_remote_code,
-    )
 
-    # NOTE: _parse_chat_message_content_parts() currently doesn't
-    # handle mm_processor_kwargs, since there is no implementation in
-    # the chat message parsing for it.
-    conversation, _ = parse_chat_messages(
-        messages,
-        model_config,
-        tokenizer,
-        content_format=resolved_content_format,
-    )
+    if not use_harmony:
+        tokenizer = await llm_engine.get_tokenizer()
+        resolved_content_format = resolve_chat_template_content_format(
+            chat_template,
+            tools,
+            chat_template_content_format,
+            tokenizer,
+            model_config=model_config,
+            # trust_remote_code=model_config.trust_remote_code,
+        )
 
-    print(f"{tokenizer=} {conversation=} {chat_template=} {tools=} {model_config=} {add_generation_prompt=} {continue_final_message=}")
-    prompt_str = apply_hf_chat_template(
-        tokenizer,
-        trust_remote_code=model_config.trust_remote_code,
-        conversation=conversation,
-        chat_template=chat_template,
-        tools=tools,
-        model_config=model_config,
-        add_generation_prompt=add_generation_prompt,
-        continue_final_message=continue_final_message,
-    )
-    # Special tokens are already included in chat templates so
-    # should not be added by the tokenizer in this case.
-    prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+        # NOTE: _parse_chat_message_content_parts() currently doesn't
+        # handle mm_processor_kwargs, since there is no implementation in
+        # the chat message parsing for it.
+        conversation, _ = parse_chat_messages(
+            messages,
+            model_config,
+            tokenizer,
+            content_format=resolved_content_format,
+        )
+
+        print(f"{tokenizer=} {conversation=} {chat_template=} {tools=} {model_config=} {add_generation_prompt=} {continue_final_message=}")
+        prompt_str = apply_hf_chat_template(
+            tokenizer,
+            trust_remote_code=model_config.trust_remote_code,
+            conversation=conversation,
+            chat_template=chat_template,
+            tools=tools,
+            model_config=model_config,
+            add_generation_prompt=add_generation_prompt,
+            continue_final_message=continue_final_message,
+        )
+        # Special tokens are already included in chat templates so
+        # should not be added by the tokenizer in this case.
+        prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+    else:
+        role_map = {"user": Role.USER, "system": Role.DEVELOPER, "assistant": Role.ASSISTANT}
+        assert all(set(message.keys()) == {"role", "content"} for message in messages)
+        harmony_tools = {}
+        for tool in tools:
+            assert set(tool.keys()) == {"type", "function"}
+            assert tool["type"] == "function"
+            assert set(tool["function"].keys()) == {"name", "description", "parameters"}
+            assert (
+                set(tool["function"]["parameters"].keys()) == {"type", "properties"}
+                or set(tool["function"]["parameters"].keys()) == {"type", "properties", "required"}
+            )
+            assert tool["function"]["parameters"]["type"] == "object"
+            assert tool["function"]["name"] not in harmony_tools.keys()
+            harmony_tools[tool["function"]["name"]] = ToolDescription(
+                name=tool["function"]["name"],
+                description=tool["function"]["description"],
+                parameters=tool["function"]["parameters"],
+            )
+        system_message = Message.from_role_and_content(
+            Role.SYSTEM,
+            SystemContent(
+                tools=[
+                    ToolNamespaceConfig(name="all_tools", description="all tools", tools=harmony_tools)
+                ]
+            )
+        )
+        conversation = Conversation.from_messages(
+            [system_message] + [
+                Message.from_role_and_content(role_map[message["role"]], message["content"])
+                for message in messages
+            ]
+        )
+        encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
+        prompt_token_ids = encoding.render_conversation_for_completion(conversation, Role.ASSISTANT)
 
     # Truncate the prompt if necessary
     was_truncated = (
