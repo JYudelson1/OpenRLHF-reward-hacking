@@ -1,4 +1,5 @@
-from openai_harmony import Role, ToolDescription, Message, SystemContent, ToolNamespaceConfig, Conversation, load_harmony_encoding, HarmonyEncodingName
+import openai_harmony
+from openai_harmony import Role, ToolDescription, SystemContent, ToolNamespaceConfig, Conversation, load_harmony_encoding, HarmonyEncodingName
 from abc import ABC, abstractmethod
 import os
 import asyncio
@@ -256,7 +257,7 @@ async def _vllm_chat_with_truncation(
                 description=tool["function"]["description"],
                 parameters=tool["function"]["parameters"],
             )
-        system_message = Message.from_role_and_content(
+        system_message = openai_harmony.Message.from_role_and_content(
             Role.SYSTEM,
             SystemContent(
                 tools=[
@@ -266,7 +267,7 @@ async def _vllm_chat_with_truncation(
         )
         conversation = Conversation.from_messages(
             [system_message] + [
-                Message.from_role_and_content(role_map[message["role"]], message["content"])
+                openai_harmony.Message.from_role_and_content(role_map[message["role"]], message["content"])
                 for message in messages
             ]
         )
