@@ -202,9 +202,9 @@ async def _vllm_chat_with_truncation(
     """
 
     model_config = await llm_engine.get_model_config()
+    tokenizer = await llm_engine.get_tokenizer()
 
     if not use_harmony:
-        tokenizer = await llm_engine.get_tokenizer()
         resolved_content_format = resolve_chat_template_content_format(
             chat_template,
             tools,
