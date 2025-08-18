@@ -311,6 +311,7 @@ async def _vllm_chat_with_truncation(
 
     assert finished_output is not None
 
+    print(f"{tokenizer.decode(finished_output.outputs[0].token_ids)=}")
     print(f"{finished_output.outputs[0].finish_reason=}")
     parsed_completion_messages = load_harmony_encoding(
         HarmonyEncodingName.HARMONY_GPT_OSS
