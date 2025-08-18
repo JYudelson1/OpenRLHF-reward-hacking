@@ -241,7 +241,7 @@ async def _vllm_chat_with_truncation(
     else:
         role_map = {"user": Role.USER, "system": Role.DEVELOPER, "assistant": Role.ASSISTANT}
         assert all(set(message.keys()) == {"role", "content"} for message in messages)
-        harmony_tools = {}
+        harmony_tools = []
         for tool in tools:
             assert set(tool.keys()) == {"type", "function"}
             assert tool["type"] == "function"
@@ -251,11 +251,12 @@ async def _vllm_chat_with_truncation(
                 or set(tool["function"]["parameters"].keys()) == {"type", "properties", "required"}
             )
             assert tool["function"]["parameters"]["type"] == "object"
-            assert tool["function"]["name"] not in harmony_tools.keys()
-            harmony_tools[tool["function"]["name"]] = ToolDescription(
-                name=tool["function"]["name"],
-                description=tool["function"]["description"],
-                parameters=tool["function"]["parameters"],
+            harmony_tools.append(
+                ToolDescription(
+                    name=tool["function"]["name"],
+                    description=tool["function"]["description"],
+                    parameters=tool["function"]["parameters"],
+                )
             )
         system_message = openai_harmony.Message.from_role_and_content(
             Role.SYSTEM,
