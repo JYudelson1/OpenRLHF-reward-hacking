@@ -50,6 +50,11 @@ def _validate_args(args):
     else:
         if args.kl_estimator not in ["k1"]:
             print(f"Recommend setting {args.kl_estimator} to 'k1' when not using KL as a loss.")
+            
+    if args.lora_alpha > 0:
+        assert args.lora_rank > 0, "Lora rank must be greater than 0 when using Lora"
+        if args.gradient_checkpointing:
+            assert args.gradient_checkpointing_use_reentrant, "Gradient checkpointing use reentrant must be True when using Lora"
 
 
 def train(args):
