@@ -664,7 +664,8 @@ class ActorPPOTrainer(BasePPOTrainer):
         if cache_reset_refs:
             ray.get(cache_reset_refs)
         torch.cuda.empty_cache()
-        torch_dist_barrier_and_cuda_sync()
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
 
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
         if global_step % args.logging_steps == 0:
