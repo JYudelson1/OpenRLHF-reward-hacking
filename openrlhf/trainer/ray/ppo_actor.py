@@ -618,7 +618,8 @@ class ActorPPOTrainer(BasePPOTrainer):
                             for engine in self.vllm_engines
                         ]
                         ray.get(refs)
-                    torch_dist_barrier_and_cuda_sync()
+                    torch.distributed.barrier()
+                    torch.cuda.synchronize()
 
     def _broadcast_to_vllm(self):
         use_prefix_cache = getattr(self.strategy.args, "enable_prefix_caching", False)
