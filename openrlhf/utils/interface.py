@@ -473,7 +473,7 @@ class AgentInterface(ABC):
                 )
             except Exception as e:
                 self.num_errors += 1
-                self.errors.append(f"Error in get_next_prompt: {str(e)}")
+                self.errors.append(f"Error in get_next_prompt: {str(e)} {traceback.format_exc()}")
                 logger.error(f"Error in get_next_prompt: {str(e)} {traceback.format_exc()}")
                 conversation.error = True
                 break
@@ -491,8 +491,8 @@ class AgentInterface(ABC):
                 is_done = await self.is_done(messages=conversation.messages, state=state)
             except Exception as e:
                 self.num_errors += 1
-                self.errors.append(f"Error in is_done: {str(e)}")
-                logger.error(f"Error in is_done: {str(e)}")
+                self.errors.append(f"Error in is_done: {str(e)} {traceback.format_exc()}")
+                logger.error(f"Error in is_done: {str(e)} {traceback.format_exc()}")
                 conversation.error = True
                 break
 
@@ -548,8 +548,8 @@ class AgentInterface(ABC):
             conversation.extra_metrics = conversation.extra_metrics | extra_metrics
         except Exception as e:
             self.num_errors += 1
-            self.errors.append(f"Error in get_extra_metrics {str(e)}")
-            logger.error(f"Error in get_extra_metrics {str(e)}")
+            self.errors.append(f"Error in get_next_prompt: {str(e)} {traceback.format_exc()}")
+            logger.error(f"Error in get_next_prompt: {str(e)} {traceback.format_exc()}")
             conversation.error = True
 
         return conversation, reward, stats, state
