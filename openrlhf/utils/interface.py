@@ -528,8 +528,8 @@ class AgentInterface(ABC):
                 reward = await self.get_reward(messages=conversation.messages, state=state)
         except Exception as e:
             self.num_errors += 1
-            self.errors.append(f"Error in get_reward: {str(e)}")
-            logger.error(f"Error in get_reward: {str(e)}")
+            self.errors.append(f"Error in get_reward: {str(e)}\nstacktrace:{traceback.format_exc()}")
+            logger.error(f"Error in get_reward: {str(e)}\nstacktrace:{traceback.format_exc()}")
             conversation.error = True
             reward = None
 
