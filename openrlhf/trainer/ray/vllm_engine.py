@@ -89,7 +89,7 @@ class LLMRayActor:
         import vllm
 
         full_determinism = kwargs.pop("full_determinism", False)
-        if full_determinism or vllm.__version__ == "0.8.2":
+        #_if full_determinism or vllm.__version__ == "0.8.2":
             # https://github.com/vllm-project/vllm/blob/effc5d24fae10b29996256eb7a88668ff7941aed/examples/offline_inference/reproduciblity.py#L11
             os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 
