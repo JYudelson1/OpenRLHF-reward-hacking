@@ -88,7 +88,6 @@ class AsyncVLLM(AsyncLLMInterface):
             sampling_params.include_stop_str_in_output = True
 
         use_harmony = "gpt-oss" in (await self.llm_engine.get_model_config()).model
-        print(f"{use_harmony=}")
         
         output, truncated_tokens = await _vllm_chat_with_truncation(
             llm_engine=self.llm_engine, messages=conversation.messages, sampling_params=sampling_params, use_harmony=use_harmony, tools=tools
