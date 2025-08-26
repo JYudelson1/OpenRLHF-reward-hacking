@@ -592,6 +592,9 @@ class AgentInterface(ABC):
             conversation.error = True
             reward = None
 
+        if isinstance(reward, int):
+            reward = float(reward)
+
         if was_truncated and self.compact_filtering:
             reward = None
         elif hit_max_steps and self.filter_max_steps:
