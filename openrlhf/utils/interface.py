@@ -203,7 +203,6 @@ async def _vllm_chat_with_truncation(
         chat_template_content_format,
         tokenizer,
         model_config=model_config,
-        trust_remote_code=model_config.trust_remote_code,
     )
 
     # NOTE: _parse_chat_message_content_parts() currently doesn't
