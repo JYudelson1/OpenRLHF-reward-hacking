@@ -6,6 +6,7 @@ import socket
 import time, datetime
 import logging
 from typing import Any, Callable, Dict, List
+from contextlib import ExitStack
 
 import deepspeed
 import ray
@@ -14,6 +15,7 @@ import torch.distributed
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers.trainer import get_scheduler
+from peft.peft_model import PeftModel
 
 from openrlhf.datasets import PromptDataset, SFTDataset
 from openrlhf.models import Actor
@@ -274,7 +276,7 @@ class ActorPPOTrainer(BasePPOTrainer):
             status.update(self.ppo_train_actor(global_steps))
 
             if self.strategy.args.deepspeed_enable_sleep:
-                self.offload_states()
+                self.offload_states(non_blocking=False)
 
             torch.cuda.empty_cache()
             deepspeed.get_accelerator().empty_cache()
@@ -509,22 +511,43 @@ class ActorPPOTrainer(BasePPOTrainer):
             else:
                 status[k] = v.float().mean().item()
         return status
+    
+    def _get_leaf_modules(self, model, use_lora):
+        leaf_modules = []
+        lora_module_keyword = ["lora_", "base_layer"]
+        
+        class IsoParamWrapper:
+            """
+            Some modules may have isolated parameters that are not in submodules.
+            This class wraps such parameters in a module so that they can be treated uniformly.
+            """
 
-    def _broadcast_to_vllm(self):
-        use_prefix_cache = getattr(self.strategy.args, "enable_prefix_caching", False)
-        cache_reset_refs = []
-        if use_prefix_cache and torch.distributed.get_rank() == 0:
-            # clear prefix cache
-            for engine in self.vllm_engines:
-                cache_reset_refs.append(engine.reset_prefix_cache.remote())
+            def __init__(self, name, parameter):
+                self.name = name
+                self.parameter = parameter
 
-        torch.cuda.empty_cache()
-        model = self.actor.model.module
-        count, num_params = 0, len(list(model.named_parameters()))
-        for name, param in model.named_parameters():
-            count += 1  # empty_cache at last param
+            def named_parameters(self, prefix=None):
+                # self.name is already the full name. No need to add prefix
+                return [(self.name, self.parameter)]
 
+        for name, module in model.named_modules():
+            if len(list(module.children())) == 0 or (use_lora and hasattr(module, "base_layer")):
+                leaf_modules.append((name, module))
+            else:
+                # find isolated parameter
+                for pname, p in module.named_parameters(recurse=False, prefix=name):
+                    leaf_modules.append((pname, IsoParamWrapper(pname, p)))
+        if use_lora:
+            leaf_modules = [
+                (n, m) for n, m in leaf_modules if not any([keyword in n for keyword in lora_module_keyword])
+            ]
+        return leaf_modules
+
+    def _broadcast_module(self, module, prefix=None, empty_cache=False, need_gather=False):
+        count, num_params = 0, len(list(module.named_parameters()))
+        for name, param in module.named_parameters(prefix=prefix):
             # broadcast
+            count += 1
             if not self.use_cuda_ipc:
                 use_ray = getattr(self.strategy.args, "vllm_sync_with_ray", False)
                 # Fire all vllm engines for broadcast
@@ -532,13 +555,16 @@ class ActorPPOTrainer(BasePPOTrainer):
                     shape = param.shape if self.strategy.args.zero_stage != 3 else param.ds_shape
                     refs = [
                         engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                            name,
+                            dtype=param.dtype,
+                            shape=shape,
+                            empty_cache=empty_cache and count == num_params,
                         )
                         for engine in self.vllm_engines
                     ]
 
                 # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-                with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                with deepspeed.zero.GatheredParameters([param], enabled=need_gather):
                     if torch.distributed.get_rank() == 0:
                         if use_ray:
                             import ray.util.collective as collective
@@ -552,7 +578,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                 from torch.multiprocessing.reductions import reduce_tensor
 
                 # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-                with deepspeed.zero.GatheredParameters([param], enabled=self.strategy.args.zero_stage == 3):
+                with deepspeed.zero.GatheredParameters([param], enabled=need_gather):
                     weight = param.data.clone()
                     ipc_handle = reduce_tensor(weight)
 
@@ -572,7 +598,7 @@ class ActorPPOTrainer(BasePPOTrainer):
                                 dtype=param.dtype,
                                 shape=shape,
                                 ipc_handles=ipc_handles,
-                                empty_cache=count == num_params,
+                                empty_cache=empty_cache and count == num_params,
                             )
                             for engine in self.vllm_engines
                         ]
@@ -580,10 +606,51 @@ class ActorPPOTrainer(BasePPOTrainer):
                     torch.distributed.barrier()
                     torch.cuda.synchronize()
 
+    def _broadcast_to_vllm(self):
+        use_prefix_cache = getattr(self.strategy.args, "enable_prefix_caching", False)
+        cache_reset_refs = []
+        if use_prefix_cache and torch.distributed.get_rank() == 0:
+            # clear prefix cache
+            for engine in self.vllm_engines:
+                cache_reset_refs.append(engine.reset_prefix_cache.remote())
+
+        torch.cuda.empty_cache()
+        model = self.actor.model.module
+        use_lora = False
+        if isinstance(model, PeftModel):
+            lora_model = model.base_model
+            model = lora_model.model
+            use_lora = True
+
+        leaf_modules = self._get_leaf_modules(model, use_lora)  # parameters of leaf_modules should not overlap
+        count, num_modules = 0, len(leaf_modules)
+        for key, module in leaf_modules:
+            count += 1
+            with ExitStack() as stack:
+                need_gather = self.strategy.args.zero_stage == 3
+                module_name = key.split(".")[-1]
+                raw_module = module
+                if use_lora and hasattr(raw_module, "base_layer"):
+                    # This is a lora module
+                    stack.enter_context(
+                        deepspeed.zero.GatheredParameters(raw_module.parameters(), enabled=need_gather)
+                    )
+                    raw_module.merge(safe_merge=True)
+                    # we don't really replace the module, but we utilize _replace_module to get the merged module,
+                    # which attaches the merged module to the fake parent.
+                    fake_parent = type("FakeParent", (), {})()
+                    lora_model._replace_module(fake_parent, module_name, raw_module.get_base_layer(), raw_module)
+                    module = getattr(fake_parent, module_name)
+                    need_gather = False
+                    stack.callback(raw_module.unmerge)
+
+                self._broadcast_module(module, prefix=key, empty_cache=count == num_modules, need_gather=need_gather)
+
         if cache_reset_refs:
             ray.get(cache_reset_refs)
         torch.cuda.empty_cache()
         torch.distributed.barrier()
+        torch.cuda.synchronize()
 
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
         if global_step % args.logging_steps == 0:
@@ -791,8 +858,8 @@ class ActorPPOTrainer(BasePPOTrainer):
     def reload_states(self):
         reload_deepspeed_states(self.actor.model)
 
-    def offload_states(self):
-        offload_deepspeed_states(self.actor.model)
+    def offload_states(self, non_blocking=True):
+        offload_deepspeed_states(self.actor.model, non_blocking=non_blocking)
 
     def log_rollouts_wandb(
         self, json_rollouts, episode=None, steps=None, i_experience=None, global_step=None, train_or_eval=None

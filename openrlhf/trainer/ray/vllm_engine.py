@@ -3,12 +3,14 @@ import asyncio
 import json
 import os
 from time import perf_counter
+import time
 import queue
 from collections import defaultdict
 from typing import Any, List
 from pymongo import MongoClient
 from datetime import datetime
-
+import torch
+import torch.distributed
 
 import ray
 from ray.util.placement_group import placement_group
@@ -322,6 +324,7 @@ def create_vllm_engines(
         bundles = [{"GPU": 1, "CPU": cpu_per_actor} for _ in range(num_engines * tensor_parallel_size)]
         shared_pg = placement_group(bundles, strategy="PACK")
         ray.get(shared_pg.ready())
+        
 
     for i in range(num_engines):
         bundle_indices = None
@@ -390,6 +393,16 @@ def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_o
     Returns:
         List of results from ray.get() if on rank 0, None otherwise
     """
+    
+    _batch_vllm_engine_call(engines, method_name, *args, rank_0_only=rank_0_only, **kwargs)
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+    torch.cuda.synchronize()
+    
+    if method_name == "sleep":
+        time.sleep(5)
+
+def _batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
     import torch
 
     if rank_0_only and torch.distributed.get_rank() != 0:
