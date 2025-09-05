@@ -392,15 +392,16 @@ class AgentInterface(ABC):
             self.num_errors += 1
             self.errors.append(f"Error in init_all_states: {str(e)}")
             logger.error(f"Error in init_all_states: {str(e)}")
-            return [
-                (
+            blank_convos = []
+            blank_metrics = await self.get_extra_metrics(messages=[], state=None)
+            for _ in range(len(full_data)):
+                extra_metrics = {"n_errors": 1.0, "num_steps": 0.0}
+                extra_metrics.update(blank_metrics)
+                blank_convos.append(
                     AgentConversation(
-                        env_name=env_name, extra_metrics={"n_errors": 1.0, "num_steps": 0.0}, error=True
-                    ),
-                    None,
+                        env_name=env_name, extra_metrics=extra_metrics, error=True
+                    )
                 )
-                for _ in range(len(full_data))
-            ]
 
         results = await asyncio.gather(
             *[
