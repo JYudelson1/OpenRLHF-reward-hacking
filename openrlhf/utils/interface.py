@@ -136,7 +136,10 @@ class AsyncVLLM(AsyncLLMInterface):
             sampling_params.include_stop_str_in_output = True
 
         output, truncated_tokens = await _vllm_chat_with_truncation(
-            llm_engine=self.llm_engine, messages=conversation.rollout_messages, sampling_params=sampling_params, tools=tools
+            llm_engine=self.llm_engine,
+            messages=conversation.rollout_messages,
+            sampling_params=sampling_params,
+            tools=tools,
         )
         was_truncated = truncated_tokens > 0
 
@@ -147,7 +150,9 @@ class AsyncVLLM(AsyncLLMInterface):
             return
 
         rollout_prompt_token_ids: list[int] = output.prompt_token_ids
-        train_prompt_token_ids: list[int] = await tokenize(llm_engine=self.llm_engine, messages=conversation.train_messages)
+        train_prompt_token_ids: list[int] = await tokenize(
+            llm_engine=self.llm_engine, messages=conversation.train_messages
+        )
 
         if conversation.n_tokens == 0:
             conversation.first_prompt_tokens = train_prompt_token_ids
@@ -164,7 +169,7 @@ class AsyncVLLM(AsyncLLMInterface):
 
         if conversation.n_tokens == 0:
             num_removed_tokens = 0
-        else:   
+        else:
             num_removed_tokens = conversation.n_tokens - len(train_prompt_token_ids) + size_last_message
 
         output_tokens = output.outputs[0].token_ids
@@ -190,6 +195,7 @@ class AsyncVLLM(AsyncLLMInterface):
 
         conversation.all_tokens = list(train_prompt_token_ids) + list(output.outputs[0].token_ids)
         conversation.n_tokens = len(conversation.all_tokens)
+
 
 async def _vllm_chat_with_truncation(
     llm_engine: vllm.AsyncLLMEngine,
@@ -424,7 +430,7 @@ class AgentInterface(ABC):
 
     async def get_extra_metrics(self, messages: list[Message], state: AgentState) -> dict[str, float]:
         return {}
-    
+
     def get_tools(self, state: AgentState) -> list[dict[str, Any]]:
         return []
 
@@ -451,11 +457,7 @@ class AgentInterface(ABC):
             for _ in range(len(full_data)):
                 extra_metrics = {"n_errors": 1.0, "num_steps": 0.0}
                 extra_metrics.update(blank_metrics)
-                blank_convos.append(
-                    AgentConversation(
-                        env_name=env_name, extra_metrics=extra_metrics, error=True
-                    )
-                )
+                blank_convos.append(AgentConversation(env_name=env_name, extra_metrics=extra_metrics, error=True))
 
         results = await asyncio.gather(
             *[
@@ -521,7 +523,7 @@ class AgentInterface(ABC):
             stats.on_env_step_start()
             try:
                 new_messages, state = await self.get_next_prompt(
-                    messages=conversation.messages,
+                    messages=conversation.rollout_messages,
                     state=state,
                     remaining_steps=self.max_steps - step if self.max_steps is not None else None,
                 )
@@ -540,7 +542,7 @@ class AgentInterface(ABC):
             if not isinstance(new_train_messages, list):
                 new_train_messages = [new_train_messages]
             assert len(new_rollout_messages) == len(new_train_messages)
-            
+
             if self.max_steps is not None and step >= self.max_steps:
                 hit_max_steps = True
                 break
