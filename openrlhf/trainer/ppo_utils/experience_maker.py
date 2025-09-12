@@ -900,7 +900,7 @@ class RemoteExperienceMaker(BaseExperienceMaker):
         )
 
         json_rollouts = [
-            {"rollout": conversation.messages, "reward": reward, "extra_metrics": conversation.extra_metrics}
+            {"rollout": {"train": conversation.train_messages, "rollout": conversation.rollout_messages}, "reward": reward, "extra_metrics": conversation.extra_metrics}
             for conversation, reward in all_outputs
         ]
 
