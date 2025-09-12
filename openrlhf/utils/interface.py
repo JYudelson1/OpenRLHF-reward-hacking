@@ -40,7 +40,8 @@ AgentState = Any  # State needed to track conversation progress
 @dataclass
 class AgentConversation:
     env_name: str
-    messages: list[Message] = field(default_factory=lambda: [])
+    rollout_messages: list[Message] = field(default_factory=lambda: [])
+    train_messages: list[Message] = field(default_factory=lambda: [])
     first_prompt_tokens: list[int] = field(default_factory=lambda: [])
     all_tokens: list[int] = field(default_factory=lambda: [])
     n_tokens: int = 0
@@ -62,8 +63,57 @@ class AsyncLLMInterface(ABC):
         self,
         conversation: AgentConversation,
         stop_strings: list[str] | None,
+        compact_filtering: bool = False,
+        system_prompt_size: int = 0,
+        tools: list[dict[str, Any]] | None = None,
     ) -> None:
         pass
+
+
+async def tokenize(
+    llm_engine: vllm.AsyncLLMEngine,
+    messages: list[Message],
+    chat_template: Optional[str] = None,
+    chat_template_content_format: ChatTemplateContentFormatOption = "auto",
+    add_generation_prompt: bool = True,
+    continue_final_message: bool = False,
+    tools: list[dict[str, Any]] | None = None,
+) -> list[int]:
+    tokenizer = await llm_engine.get_tokenizer()
+    model_config = await llm_engine.get_model_config()
+    resolved_content_format = resolve_chat_template_content_format(
+        chat_template,
+        tools,
+        chat_template_content_format,
+        tokenizer,
+        model_config=model_config,
+    )
+
+    # NOTE: _parse_chat_message_content_parts() currently doesn't
+    # handle mm_processor_kwargs, since there is no implementation in
+    # the chat message parsing for it.
+    conversation, _ = parse_chat_messages(
+        messages,
+        model_config,
+        tokenizer,
+        content_format=resolved_content_format,
+    )
+
+    prompt_str = apply_hf_chat_template(
+        tokenizer,
+        trust_remote_code=model_config.trust_remote_code,
+        conversation=conversation,
+        chat_template=chat_template,
+        tools=tools,
+        model_config=model_config,
+        add_generation_prompt=add_generation_prompt,
+        continue_final_message=continue_final_message,
+    )
+    # Special tokens are already included in chat templates so
+    # should not be added by the tokenizer in this case.
+    prompt_token_ids = tokenizer.encode(prompt_str, add_special_tokens=False)
+
+    return prompt_token_ids
 
 
 @dataclass(frozen=True)
@@ -86,7 +136,7 @@ class AsyncVLLM(AsyncLLMInterface):
             sampling_params.include_stop_str_in_output = True
 
         output, truncated_tokens = await _vllm_chat_with_truncation(
-            llm_engine=self.llm_engine, messages=conversation.messages, sampling_params=sampling_params, tools=tools
+            llm_engine=self.llm_engine, messages=conversation.rollout_messages, sampling_params=sampling_params, tools=tools
         )
         was_truncated = truncated_tokens > 0
 
@@ -96,11 +146,14 @@ class AsyncVLLM(AsyncLLMInterface):
                 conversation.action_mask = [0] * conversation.n_tokens
             return
 
+        rollout_prompt_token_ids: list[int] = output.prompt_token_ids
+        train_prompt_token_ids: list[int] = await tokenize(llm_engine=self.llm_engine, messages=conversation.train_messages)
+
         if conversation.n_tokens == 0:
-            conversation.first_prompt_tokens = output.prompt_token_ids
+            conversation.first_prompt_tokens = train_prompt_token_ids
 
         last_prompt_messages = []
-        for message in reversed(conversation.messages):
+        for message in reversed(conversation.train_messages):
             if message["role"] != "assistant":
                 last_prompt_messages.insert(0, message)
             else:
@@ -112,7 +165,7 @@ class AsyncVLLM(AsyncLLMInterface):
         if conversation.n_tokens == 0:
             num_removed_tokens = 0
         else:   
-            num_removed_tokens = conversation.n_tokens - len(output.prompt_token_ids) + size_last_message
+            num_removed_tokens = conversation.n_tokens - len(train_prompt_token_ids) + size_last_message
 
         output_tokens = output.outputs[0].token_ids
 
@@ -127,14 +180,15 @@ class AsyncVLLM(AsyncLLMInterface):
             conversation.num_actions_list[-1] -= num_removed_tokens
 
         output_message = {"role": "assistant", "content": output.outputs[0].text}
-        conversation.messages.append(output_message)
+        conversation.rollout_messages.append(output_message)
+        conversation.train_messages.append(output_message)
 
-        conversation.action_mask.extend([0] * (len(output.prompt_token_ids) - len(conversation.action_mask)))
+        conversation.action_mask.extend([0] * (len(train_prompt_token_ids) - len(conversation.action_mask)))
         conversation.action_mask.extend([1] * len(output_tokens))
 
         conversation.num_actions_list.append(len(output_tokens))
 
-        conversation.all_tokens = list(output.prompt_token_ids) + list(output.outputs[0].token_ids)
+        conversation.all_tokens = list(train_prompt_token_ids) + list(output.outputs[0].token_ids)
         conversation.n_tokens = len(conversation.all_tokens)
 
 async def _vllm_chat_with_truncation(
@@ -340,7 +394,7 @@ class AgentInterface(ABC):
     @abstractmethod
     async def get_next_prompt(
         self, messages: List[Message], state: AgentState, remaining_steps: int | None
-    ) -> tuple[list[Message] | Message | None, AgentState]:
+    ) -> tuple[tuple[list[Message] | Message, list[Message] | Message] | None, AgentState]:
         """Input:
         - messages: the messages in the conversation
         - state: the state of the environment
@@ -480,15 +534,19 @@ class AgentInterface(ABC):
 
             if new_messages is None:
                 break
-            if not isinstance(new_messages, list):
-                new_messages = [new_messages]
-
+            new_rollout_messages, new_train_messages = new_messages
+            if not isinstance(new_rollout_messages, list):
+                new_rollout_messages = [new_rollout_messages]
+            if not isinstance(new_train_messages, list):
+                new_train_messages = [new_train_messages]
+            assert len(new_rollout_messages) == len(new_train_messages)
+            
             if self.max_steps is not None and step >= self.max_steps:
                 hit_max_steps = True
                 break
             stats.on_computing_is_done_start()
             try:
-                is_done = await self.is_done(messages=conversation.messages, state=state)
+                is_done = await self.is_done(messages=conversation.rollout_messages, state=state)
             except Exception as e:
                 self.num_errors += 1
                 self.errors.append(f"Error in is_done: {str(e)} {traceback.format_exc()}")
@@ -502,7 +560,8 @@ class AgentInterface(ABC):
                 was_truncated = True
                 break
 
-            conversation.messages += new_messages
+            conversation.rollout_messages += new_rollout_messages
+            conversation.train_messages += new_train_messages
             conversation.increment_num_steps()
 
             stats.on_llm_completion_start()
@@ -523,9 +582,9 @@ class AgentInterface(ABC):
         # Normal reward calculation
         try:
             if is_eval:
-                reward = await self.get_reward_in_eval(messages=conversation.messages, state=state)
+                reward = await self.get_reward_in_eval(messages=conversation.rollout_messages, state=state)
             else:
-                reward = await self.get_reward(messages=conversation.messages, state=state)
+                reward = await self.get_reward(messages=conversation.rollout_messages, state=state)
         except Exception as e:
             self.num_errors += 1
             self.errors.append(f"Error in get_reward: {str(e)}\nstacktrace:{traceback.format_exc()}")
@@ -541,7 +600,7 @@ class AgentInterface(ABC):
         stats.on_finish()
 
         try:
-            extra_metrics = await self.get_extra_metrics(messages=conversation.messages, state=state)
+            extra_metrics = await self.get_extra_metrics(messages=conversation.rollout_messages, state=state)
             assert isinstance(extra_metrics, dict)
             assert all(isinstance(key, str) for key in extra_metrics.keys())
             assert all(isinstance(value, float) for value in extra_metrics.values())
