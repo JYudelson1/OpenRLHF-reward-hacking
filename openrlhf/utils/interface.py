@@ -30,6 +30,8 @@ from datetime import datetime
 from vllm.transformers_utils.tokenizer import get_tokenizer
 import random
 
+from openrlhf.utils.openai_or_anthropic_llm import AsyncOpenAIOrAnthropicLLM
+
 logger = logging.getLogger(__name__)
 
 Message = Dict[str, str]
@@ -383,8 +385,11 @@ class AgentInterface(ABC):
     ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
 
-        tokenizer = await llm.llm_engine.get_tokenizer()
-        system_prompt_size = get_default_system_prompt_size(tokenizer)
+        if isinstance(self.llm_engine, AsyncOpenAIOrAnthropicLLM):
+            system_prompt_size = 0
+        else:
+            tokenizer = await llm.llm_engine.get_tokenizer()
+            system_prompt_size = get_default_system_prompt_size(tokenizer)
 
         try:
             states = await self.init_all_states(full_data)
