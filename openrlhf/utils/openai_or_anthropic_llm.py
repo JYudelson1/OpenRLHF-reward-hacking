@@ -123,6 +123,7 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
         stop_strings: list[str] | None,
         compact_filtering: bool,
         system_prompt_size: int,
+        tools,
     ) -> None:
         messages = self._merge_tool_and_user_messages(conversation.messages)
 
