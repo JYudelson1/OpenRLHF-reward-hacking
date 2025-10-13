@@ -121,6 +121,7 @@ class AsyncOpenAIOrAnthropicLLM(AsyncLLMInterface):
         self,
         conversation: AgentConversation,
         stop_strings: list[str] | None,
+        compact_filtering: bool,
     ) -> None:
         messages = self._merge_tool_and_user_messages(conversation.messages)
 
