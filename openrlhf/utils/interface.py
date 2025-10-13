@@ -384,7 +384,7 @@ class AgentInterface(ABC):
     ) -> list[tuple[AgentConversation, Reward | None]]:
         time_init_env_started = perf_counter()
 
-        if isinstance(self.llm_engine, AsyncVLLM):
+        if isinstance(llm, AsyncVLLM):
             tokenizer = await llm.llm_engine.get_tokenizer()
             system_prompt_size = get_default_system_prompt_size(tokenizer)
         else:
